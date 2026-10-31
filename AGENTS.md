@@ -20,7 +20,7 @@
 | 传输 | TCP + rustls（TLS 1.3）；输入连接与数据连接分离；不兼容 Deskflow 协议 |
 | 发现与配对 | mDNS 发现；配对码配对；配对后固定对方证书 |
 | 进程模型 | 后台常驻（含托盘）；设置界面为独立进程，按需启动，关闭即退出 |
-| 界面 | egui（glow 后端）；运行时加载系统中文字体，不打包字体 |
+| 界面 | Flutter（自定义设计，见 ADR 0003）；工程在 `app/`，经 flutter_rust_bridge 调用 `ferry-settings` 与后台通信 |
 | 托盘 | tray-icon |
 | Windows | windows-rs + Win32 API |
 | macOS | objc2 系列 crate |
@@ -53,7 +53,8 @@ screen-ferry/
 ├─ crates/                 # 所有 Rust crate，一层平铺，不嵌套
 ├─ xtask/                  # 构建自动化：打包、签名、公证、发布（不写 shell 脚本）
 ├─ fuzz/                   # 协议解码器的 fuzz 测试（nightly，不加入 workspace）
-├─ assets/                 # 唯一存放二进制资源的地方
+├─ app/                    # Flutter 设置界面（不是 Cargo workspace 成员），测试放 app/test/
+├─ assets/                 # 唯一存放二进制资源的地方（例外：app/ 中平台工程要求的图标，见 ADR 0003）
 │  └─ icons/               #   应用图标、托盘图标（svg 源文件 + 导出图）
 ├─ packaging/              # 平台打包配置，只放配置，不放代码
 │  ├─ macos/               #   Info.plist、entitlements.plist
@@ -90,7 +91,7 @@ crates/
 ├─ ferry-engine             # 把 core、platform、net、store、ipc 组装成运行时
 │  ── L4 应用（二进制）────────────────────────────
 ├─ ferry-daemon             # → screenferry：后台常驻 + 托盘
-└─ ferry-settings           # → screenferry-settings：egui 设置界面
+└─ ferry-settings           # 设置界面的 Rust 侧：供 app/ 经 flutter_rust_bridge 调用
 ```
 
 按规则预留、尚未创建的 crate：
@@ -186,6 +187,7 @@ ferry-platform/src/              ferry-platform-{windows,macos,mock}/src/
 6. 跨 crate 的场景测试（断线、丢包、卡键、控制权归还）放在 `ferry-engine/tests/suite/`，使用 `ferry-platform-mock`。
 7. 性能测试放 `benches/`，fuzz 测试放仓库根目录的 `fuzz/`。
 8. 文档注释中的示例代码属于文档，允许保留，会作为 doctest 运行。
+9. 以上规则针对 Rust crate。`app/`（Flutter）按 Flutter 惯例把测试放在 `app/test/`。
 
 ## 10. 运行时数据目录
 
@@ -225,6 +227,11 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo xtask lint
 cargo deny check
+
+# 改动 app/ 时另外运行（在 app/ 目录下）
+dart format --set-exit-if-changed lib test
+flutter analyze
+flutter test
 ```
 
-五项全部通过才能提交。`cargo xtask lint` 自动检查第 4–9 节中可以静态验证的规则；新增 crate 时，先在 `xtask/src/deps.rs` 的 `layer()` 中登记层级。
+以上检查全部通过才能提交。`cargo xtask lint` 自动检查第 4–9 节中可以静态验证的规则；新增 crate 时，先在 `xtask/src/deps.rs` 的 `layer()` 中登记层级。

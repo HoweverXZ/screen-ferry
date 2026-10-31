@@ -24,6 +24,23 @@ jobs:
       - run: cargo test --workspace
       - run: cargo xtask lint
 
+  settings-ui:
+    name: settings ui (Flutter)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.8
+          channel: stable
+      - run: flutter pub get
+      - run: dart format --set-exit-if-changed lib test
+      - run: flutter analyze
+      - run: flutter test
+
   deny:
     runs-on: ubuntu-latest
     steps:

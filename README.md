@@ -52,6 +52,16 @@ cargo xtask lint
 
 断线、Windows 端退出或心跳超时时，Mac 会立即收回鼠标控制。
 
+## 设置界面
+
+设置界面用 Flutter 编写，工程在 `app/`，目前用模拟数据展示界面，还没有接到后台。在 Mac 上运行：
+
+```bash
+cd app && flutter run -d macos
+```
+
+需要 Flutter 3.47 和 Xcode。
+
 ## 许可证
 
 可任选以下一种许可证使用：

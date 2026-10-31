@@ -1,0 +1,144 @@
+// 日志：光标切换、剪贴板同步、设备与连接的记录，可筛选、可清空，新记录实时插到最上面。
+
+import 'package:flutter/material.dart';
+
+import '../state/app_scope.dart';
+import '../state/app_state.dart';
+import '../theme/tokens.dart';
+import '../widgets/controls.dart';
+import '../widgets/page_scaffold.dart';
+import '../widgets/surface.dart';
+
+enum _Filter { all, cursor, clip, link }
+
+class LogPage extends StatefulWidget {
+  const LogPage({super.key});
+
+  @override
+  State<LogPage> createState() => _LogPageState();
+}
+
+class _LogPageState extends State<LogPage> {
+  _Filter _filter = _Filter.all;
+
+  /// 打开页面时已有的记录不播放进场动画，之后新来的才播放。
+  late final int _openedAt = AppScope.read(context).log.firstOrNull?.id ?? -1;
+
+  bool _match(LogEntry e) => switch (_filter) {
+    _Filter.all => true,
+    _Filter.cursor => e.kind == LogKind.cursor,
+    _Filter.clip => e.kind == LogKind.clip,
+    _Filter.link => e.kind == LogKind.link,
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final state = AppScope.of(context);
+    final c = SfColors.of(context);
+    final items = state.log.where(_match).toList();
+    return PageScaffold(
+      title: '日志',
+      actions: [PillButton(label: '清空', icon: Icons.delete_outline_rounded, onPressed: state.clearLog)],
+      children: [
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            SfSegmented<_Filter>(
+              label: '筛选',
+              onCard: true,
+              segments: const [
+                (_Filter.all, '全部'),
+                (_Filter.cursor, '光标'),
+                (_Filter.clip, '剪贴板'),
+                (_Filter.link, '设备与连接'),
+              ],
+              value: _filter,
+              onChanged: (v) => setState(() => _filter = v),
+            ),
+            Text(
+              '共 ${items.length} 条',
+              style: TextStyle(color: c.muted, fontFeatures: tabular),
+            ),
+          ],
+        ),
+        SfCard(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: items.isEmpty
+              ? Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 34),
+                  child: Center(
+                    child: Text('暂无记录', style: TextStyle(color: c.muted)),
+                  ),
+                )
+              : Column(
+                  children: [
+                    for (var i = 0; i < items.length; i++) ...[
+                      if (i > 0) Divider(height: 1, thickness: 1, indent: 20, endIndent: 20, color: c.line),
+                      _LogRow(key: ValueKey(items[i].id), entry: items[i], fresh: items[i].id > _openedAt),
+                    ],
+                  ],
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+class _LogRow extends StatelessWidget {
+  const _LogRow({super.key, required this.entry, required this.fresh});
+
+  final LogEntry entry;
+  final bool fresh;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = SfColors.of(context);
+    Widget row = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 70,
+            child: Text(
+              clockTime(entry.at),
+              style: TextStyle(fontFamily: monoFont, fontSize: 13, color: c.muted),
+            ),
+          ),
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(shape: BoxShape.circle, color: c.card2),
+            child: Icon(entry.icon, size: 17),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(entry.text),
+                Text(entry.detail, style: TextStyle(fontSize: 13, color: c.muted)),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Pill(entry.kind.label),
+        ],
+      ),
+    );
+    if (fresh) {
+      row = TweenAnimationBuilder<double>(
+        tween: Tween(begin: 0, end: 1),
+        duration: const Duration(milliseconds: 500),
+        curve: Motion.ease,
+        builder: (context, t, child) => Opacity(
+          opacity: t,
+          child: Transform.translate(offset: Offset(0, -10 * (1 - t)), child: child),
+        ),
+        child: row,
+      );
+    }
+    return row;
+  }
+}

@@ -145,3 +145,19 @@ pub(crate) fn modifier_flag(keycode: u16) -> Option<u64> {
         _ => return None,
     })
 }
+
+/// 媒体键（`NX_KEYTYPE_*`）对应的 HID 键码。
+///
+/// 只映射对方系统也有的键：音量和播放控制。亮度、键盘背光等返回 `None`，
+/// 它们始终留给本机处理，光标在对方屏幕时也一样。
+pub fn media_key(nx_key: u32) -> Option<KeyCode> {
+    Some(match nx_key {
+        0 => KeyCode::VOLUME_UP,       // NX_KEYTYPE_SOUND_UP
+        1 => KeyCode::VOLUME_DOWN,     // NX_KEYTYPE_SOUND_DOWN
+        7 => KeyCode::MUTE,            // NX_KEYTYPE_MUTE
+        16 => KeyCode::PLAY_PAUSE,     // NX_KEYTYPE_PLAY
+        17 => KeyCode::NEXT_TRACK,     // NX_KEYTYPE_NEXT
+        18 => KeyCode::PREVIOUS_TRACK, // NX_KEYTYPE_PREVIOUS
+        _ => return None,
+    })
+}

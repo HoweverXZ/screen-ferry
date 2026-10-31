@@ -20,6 +20,7 @@ cargo xtask lint
 
 - 默认把 Mac 的 Command 当作 Windows 的 Ctrl，⌘C、⌘V 即复制粘贴；不需要时加 `--no-cmd-ctrl-swap`。
 - 进入 Windows 时同步 Caps Lock 状态。
+- 媒体键（音量加减、静音、播放/暂停、上一首、下一首）也会转发；亮度、键盘背光仍作用在 Mac 上。
 - 光标在 Windows 上时，按 **Ctrl + Option + Esc** 可以强制回到 Mac。
 - 剪贴板在光标切过去时才同步：在 Mac 上复制，移到 Windows 即可粘贴，反之亦然。不需要时在任意一端加 `--no-clipboard`。目前只同步纯文本。
 - 测试时请先退出 Deskflow 等同类软件，两者会争抢同一套键鼠。

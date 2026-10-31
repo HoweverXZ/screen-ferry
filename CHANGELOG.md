@@ -38,6 +38,10 @@
   - 设备身份存于数据目录的 `identity/`，已信任设备存于 `peers.toml`（`schema_version = 1`）。
   - 新增 `screenferry peers`、`screenferry forget`，以及 `--data-dir`。
   - 协议：新增配对连接（`channel = 3`）、`PairCommit` / `PairNonce` / `PairResult` 消息、`Reject` 原因 `NOT_PAIRED`。
+- 媒体键：
+  - macOS 捕获 `NX_SYSDEFINED` 系统事件，转发音量加减、静音、播放/暂停、上一首、下一首（HID 消费者页）。
+  - 亮度、键盘背光、电源键等对方没有的键始终交给本机，光标在对方屏幕时也一样。
+  - Windows 以虚拟键码加 E0 扫描码注入。
 - 局域网自动发现（mDNS）：
   - 服务端广播 `_screenferry._tcp`，TXT 记录带指纹、设备名、协议版本；`--no-announce` 关闭。
   - `connect` 不填地址时自动寻找：优先已配对的服务端；从未配对过时，局域网里只有一台才自动连，多台则提示指定地址。

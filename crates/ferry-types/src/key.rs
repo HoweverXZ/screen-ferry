@@ -30,6 +30,15 @@ impl KeyCode {
     /// 右 Windows 键 / 右 Command 键。
     pub const RIGHT_GUI: Self = Self::keyboard(0xE7);
 
+    // ── 消费者页：媒体键 ──
+    pub const NEXT_TRACK: Self = Self::consumer(0xB5);
+    pub const PREVIOUS_TRACK: Self = Self::consumer(0xB6);
+    pub const STOP: Self = Self::consumer(0xB7);
+    pub const PLAY_PAUSE: Self = Self::consumer(0xCD);
+    pub const MUTE: Self = Self::consumer(0xE2);
+    pub const VOLUME_UP: Self = Self::consumer(0xE9);
+    pub const VOLUME_DOWN: Self = Self::consumer(0xEA);
+
     pub const fn new(page: u16, usage: u16) -> Self {
         Self(((page as u32) << 16) | usage as u32)
     }
@@ -37,6 +46,11 @@ impl KeyCode {
     /// 键盘页上的按键。
     pub const fn keyboard(usage: u16) -> Self {
         Self::new(Self::KEYBOARD_PAGE, usage)
+    }
+
+    /// 消费者页上的按键（媒体键）。
+    pub const fn consumer(usage: u16) -> Self {
+        Self::new(Self::CONSUMER_PAGE, usage)
     }
 
     pub const fn from_raw(raw: u32) -> Self {

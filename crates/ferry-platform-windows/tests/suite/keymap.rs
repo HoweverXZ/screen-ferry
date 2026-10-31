@@ -34,8 +34,26 @@ fn common_keys() {
 }
 
 #[test]
-fn only_the_keyboard_page_is_supported() {
-    assert_eq!(win_key(KeyCode::new(KeyCode::CONSUMER_PAGE, 0xE9)), None);
+fn media_keys_use_virtual_keys_with_their_e0_scan_codes() {
+    let media = |vk, scan| Some(WinKey::Media { vk, scan });
+    let cases = [
+        (KeyCode::VOLUME_UP, media(0xAF, 0x30)),
+        (KeyCode::VOLUME_DOWN, media(0xAE, 0x2E)),
+        (KeyCode::MUTE, media(0xAD, 0x20)),
+        (KeyCode::PLAY_PAUSE, media(0xB3, 0x22)),
+        (KeyCode::NEXT_TRACK, media(0xB0, 0x19)),
+        (KeyCode::PREVIOUS_TRACK, media(0xB1, 0x10)),
+        (KeyCode::STOP, media(0xB2, 0x24)),
+    ];
+    for (code, expected) in cases {
+        assert_eq!(win_key(code), expected, "{code:?}");
+    }
+}
+
+#[test]
+fn unknown_pages_and_usages_are_unsupported() {
+    assert_eq!(win_key(KeyCode::consumer(0x6F)), None, "亮度");
+    assert_eq!(win_key(KeyCode::new(0x01, 0x81)), None, "通用桌面页");
 }
 
 #[test]

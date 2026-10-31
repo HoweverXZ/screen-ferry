@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use ferry_platform_macos::hid_code;
+use ferry_platform_macos::{hid_code, media_key};
 use ferry_types::KeyCode;
 
 #[test]
@@ -63,4 +63,28 @@ fn no_two_keys_share_a_hid_code() {
 #[test]
 fn fn_key_has_no_hid_code() {
     assert_eq!(hid_code(0x3F), None);
+}
+
+#[test]
+fn media_keys_map_to_the_consumer_page() {
+    let cases = [
+        (0, KeyCode::VOLUME_UP),
+        (1, KeyCode::VOLUME_DOWN),
+        (7, KeyCode::MUTE),
+        (16, KeyCode::PLAY_PAUSE),
+        (17, KeyCode::NEXT_TRACK),
+        (18, KeyCode::PREVIOUS_TRACK),
+    ];
+    for (nx, hid) in cases {
+        assert_eq!(media_key(nx), Some(hid), "NX_KEYTYPE {nx}");
+        assert_eq!(hid.page(), KeyCode::CONSUMER_PAGE);
+    }
+}
+
+#[test]
+fn keys_the_other_side_lacks_stay_on_the_mac() {
+    // 亮度、Caps Lock、键盘背光：对方没有对应的键，留给本机。
+    for nx in [2, 3, 4, 21, 22, 23] {
+        assert_eq!(media_key(nx), None, "NX_KEYTYPE {nx}");
+    }
 }

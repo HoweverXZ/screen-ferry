@@ -120,6 +120,39 @@ async fn keys_are_forwarded_with_command_as_control() {
 }
 
 #[tokio::test]
+async fn media_keys_are_forwarded_and_released_on_leave() {
+    let rig = Rig::start().await;
+    rig.enter().await;
+    rig.key(KeyCode::VOLUME_UP, KeyAction::Down);
+    rig.key(KeyCode::VOLUME_UP, KeyAction::Repeat);
+    rig.key(KeyCode::VOLUME_UP, KeyAction::Up);
+    rig.key(KeyCode::PLAY_PAUSE, KeyAction::Down);
+    rig.leave().await; // 播放键还按着就离开了
+
+    eventually("客户端收到媒体键并松开", || {
+        rig.inject.events().len() >= 6
+    })
+    .await;
+    let keys: Vec<_> = rig
+        .inject
+        .events()
+        .into_iter()
+        .filter(|e| matches!(e, InputEvent::Key { .. }))
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            key(KeyCode::VOLUME_UP, KeyAction::Down),
+            key(KeyCode::VOLUME_UP, KeyAction::Repeat),
+            key(KeyCode::VOLUME_UP, KeyAction::Up),
+            key(KeyCode::PLAY_PAUSE, KeyAction::Down),
+            key(KeyCode::PLAY_PAUSE, KeyAction::Up),
+        ],
+        "媒体键原样转发，离开时松开",
+    );
+}
+
+#[tokio::test]
 async fn ctrl_option_escape_returns_to_local() {
     let rig = Rig::start().await;
     rig.enter().await;

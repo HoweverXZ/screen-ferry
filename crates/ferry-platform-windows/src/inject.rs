@@ -112,6 +112,7 @@ fn keyboard(key: WinKey, up: bool) -> INPUT {
             KEYEVENTF_SCANCODE | KEYEVENTF_EXTENDEDKEY,
         ),
         WinKey::Virtual(vk) => (VIRTUAL_KEY(vk), 0, KEYBD_EVENT_FLAGS(0)),
+        WinKey::Media { vk, scan } => (VIRTUAL_KEY(vk), scan, KEYEVENTF_EXTENDEDKEY),
     };
     if up {
         flags |= KEYEVENTF_KEYUP;

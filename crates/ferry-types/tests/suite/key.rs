@@ -28,3 +28,20 @@ fn recognizes_exactly_eight_modifiers() {
     assert!(!KeyCode::CAPS_LOCK.is_modifier());
     assert!(!KeyCode::new(KeyCode::CONSUMER_PAGE, 0xE0).is_modifier());
 }
+
+#[test]
+fn media_keys_live_on_the_consumer_page() {
+    for code in [
+        KeyCode::VOLUME_UP,
+        KeyCode::VOLUME_DOWN,
+        KeyCode::MUTE,
+        KeyCode::PLAY_PAUSE,
+        KeyCode::NEXT_TRACK,
+        KeyCode::PREVIOUS_TRACK,
+        KeyCode::STOP,
+    ] {
+        assert_eq!(code.page(), KeyCode::CONSUMER_PAGE, "{code:?}");
+        assert!(!code.is_modifier());
+    }
+    assert_eq!(KeyCode::consumer(0xE9), KeyCode::VOLUME_UP);
+}

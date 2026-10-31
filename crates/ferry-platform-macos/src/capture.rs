@@ -6,6 +6,9 @@
 //!
 //! 键盘：光标在本机时只记录哪些键按着，不交给 sink；抓取期间转交 sink 并吞掉。
 //! 抓取前就按着的键，之后的连发和松开仍交给本机，免得本机以为它一直按着。
+//!
+//! 媒体键（音量、播放）不是普通按键，而是 `NX_SYSDEFINED` 系统事件，按同样的规则处理。
+//! 不认识的系统事件（亮度、键盘背光、电源键等）一律交给本机。
 
 use std::collections::BTreeSet;
 use std::ffi::c_void;
@@ -18,6 +21,8 @@ use std::thread::{self, JoinHandle};
 
 use ferry_platform::{CaptureEvent, CaptureSink, Error, InputCapture, Result};
 use ferry_types::{KeyAction, KeyCode, LockKeys, MouseButton, Point, WHEEL_NOTCH};
+use objc2::rc::autoreleasepool;
+use objc2_app_kit::NSEvent;
 use objc2_core_foundation::{
     CFMachPort, CFRetained, CFRunLoop, CGPoint, kCFRunLoopCommonModes, kCFRunLoopDefaultMode,
 };
@@ -28,11 +33,16 @@ use objc2_core_graphics::{
 };
 
 use crate::display::check;
-use crate::keymap::{hid_code, modifier_flag};
+use crate::keymap::{hid_code, media_key, modifier_flag};
 use crate::permission::ACCESSIBILITY;
 
+/// `NX_SYSDEFINED`：媒体键等系统事件。CGEventType 没有为它命名。
+const SYSTEM_DEFINED: CGEventType = CGEventType(14);
+/// 系统事件中“辅助控制键”（媒体键）的子类型 `NX_SUBTYPE_AUX_CONTROL_BUTTONS`。
+const AUX_CONTROL_BUTTONS: i16 = 8;
+
 /// 拦截的事件类型。
-const EVENTS: [CGEventType; 14] = [
+const EVENTS: [CGEventType; 15] = [
     CGEventType::MouseMoved,
     CGEventType::LeftMouseDown,
     CGEventType::LeftMouseUp,
@@ -47,6 +57,7 @@ const EVENTS: [CGEventType; 14] = [
     CGEventType::KeyDown,
     CGEventType::KeyUp,
     CGEventType::FlagsChanged,
+    SYSTEM_DEFINED,
 ];
 
 /// 捕获线程每隔这么久检查一次是否该退出（同时也会被立即唤醒）。
@@ -278,7 +289,12 @@ unsafe extern "C-unwind" fn on_event(
     };
     // SAFETY: 系统保证回调期间事件有效。
     let Some(captured) = translate(ty, unsafe { event.as_ref() }) else {
-        return verdict;
+        // 不认识的系统事件（亮度、电源键等）始终交给本机，不能吞掉。
+        return if ty == SYSTEM_DEFINED {
+            event.as_ptr()
+        } else {
+            verdict
+        };
     };
 
     if let CaptureEvent::Key { code, action } = captured {
@@ -385,6 +401,26 @@ fn translate(ty: CGEventType, event: &CGEvent) -> Option<CaptureEvent> {
                 -(lines(CGEventField::ScrollWheelEventFixedPtDeltaAxis2) * notch).round() as i32;
             (dx != 0 || dy != 0).then_some(CaptureEvent::Wheel { dx, dy })
         }
+        SYSTEM_DEFINED => media(event),
         _ => None,
     }
+}
+
+/// 解出媒体键。键码和状态打包在 NSEvent 的 `data1` 里：
+/// 高 16 位是 `NX_KEYTYPE_*`，低 16 位中高 8 位是状态（0xA 按下、0xB 松开），最低位表示连发。
+fn media(event: &CGEvent) -> Option<CaptureEvent> {
+    // 捕获线程没有现成的自动释放池，NSEvent 是自动释放的对象。
+    let data = autoreleasepool(|_| {
+        let ns = NSEvent::eventWithCGEvent(event)?;
+        (ns.subtype().0 == AUX_CONTROL_BUTTONS).then(|| ns.data1() as u64)
+    })?;
+    let code = media_key(((data >> 16) & 0xFFFF) as u32)?;
+    let repeat = data & 1 != 0;
+    let action = match (data >> 8) & 0xFF {
+        0x0A if repeat => KeyAction::Repeat,
+        0x0A => KeyAction::Down,
+        0x0B => KeyAction::Up,
+        _ => return None,
+    };
+    Some(CaptureEvent::Key { code, action })
 }

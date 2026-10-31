@@ -12,13 +12,33 @@ pub enum WinKey {
     Scan { code: u16, extended: bool },
     /// 虚拟键码。只用于没有普通扫描码的键（Pause 的扫描码是 E1 序列）。
     Virtual(u16),
+    /// 媒体键：虚拟键码加上它的 E0 扫描码。系统按虚拟键码处理，扫描码让底层钩子也能认出来。
+    Media { vk: u16, scan: u16 },
 }
 
 /// `VK_PAUSE`
 const VK_PAUSE: u16 = 0x13;
 
+/// 媒体键：HID 消费者页用法 → （虚拟键码，E0 扫描码）。
+fn media(code: KeyCode) -> Option<WinKey> {
+    let (vk, scan) = match code {
+        KeyCode::MUTE => (0xAD, 0x20),           // VK_VOLUME_MUTE
+        KeyCode::VOLUME_DOWN => (0xAE, 0x2E),    // VK_VOLUME_DOWN
+        KeyCode::VOLUME_UP => (0xAF, 0x30),      // VK_VOLUME_UP
+        KeyCode::NEXT_TRACK => (0xB0, 0x19),     // VK_MEDIA_NEXT_TRACK
+        KeyCode::PREVIOUS_TRACK => (0xB1, 0x10), // VK_MEDIA_PREV_TRACK
+        KeyCode::STOP => (0xB2, 0x24),           // VK_MEDIA_STOP
+        KeyCode::PLAY_PAUSE => (0xB3, 0x22),     // VK_MEDIA_PLAY_PAUSE
+        _ => return None,
+    };
+    Some(WinKey::Media { vk, scan })
+}
+
 /// HID 键码对应的 Windows 按键。没有对应的键返回 `None`。
 pub fn win_key(code: KeyCode) -> Option<WinKey> {
+    if code.page() == KeyCode::CONSUMER_PAGE {
+        return media(code);
+    }
     if code.page() != KeyCode::KEYBOARD_PAGE {
         return None;
     }

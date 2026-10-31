@@ -49,14 +49,17 @@ impl Heartbeat {
         Some((now - self.epoch).as_micros() as u64)
     }
 
-    pub(crate) fn pong(&mut self, nonce: u64) {
+    /// 收到 Pong，返回这次的往返延迟；不是本连接发出的 nonce 时为 `None`。
+    pub(crate) fn pong(&mut self, nonce: u64) -> Option<Duration> {
         let sent = self.epoch + Duration::from_micros(nonce);
         let now = Instant::now();
         if sent > now {
-            return; // 不是本连接发出的 nonce
+            return None;
         }
         self.last_pong = now;
-        self.window.record(now - sent);
+        let rtt = now - sent;
+        self.window.record(rtt);
+        Some(rtt)
     }
 
     pub(crate) fn timed_out(&self) -> bool {

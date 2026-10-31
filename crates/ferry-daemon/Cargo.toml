@@ -17,6 +17,7 @@ ferry-engine.workspace = true
 ferry-platform.workspace = true
 ferry-store.workspace = true
 ferry-trust.workspace = true
+ferry-types.workspace = true
 tokio = { workspace = true, features = ["io-std", "io-util", "macros", "net", "rt", "signal"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true

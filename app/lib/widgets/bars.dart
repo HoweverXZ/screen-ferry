@@ -14,6 +14,9 @@ class LatencyBars extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = SfColors.of(context);
+    // 没有数据时画一排最矮的灰柱，保持卡片高度不变。
+    final values = this.values.isEmpty ? List.filled(32, 0.0) : this.values;
+    final active = this.active && this.values.isNotEmpty;
     final top = max(0.8, values.reduce(max) * 1.15);
     return RepaintBoundary(
       child: SizedBox(

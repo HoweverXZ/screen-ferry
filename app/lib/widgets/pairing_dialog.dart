@@ -1,22 +1,67 @@
-// 配对弹窗：6 位配对码依次弹出，倒计时结束自动拒绝，确认后显示成功动画。
+// 配对弹窗：后台发来配对请求时弹出，6 位配对码依次弹起；
+// 用户确认后等对方也确认，后台说结束了就自动关闭，配对成功时先显示成功动画。
+
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../state/app_scope.dart';
 import '../state/app_state.dart';
 import '../theme/tokens.dart';
 import 'surface.dart';
 
 const _timeout = Duration(seconds: 120);
 
-/// 用户确认返回 `true`，拒绝或超时返回 `false`。
-Future<bool> showPairingDialog(BuildContext context, {required Device device, required String code}) async {
-  final result = await showGeneralDialog<bool>(
+/// 包住页面：有等待核对的配对请求时依次弹出对话框。
+class PairingHost extends StatefulWidget {
+  const PairingHost({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  State<PairingHost> createState() => _PairingHostState();
+}
+
+class _PairingHostState extends State<PairingHost> {
+  /// 已经弹过的请求：拒绝后在后台确认结束之前，不要再弹一次。
+  final _shown = <int>{};
+  bool _showing = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _check(AppScope.of(context));
+  }
+
+  /// 没有弹窗在显示、又有没弹过的请求时，弹出最早的那个。
+  void _check(AppState state) {
+    _shown.retainWhere(state.isPromptOpen);
+    if (_showing) return;
+    final next = state.prompts.where((p) => !_shown.contains(p.id)).firstOrNull;
+    if (next == null) return;
+    _shown.add(next.id);
+    _showing = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await _show(context, next);
+      _showing = false;
+      // 关闭期间可能又来了新的请求。
+      if (mounted) _check(AppScope.read(context));
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
+Future<void> _show(BuildContext context, PairingPrompt prompt) {
+  return showGeneralDialog<void>(
     context: context,
     barrierDismissible: false,
     barrierLabel: '配对',
     barrierColor: Colors.black.withValues(alpha: 0.34),
     transitionDuration: const Duration(milliseconds: 400),
-    pageBuilder: (context, _, _) => _PairingDialog(device: device, code: code),
+    pageBuilder: (context, _, _) => _PairingDialog(prompt: prompt),
     transitionBuilder: (context, animation, _, child) {
       final curved = CurvedAnimation(parent: animation, curve: Motion.spring, reverseCurve: Curves.easeIn);
       return FadeTransition(
@@ -25,14 +70,14 @@ Future<bool> showPairingDialog(BuildContext context, {required Device device, re
       );
     },
   );
-  return result ?? false;
 }
 
-class _PairingDialog extends StatefulWidget {
-  const _PairingDialog({required this.device, required this.code});
+enum _Stage { asking, waiting, paired }
 
-  final Device device;
-  final String code;
+class _PairingDialog extends StatefulWidget {
+  const _PairingDialog({required this.prompt});
+
+  final PairingPrompt prompt;
 
   @override
   State<_PairingDialog> createState() => _PairingDialogState();
@@ -40,25 +85,52 @@ class _PairingDialog extends StatefulWidget {
 
 class _PairingDialogState extends State<_PairingDialog> with TickerProviderStateMixin {
   late final _intro = AnimationController(vsync: this, duration: const Duration(milliseconds: 1000))..forward();
-  late final _countdown = AnimationController(vsync: this, duration: _timeout)
-    ..addStatusListener((status) {
-      if (status == AnimationStatus.completed && !_paired && mounted) Navigator.of(context).pop(false);
-    })
-    ..forward();
-  bool _paired = false;
+  late final _countdown = AnimationController(vsync: this, duration: _timeout)..forward();
+  _Stage _stage = _Stage.asking;
+  bool _closing = false;
+  Timer? _timer;
+
+  PairingPrompt get _p => widget.prompt;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final state = AppScope.of(context);
+    final paired = state.peers.any((p) => p.fingerprint == _p.fingerprint);
+    if (_stage == _Stage.waiting && paired) {
+      // 两边都确认了：先给一个成功动画再关。随后的 build 会显示它。
+      _stage = _Stage.paired;
+      _closeAfter(const Duration(milliseconds: 1200));
+    } else if (!state.isPromptOpen(_p.id) && _stage != _Stage.paired) {
+      // 后台说这次配对结束了（对方拒绝、超时或断开）。刚确认时成功的状态可能稍晚一点到，等一会儿。
+      _closeAfter(_stage == _Stage.waiting ? const Duration(seconds: 1) : Duration.zero);
+    }
+  }
+
+  void _closeAfter(Duration delay) {
+    if (_closing) return;
+    _timer?.cancel();
+    _timer = Timer(delay, () {
+      if (!mounted || _closing) return;
+      _closing = true;
+      Navigator.of(context).pop();
+    });
+  }
+
+  void _reply(bool accept) {
+    final state = AppScope.read(context);
+    state.replyPairing(_p.id, accept: accept);
+    if (!accept) return _closeAfter(Duration.zero);
+    _countdown.stop();
+    setState(() => _stage = _Stage.waiting);
+  }
 
   @override
   void dispose() {
+    _timer?.cancel();
     _intro.dispose();
     _countdown.dispose();
     super.dispose();
-  }
-
-  Future<void> _accept() async {
-    _countdown.stop();
-    setState(() => _paired = true);
-    await Future<void>.delayed(const Duration(milliseconds: 1200));
-    if (mounted) Navigator.of(context).pop(true);
   }
 
   @override
@@ -77,7 +149,10 @@ class _PairingDialogState extends State<_PairingDialog> with TickerProviderState
               child: AnimatedSize(
                 duration: Motion.medium,
                 curve: Motion.ease,
-                child: AnimatedSwitcher(duration: Motion.medium, child: _paired ? _success(c) : _request(c)),
+                child: AnimatedSwitcher(
+                  duration: Motion.medium,
+                  child: _stage == _Stage.paired ? _success(c) : _request(c),
+                ),
               ),
             ),
           ),
@@ -87,6 +162,7 @@ class _PairingDialogState extends State<_PairingDialog> with TickerProviderState
   }
 
   Widget _request(SfColors c) {
+    final waiting = _stage == _Stage.waiting;
     return Column(
       key: const ValueKey('request'),
       mainAxisSize: MainAxisSize.min,
@@ -102,10 +178,7 @@ class _PairingDialogState extends State<_PairingDialog> with TickerProviderState
             ),
             const SizedBox(width: 14),
             Expanded(
-              child: Text(
-                '与“${widget.device.name}”配对',
-                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
-              ),
+              child: Text('与“${_p.peerName}”配对', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
             ),
           ],
         ),
@@ -120,7 +193,7 @@ class _PairingDialogState extends State<_PairingDialog> with TickerProviderState
               text: '对方指纹 ',
               children: [
                 TextSpan(
-                  text: widget.device.fingerprint,
+                  text: _p.short,
                   style: const TextStyle(fontFamily: monoFont),
                 ),
               ],
@@ -129,64 +202,76 @@ class _PairingDialogState extends State<_PairingDialog> with TickerProviderState
           ),
         ),
         const SizedBox(height: 22),
-        AnimatedBuilder(
-          animation: _countdown,
-          builder: (context, _) {
-            final left = (_timeout.inSeconds * (1 - _countdown.value)).ceil();
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                ClipRSuperellipse(
-                  borderRadius: BorderRadius.circular(3),
-                  child: SizedBox(
-                    height: 6,
-                    child: Stack(
-                      children: [
-                        Positioned.fill(child: ColoredBox(color: c.card2)),
-                        FractionallySizedBox(
-                          widthFactor: 1 - _countdown.value,
-                          child: ColoredBox(color: c.accent),
-                        ),
-                      ],
+        if (waiting)
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2.2, color: c.accent)),
+              const SizedBox(width: 10),
+              Text('已确认，等待对方确认…', style: TextStyle(color: c.muted)),
+            ],
+          )
+        else ...[
+          AnimatedBuilder(
+            animation: _countdown,
+            builder: (context, _) {
+              final left = (_timeout.inSeconds * (1 - _countdown.value)).ceil();
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ClipRSuperellipse(
+                    borderRadius: BorderRadius.circular(3),
+                    child: SizedBox(
+                      height: 6,
+                      child: Stack(
+                        children: [
+                          Positioned.fill(child: ColoredBox(color: c.card2)),
+                          FractionallySizedBox(
+                            widthFactor: 1 - _countdown.value,
+                            child: ColoredBox(color: c.accent),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '$left 秒后自动拒绝',
-                  style: TextStyle(fontSize: 13, color: c.muted, fontFeatures: tabular),
-                ),
-              ],
-            );
-          },
-        ),
-        const SizedBox(height: 22),
-        Wrap(
-          alignment: WrapAlignment.end,
-          spacing: 10,
-          runSpacing: 10,
-          children: [
-            PillButton(label: '拒绝', soft: true, onPressed: () => Navigator.of(context).pop(false)),
-            PillButton(label: '数字一致，配对', icon: Icons.check_rounded, primary: true, onPressed: _accept),
-          ],
-        ),
+                  const SizedBox(height: 8),
+                  Text(
+                    left > 0 ? '$left 秒后自动拒绝' : '已超时',
+                    style: TextStyle(fontSize: 13, color: c.muted, fontFeatures: tabular),
+                  ),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 22),
+          Wrap(
+            alignment: WrapAlignment.end,
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              PillButton(label: '拒绝', soft: true, onPressed: () => _reply(false)),
+              PillButton(label: '数字一致，配对', icon: Icons.check_rounded, primary: true, onPressed: () => _reply(true)),
+            ],
+          ),
+        ],
       ],
     );
   }
 
   /// 6 个数字格，分两组；入场时从左到右依次弹起。
   Widget _digits(SfColors c) {
+    final code = _p.digits;
     final cells = <Widget>[];
-    for (var i = 0; i < widget.code.length; i++) {
+    for (var i = 0; i < code.length; i++) {
       final start = 0.12 + i * 0.07;
       final appear = CurvedAnimation(
         parent: _intro,
-        curve: Interval(start, start + 0.5, curve: Motion.spring),
+        curve: Interval(start, (start + 0.5).clamp(0, 1), curve: Motion.spring),
       );
       if (i == 3) cells.add(const SizedBox(width: 10));
       cells.add(
         FadeTransition(
-          opacity: CurvedAnimation(parent: _intro, curve: Interval(start, start + 0.3)),
+          opacity: CurvedAnimation(parent: _intro, curve: Interval(start, (start + 0.3).clamp(0, 1))),
           child: SlideTransition(
             position: Tween(begin: const Offset(0, 0.35), end: Offset.zero).animate(appear),
             child: ScaleTransition(
@@ -198,7 +283,7 @@ class _PairingDialogState extends State<_PairingDialog> with TickerProviderState
                 alignment: Alignment.center,
                 decoration: ShapeDecoration(color: c.card2, shape: continuous(16)),
                 child: Text(
-                  widget.code[i],
+                  code[i],
                   style: TextStyle(fontFamily: monoFont, fontSize: 30, fontWeight: FontWeight.w700, color: c.fg),
                 ),
               ),
@@ -208,9 +293,12 @@ class _PairingDialogState extends State<_PairingDialog> with TickerProviderState
       );
     }
     return Semantics(
-      label: '配对码 ${widget.code.substring(0, 3)} ${widget.code.substring(3)}',
+      label: '配对码 ${_p.code}',
       child: ExcludeSemantics(
-        child: Row(mainAxisSize: MainAxisSize.min, children: cells),
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Row(mainAxisSize: MainAxisSize.min, children: cells),
+        ),
       ),
     );
   }
@@ -235,7 +323,7 @@ class _PairingDialogState extends State<_PairingDialog> with TickerProviderState
             ),
           ),
           const SizedBox(height: 14),
-          Text('已与“${widget.device.name}”配对', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+          Text('已与“${_p.peerName}”配对', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
           const SizedBox(height: 4),
           Text('以后连接不再询问', style: TextStyle(color: c.muted)),
         ],

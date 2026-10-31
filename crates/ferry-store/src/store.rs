@@ -4,29 +4,39 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use ferry_trust::{Identity, PeerList};
+use ferry_types::Config;
 
-use crate::dirs::default_data_dir;
+use crate::config;
+use crate::dirs::{default_cache_dir, default_data_dir};
 use crate::error::{Error, Result};
 use crate::file::{self, io};
 use crate::peers;
 
-/// 一个数据目录。只读写其中的文件，不缓存内容，多次打开同一目录也不会不一致。
+/// 一个数据目录（及其对应的缓存目录）。只读写其中的文件，不缓存内容，多次打开同一目录也不会不一致。
 #[derive(Clone, Debug)]
 pub struct Store {
     root: PathBuf,
+    /// 运行时文件（例如 `ipc.json`）所在的目录。
+    cache: PathBuf,
 }
 
 impl Store {
     /// 打开本机默认的数据目录，不存在时创建。
     pub fn open_default() -> Result<Self> {
-        Self::open(default_data_dir()?)
+        let mut store = Self::open(default_data_dir()?)?;
+        store.cache = default_cache_dir()?;
+        Ok(store)
     }
 
-    /// 打开指定的数据目录，不存在时创建。
+    /// 打开指定的数据目录，不存在时创建。运行时文件也放在这个目录里，
+    /// 这样用 `--data-dir` 运行的几份后台互不干扰。
     pub fn open(root: impl Into<PathBuf>) -> Result<Self> {
         let root = root.into();
         fs::create_dir_all(&root).map_err(|e| io(&root, e))?;
-        Ok(Self { root })
+        Ok(Self {
+            cache: root.clone(),
+            root,
+        })
     }
 
     pub fn root(&self) -> &Path {
@@ -69,6 +79,28 @@ impl Store {
 
     pub fn save_peers(&self, list: &PeerList) -> Result<()> {
         file::write(&self.peers_path(), peers::render(list).as_bytes())
+    }
+
+    /// 用户设置。文件不存在时为缺省设置（不会自动写入）。
+    pub fn config(&self) -> Result<Config> {
+        let path = self.config_path();
+        match file::read(&path)? {
+            Some(data) => config::parse(&path, &data),
+            None => Ok(Config::default()),
+        }
+    }
+
+    pub fn save_config(&self, config: &Config) -> Result<()> {
+        file::write(&self.config_path(), config::render(config).as_bytes())
+    }
+
+    /// 后台写给设置界面的连接信息（端口与令牌），见 ADR 0004。
+    pub fn ipc_endpoint_path(&self) -> PathBuf {
+        self.cache.join("ipc.json")
+    }
+
+    fn config_path(&self) -> PathBuf {
+        self.root.join("config.toml")
     }
 
     fn peers_path(&self) -> PathBuf {

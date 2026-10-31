@@ -40,13 +40,13 @@ class AboutPage extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Wrap(
+                Wrap(
                   spacing: 10,
                   runSpacing: 6,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    Text('ScreenFerry', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),
-                    Pill('v0.1.0', tone: PillTone.accent),
+                    const Text('ScreenFerry', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),
+                    if (state.version.isNotEmpty) Pill('v${state.version}', tone: PillTone.accent),
                   ],
                 ),
                 const SizedBox(height: 6),
@@ -57,7 +57,7 @@ class AboutPage extends StatelessWidget {
               label: '检查更新',
               icon: Icons.refresh_rounded,
               soft: true,
-              onPressed: () => state.showToast('已是最新版本'),
+              onPressed: () => state.showToast('自动检查更新即将支持'),
             ),
           ),
         ),

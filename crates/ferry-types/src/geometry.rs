@@ -1,4 +1,6 @@
-//! 几何：桌面坐标系中的点与矩形。
+//! 几何：桌面坐标系中的点与矩形，以及两台设备屏幕的相对位置。
+
+use serde::{Deserialize, Serialize};
 
 /// 桌面坐标系中的点。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -45,4 +47,14 @@ impl Rect {
     pub const fn contains(self, p: Point) -> bool {
         p.x >= self.x && p.x < self.right() && p.y >= self.y && p.y < self.bottom()
     }
+}
+
+/// 远端设备位于本机的哪一侧。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Side {
+    Left,
+    Right,
+    Top,
+    Bottom,
 }

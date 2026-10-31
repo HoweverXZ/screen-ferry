@@ -18,32 +18,54 @@ class LayoutPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
+    final c = SfColors.of(context);
+    if (!state.isServer) {
+      // 屏幕怎么摆由键鼠所在的那台（服务端）决定。
+      return PageScaffold(
+        title: '布局',
+        children: [
+          SfCard(
+            child: Row(
+              children: [
+                Icon(Icons.splitscreen_rounded, size: 28, color: c.accent),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('屏幕位置在 ${state.peerName} 上设置', style: const TextStyle(fontWeight: FontWeight.w600)),
+                      Text('键盘鼠标在那台电脑上，由它决定从哪条边切过来。', style: TextStyle(color: c.muted)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
     return PageScaffold(
       title: '布局',
       children: [
         const _Stage(),
-        SfGroup(
+        const SfGroup(
           children: [
             SfRow(
               title: '切换方式',
-              subtitle: '停留一下再切换，可以避免鼠标甩到边缘时误切',
+              subtitle: '停留一下再切换，可以避免鼠标甩到边缘时误切 · 即将支持',
               trailing: SfSegmented<SwitchMode>(
                 label: '切换方式',
-                segments: const [(SwitchMode.instant, '立即'), (SwitchMode.dwell, '停留 0.15 秒')],
-                value: state.switchMode,
-                onChanged: (v) => state.update(() => state.switchMode = v),
+                segments: [(SwitchMode.instant, '立即'), (SwitchMode.dwell, '停留 0.15 秒')],
+                value: SwitchMode.instant,
+                onChanged: null,
               ),
             ),
             SfRow(
               title: '拖拽时不切换',
-              subtitle: '按住鼠标键时，光标不会切到另一台电脑',
-              trailing: SfSwitch(
-                value: state.holdWhileDragging,
-                label: '拖拽时不切换',
-                onChanged: (v) => state.update(() => state.holdWhileDragging = v),
-              ),
+              subtitle: '按住鼠标键时，光标不会切到另一台电脑 · 目前始终开启',
+              trailing: SfSwitch(value: true, label: '拖拽时不切换', onChanged: null),
             ),
-            const SfRow(title: '回到本机', subtitle: '光标卡在对方屏幕上时，按它立即回来', trailing: KeyCombo(['Ctrl', 'Option', 'Esc'])),
+            SfRow(title: '回到本机', subtitle: '光标卡在对方屏幕上时，按它立即回来', trailing: KeyCombo(['Ctrl', 'Option', 'Esc'])),
           ],
         ),
       ],
@@ -139,7 +161,7 @@ class _StageState extends State<_Stage> {
                   ),
                   Positioned.fromRect(
                     rect: local,
-                    child: _ScreenBox(name: state.localName, detail: '本机 · 2560 × 1440'),
+                    child: _ScreenBox(name: state.localName, detail: '本机'),
                   ),
                   AnimatedPositioned(
                     duration: dragging ? Duration.zero : const Duration(milliseconds: 500),
@@ -153,20 +175,23 @@ class _StageState extends State<_Stage> {
                       child: MouseRegion(
                         cursor: dragging ? SystemMouseCursors.grabbing : SystemMouseCursors.grab,
                         child: GestureDetector(
-                          onPanStart: (_) => setState(() => _drag = remote),
-                          onPanUpdate: (d) => setState(() => _drag = _drag! + d.delta),
-                          onPanEnd: (_) {
-                            final side = _nearest(_drag! - center, s);
-                            setState(() => _drag = null);
-                            state.moveScreen(side);
-                          },
+                          // 没连上后台时不能改，拖不动。
+                          onPanStart: state.online ? (_) => setState(() => _drag = remote) : null,
+                          onPanUpdate: state.online ? (d) => setState(() => _drag = _drag! + d.delta) : null,
+                          onPanEnd: state.online
+                              ? (_) {
+                                  final side = _nearest(_drag! - center, s);
+                                  setState(() => _drag = null);
+                                  state.moveScreen(side);
+                                }
+                              : null,
                           child: AnimatedScale(
                             scale: dragging ? 1.04 : 1,
                             duration: Motion.fast,
                             curve: Motion.spring,
                             child: _ScreenBox(
                               name: state.peerName,
-                              detail: '3840 × 2160 · 150%',
+                              detail: state.connected ? '已连接' : '未连接',
                               remote: true,
                               lifted: dragging,
                             ),

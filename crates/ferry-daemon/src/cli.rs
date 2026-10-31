@@ -8,10 +8,14 @@ use ferry_engine::DEFAULT_PORT;
 
 pub(crate) const USAGE: &str = "\
 用法：
+  screenferry         [--data-dir 目录] [-v]
   screenferry serve   [--listen 地址] [--side 方向] [--no-cmd-ctrl-swap] [--no-announce] [通用选项]
   screenferry connect [服务端地址] [通用选项]
   screenferry peers   [--data-dir 目录]
   screenferry forget  <设备名或指纹> [--data-dir 目录]
+
+不带命令时常驻运行：按数据目录中的 config.toml 工作，配对、设置都在设置界面里完成。
+已经有一份在运行时，请它打开设置界面后退出。下面的命令用于调试，参数取代 config.toml。
 
 命令：
   serve      在拥有键鼠的电脑上运行，等待另一台连接
@@ -55,6 +59,8 @@ pub(crate) struct Options {
 }
 
 pub(crate) enum Mode {
+    /// 常驻运行，按 `config.toml` 工作。
+    Resident,
     Serve {
         listen: SocketAddr,
         side: Side,
@@ -72,10 +78,17 @@ pub(crate) enum Mode {
 }
 
 pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, String> {
-    let mut args = args.into_iter();
-    let command = match args.next().as_deref() {
-        None | Some("-h" | "--help" | "help") => return Ok(Parsed::Help),
-        Some(command @ ("serve" | "connect" | "peers" | "forget")) => command.to_owned(),
+    let mut args = args.into_iter().peekable();
+    let command = match args.peek().map(String::as_str) {
+        Some("-h" | "--help" | "help") => return Ok(Parsed::Help),
+        // 不带命令（或直接跟选项）：常驻运行。
+        None => "resident".to_owned(),
+        Some(first) if first.starts_with('-') => "resident".to_owned(),
+        Some(command @ ("serve" | "connect" | "peers" | "forget")) => {
+            let command = command.to_owned();
+            args.next();
+            command
+        }
         Some(other) => return Err(format!("未知命令：{other}")),
     };
     let runs = matches!(command.as_str(), "serve" | "connect");
@@ -114,6 +127,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, St
     }
 
     let mode = match command.as_str() {
+        "resident" => Mode::Resident,
         "serve" => Mode::Serve {
             listen,
             side,

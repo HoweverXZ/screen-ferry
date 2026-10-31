@@ -18,6 +18,10 @@ class SettingsPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
     final c = SfColors.of(context);
+    final s = state.settings;
+    // 没连上后台时开关不可点（返回 null）。
+    ValueChanged<bool>? set(SettingsPatch Function(bool) patch) =>
+        state.online ? (v) => state.updateSettings(patch(v)) : null;
     return PageScaffold(
       title: '设置',
       children: [
@@ -33,7 +37,7 @@ class SettingsPage extends StatelessWidget {
                   label: '主题',
                   segments: const [(ThemeMode.system, '跟随系统'), (ThemeMode.light, '浅色'), (ThemeMode.dark, '深色')],
                   value: state.appearance.mode,
-                  onChanged: (v) => state.appearance.mode = v,
+                  onChanged: state.online ? state.setTheme : null,
                 ),
               ),
               SfRow(
@@ -48,7 +52,7 @@ class SettingsPage extends StatelessWidget {
                       _Swatch(
                         choice: AccentChoice.all[i],
                         selected: state.appearance.accent == i,
-                        onTap: () => state.appearance.accent = i,
+                        onTap: state.online ? () => state.setAccent(i) : null,
                       ),
                     ],
                   ],
@@ -60,53 +64,47 @@ class SettingsPage extends StatelessWidget {
         const SectionTitle('键盘与剪贴板'),
         SfGroup(
           children: [
-            SfRow(
-              icon: Icons.keyboard_command_key_rounded,
-              title: '⌘ 当作 Ctrl',
-              subtitle: '在 Windows 上按 ⌘C、⌘V 就是复制、粘贴',
-              trailing: SfSwitch(
-                value: state.swapCommandControl,
-                label: '⌘ 当作 Ctrl',
-                onChanged: (v) => state.update(() => state.swapCommandControl = v),
+            if (state.isServer)
+              SfRow(
+                icon: Icons.keyboard_command_key_rounded,
+                title: '⌘ 当作 Ctrl',
+                subtitle: '在 Windows 上按 ⌘C、⌘V 就是复制、粘贴',
+                trailing: SfSwitch(
+                  value: s.swapCmdCtrl,
+                  label: '⌘ 当作 Ctrl',
+                  onChanged: set((v) => SettingsPatch(swapCmdCtrl: v)),
+                ),
               ),
-            ),
             SfRow(
               icon: Icons.content_paste_rounded,
               title: '同步剪贴板',
               subtitle: '光标切过去时，对方才来取最新的内容',
               trailing: SfSwitch(
-                value: state.syncClipboard,
+                value: s.clipboard,
                 label: '同步剪贴板',
-                onChanged: (v) => state.update(() => state.syncClipboard = v),
+                onChanged: set((v) => SettingsPatch(clipboard: v)),
               ),
             ),
             SfRow(
               icon: Icons.storage_rounded,
               title: '单项大小上限',
-              subtitle: '超过的内容不同步',
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  SizedBox(
-                    width: 180,
-                    child: Slider(
-                      value: state.clipboardLimitMb,
-                      min: 1,
-                      max: 64,
-                      divisions: 63,
-                      label: '${state.clipboardLimitMb.round()} MB',
-                      onChanged: (v) => state.update(() => state.clipboardLimitMb = v),
+              subtitle: '超过的内容不同步 · 即将支持',
+              trailing: Opacity(
+                opacity: 0.5,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const SizedBox(width: 180, child: Slider(value: 32, min: 1, max: 64, onChanged: null)),
+                    SizedBox(
+                      width: 56,
+                      child: Text(
+                        '32 MB',
+                        textAlign: TextAlign.end,
+                        style: TextStyle(fontFeatures: tabular, color: c.muted),
+                      ),
                     ),
-                  ),
-                  SizedBox(
-                    width: 56,
-                    child: Text(
-                      '${state.clipboardLimitMb.round()} MB',
-                      textAlign: TextAlign.end,
-                      style: const TextStyle(fontFeatures: tabular),
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ],
@@ -118,26 +116,27 @@ class SettingsPage extends StatelessWidget {
               icon: Icons.power_settings_new_rounded,
               title: '开机自动启动',
               trailing: SfSwitch(
-                value: state.launchAtLogin,
+                value: s.autostart,
                 label: '开机自动启动',
-                onChanged: (v) => state.update(() => state.launchAtLogin = v),
+                onChanged: set((v) => SettingsPatch(autostart: v)),
               ),
             ),
-            SfRow(
-              icon: Icons.wifi_tethering_rounded,
-              title: '在局域网里广播本机',
-              subtitle: '对方运行 connect 时不用填地址',
-              trailing: SfSwitch(
-                value: state.announce,
-                label: '在局域网里广播本机',
-                onChanged: (v) => state.update(() => state.announce = v),
+            if (state.isServer)
+              SfRow(
+                icon: Icons.wifi_tethering_rounded,
+                title: '在局域网里广播本机',
+                subtitle: '另一台电脑不用填地址就能找到本机',
+                trailing: SfSwitch(
+                  value: s.announce,
+                  label: '在局域网里广播本机',
+                  onChanged: set((v) => SettingsPatch(announce: v)),
+                ),
               ),
-            ),
             SfRow(icon: Icons.folder_outlined, title: '数据目录', subtitle: state.dataDir, mono: true),
             SfRow(
               icon: Icons.info_outline_rounded,
               title: '关于 ScreenFerry',
-              subtitle: '版本 0.1.0',
+              subtitle: state.version.isEmpty ? null : '版本 ${state.version}',
               trailing: Icon(Icons.chevron_right_rounded, color: c.muted),
               onTap: () => state.go(SfPage.about),
             ),
@@ -153,7 +152,7 @@ class _Swatch extends StatelessWidget {
 
   final AccentChoice choice;
   final bool selected;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {

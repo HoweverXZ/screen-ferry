@@ -8,7 +8,6 @@ import '../state/app_scope.dart';
 import '../state/app_state.dart';
 import '../theme/tokens.dart';
 import '../widgets/page_scaffold.dart';
-import '../widgets/pairing_dialog.dart';
 import '../widgets/surface.dart';
 
 class DevicesPage extends StatelessWidget {
@@ -29,7 +28,11 @@ class DevicesPage extends StatelessWidget {
               width: 64,
               height: 64,
               decoration: ShapeDecoration(color: c.accent, shape: continuous(22)),
-              child: Icon(Icons.desktop_mac_outlined, size: 32, color: c.onAccent),
+              child: Icon(
+                state.isServer ? Icons.desktop_mac_outlined : Icons.desktop_windows_outlined,
+                size: 32,
+                color: c.onAccent,
+              ),
             ),
             body: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -62,20 +65,27 @@ class DevicesPage extends StatelessWidget {
             ),
           ),
         ),
-        SectionTitle('已配对', note: '${state.paired.length} 台'),
+        SectionTitle('已配对', note: '${state.peers.length} 台'),
         _CardWall(
           empty: const _Empty(
             icon: Icons.link_rounded,
             title: '还没有配对的设备',
             text: '在另一台电脑上运行 ScreenFerry，两边核对配对码后会出现在这里。',
           ),
-          children: [for (final d in state.paired) _PairedCard(key: ValueKey('p-${d.id}'), device: d)],
+          children: [for (final d in state.peers) _PairedCard(key: ValueKey('p-${d.fingerprint}'), device: d)],
         ),
         const SectionTitle('在局域网里发现', note: '还没配对'),
-        _CardWall(
-          empty: const _Empty(icon: Icons.radar_rounded, title: '局域网里没有其他设备', text: '运行 ScreenFerry 的电脑会自动出现在这里。'),
-          children: [for (final d in state.found) _FoundCard(key: ValueKey('f-${d.id}'), device: d)],
-        ),
+        if (state.isServer)
+          const _Empty(
+            icon: Icons.radar_rounded,
+            title: '等另一台电脑来找本机',
+            text: '在另一台电脑上运行 ScreenFerry 并选择本机后，这里会弹出配对码请你核对。',
+          )
+        else
+          _CardWall(
+            empty: const _Empty(icon: Icons.radar_rounded, title: '局域网里没有其他设备', text: '运行 ScreenFerry 的电脑会自动出现在这里。'),
+            children: [for (final d in state.found) _FoundCard(key: ValueKey('f-${d.fingerprint}'), device: d)],
+          ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 6),
           child: Text(
@@ -149,7 +159,7 @@ class _Empty extends StatelessWidget {
 class _PairedCard extends StatefulWidget {
   const _PairedCard({super.key, required this.device});
 
-  final Device device;
+  final PeerInfo device;
 
   @override
   State<_PairedCard> createState() => _PairedCardState();
@@ -158,19 +168,21 @@ class _PairedCard extends StatefulWidget {
 class _PairedCardState extends State<_PairedCard> {
   bool _confirming = false;
   bool _leaving = false;
-  late final bool _fresh =
-      widget.device.pairedAt != null && DateTime.now().difference(widget.device.pairedAt!) < const Duration(seconds: 2);
+  late final bool _fresh = AppScope.read(context).isFresh(widget.device.fingerprint);
 
   void _remove() {
     setState(() => _leaving = true);
     final state = AppScope.read(context);
-    Future<void>.delayed(const Duration(milliseconds: 320), () => state.removeDevice(widget.device));
+    Future<void>.delayed(const Duration(milliseconds: 320), () => state.forget(widget.device));
   }
 
   @override
   Widget build(BuildContext context) {
     final d = widget.device;
     final c = SfColors.of(context);
+    final state = AppScope.of(context);
+    final addr = state.peer?.fingerprint == d.fingerprint ? state.peer?.addr ?? '' : '';
+    final seen = d.online && addr.isNotEmpty ? '在线 · $addr' : seenText(d);
     Widget card = SfCard(
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -180,7 +192,7 @@ class _PairedCardState extends State<_PairedCard> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               IconTile(
-                d.laptop ? Icons.laptop_windows_outlined : Icons.desktop_windows_outlined,
+                state.isServer ? Icons.desktop_windows_outlined : Icons.desktop_mac_outlined,
                 size: 52,
                 radius: 18,
                 emphasized: d.online,
@@ -189,14 +201,19 @@ class _PairedCardState extends State<_PairedCard> {
             ],
           ),
           const SizedBox(height: 12),
-          Text(d.name, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w700)),
+          Text(
+            d.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w700),
+          ),
           const SizedBox(height: 2),
           Text.rich(
             TextSpan(
-              text: '${d.os} · ',
+              text: '指纹 ',
               children: [
                 TextSpan(
-                  text: d.fingerprint,
+                  text: d.short,
                   style: const TextStyle(fontFamily: monoFont),
                 ),
               ],
@@ -221,16 +238,20 @@ class _PairedCardState extends State<_PairedCard> {
                         ),
                         SmallButton(label: '取消', onPressed: () => setState(() => _confirming = false)),
                         const SizedBox(width: 6),
-                        SmallButton(label: '移除', danger: true, onPressed: _remove),
+                        SmallButton(label: '移除', danger: true, onPressed: state.online ? _remove : null),
                       ],
                     )
                   : Row(
                       key: const ValueKey('normal'),
                       children: [
                         Expanded(
-                          child: Text(d.seen, style: TextStyle(fontSize: 13, color: c.muted)),
+                          child: Text(seen, style: TextStyle(fontSize: 13, color: c.muted)),
                         ),
-                        TextLink(label: '移除', danger: true, onPressed: () => setState(() => _confirming = true)),
+                        TextLink(
+                          label: '移除',
+                          danger: true,
+                          onPressed: state.online ? () => setState(() => _confirming = true) : null,
+                        ),
                       ],
                     ),
             ),
@@ -263,25 +284,36 @@ class _PairedCardState extends State<_PairedCard> {
 class _FoundCard extends StatelessWidget {
   const _FoundCard({super.key, required this.device});
 
-  final Device device;
+  final FoundDevice device;
 
   @override
   Widget build(BuildContext context) {
     final c = SfColors.of(context);
+    final state = AppScope.of(context);
     return DashedBox(
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
+            const Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [IconTile(Icons.desktop_windows_outlined, size: 52, radius: 18), const Pill('未配对')],
+              children: [IconTile(Icons.desktop_mac_outlined, size: 52, radius: 18), Pill('未配对')],
             ),
             const SizedBox(height: 12),
-            Text(device.name, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w700)),
+            Text(
+              device.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w700),
+            ),
             const SizedBox(height: 2),
-            Text('${device.os} · ${device.address}', style: TextStyle(fontSize: 14, color: c.muted)),
+            Text(
+              device.addr.isEmpty ? '指纹 ${device.short}' : device.addr,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 14, color: c.muted),
+            ),
             const Spacer(),
             Divider(height: 1, thickness: 1, color: c.line),
             const SizedBox(height: 10),
@@ -293,15 +325,7 @@ class _FoundCard extends StatelessWidget {
                 SmallButton(
                   label: '配对',
                   tone: PillTone.accent,
-                  onPressed: () async {
-                    final state = AppScope.read(context);
-                    final ok = await showPairingDialog(context, device: device, code: '482913');
-                    if (ok) {
-                      state.completePairing(device);
-                    } else {
-                      state.showToast('已拒绝配对');
-                    }
-                  },
+                  onPressed: state.online ? () => state.connectTo(device) : null,
                 ),
               ],
             ),

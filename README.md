@@ -52,15 +52,21 @@ cargo xtask lint
 
 断线、Windows 端退出或心跳超时时，Mac 会立即收回鼠标控制。
 
-## 设置界面
+## 常驻运行与设置界面
 
-设置界面用 Flutter 编写，工程在 `app/`，目前用模拟数据展示界面，还没有接到后台。在 Mac 上运行：
+`screenferry` 不带参数时常驻运行：按数据目录中的 `config.toml` 工作（macOS 默认当服务端），
+配对、方向、开关都在设置界面里完成。已经有一份在运行时，再运行一次会请它打开设置界面。
 
 ```bash
-cd app && flutter run -d macos
+./target/release/screenferry          # Mac 上常驻运行
+cd app && flutter build macos --release
+open build/macos/Build/Products/Release/ScreenFerry.app
 ```
 
-需要 Flutter 3.47 和 Xcode。
+设置界面用 Flutter 编写，工程在 `app/`，需要 Flutter 3.47 和 Xcode。它读取后台写在
+`~/Library/Caches/ScreenFerry/ipc.json` 中的端口和令牌连接后台（协议见 [docs/ipc.md](docs/ipc.md)）；
+后台没在运行时显示“后台没有运行”，后台启动后自动连上。另一台电脑第一次连接时，
+配对码在设置界面里核对；没有打开设置界面时，后台会自动打开它。
 
 ## 许可证
 

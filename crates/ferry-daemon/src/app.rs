@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 use std::process::ExitCode;
 
 use ferry_core::KeyRemap;
-use ferry_engine::{ClientConfig, ServerAddr, ServerConfig};
+use ferry_engine::{ClientConfig, Events, Live, ServerAddr, ServerConfig};
 use ferry_store::Store;
 use ferry_trust::Fingerprint;
 use tracing::{error, info};
@@ -45,6 +45,7 @@ pub(crate) fn run(options: Options) -> ExitCode {
         }
     };
     match options.mode {
+        Mode::Resident => return report(resident(store)),
         Mode::Peers => return report(list_peers(&store)),
         Mode::Forget { target } => return report(forget(&store, &target)),
         Mode::Serve { .. } | Mode::Connect { .. } => {}
@@ -75,12 +76,12 @@ pub(crate) fn run(options: Options) -> ExitCode {
                         KeyRemap::none()
                     };
                     let config = ServerConfig {
-                        side,
+                        live: Live { side, remap }.fixed(),
                         name: options.name,
-                        remap,
                         clipboard: options.clipboard,
                         store,
                         announce,
+                        events: Events::none(),
                     };
                     serve(listen, config).await
                 }
@@ -90,10 +91,13 @@ pub(crate) fn run(options: Options) -> ExitCode {
                         name: options.name,
                         clipboard: options.clipboard,
                         store,
+                        events: Events::none(),
                     };
                     connect(config).await
                 }
-                Mode::Peers | Mode::Forget { .. } => unreachable!("已在上面处理"),
+                Mode::Resident | Mode::Peers | Mode::Forget { .. } => {
+                    unreachable!("已在上面处理")
+                }
             }
         };
         // 收到 Ctrl+C 时让引擎正常析构：归还鼠标控制、松开按键，而不是被系统直接杀掉。
@@ -106,6 +110,41 @@ pub(crate) fn run(options: Options) -> ExitCode {
         }
     });
     report(result)
+}
+
+/// 常驻运行。已经有一份在运行时，请它打开设置界面，然后退出。
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn resident(store: Store) -> Result<(), Box<dyn std::error::Error>> {
+    use ferry_engine::resident::{self, Command};
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(async move {
+        if resident::hand_over_to_running(&store).await {
+            info!("ScreenFerry 已在运行，已请它打开设置界面");
+            return Ok(());
+        }
+        let (control, handle) = resident::control();
+        // Ctrl+C 走正常退出：停下引擎（归还鼠标、松开按键），删掉 ipc.json。
+        tokio::spawn({
+            let handle = handle.clone();
+            async move {
+                if tokio::signal::ctrl_c().await.is_ok() {
+                    info!("收到 Ctrl+C，正在退出");
+                    handle.send(Command::Quit);
+                }
+            }
+        });
+        resident::run(store, crate::host::NativeHost, control).await?;
+        drop(handle);
+        Ok(())
+    })
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn resident(_store: Store) -> Result<(), Box<dyn std::error::Error>> {
+    Err("常驻运行目前只支持 macOS 和 Windows".into())
 }
 
 fn report(result: Result<(), Box<dyn std::error::Error>>) -> ExitCode {

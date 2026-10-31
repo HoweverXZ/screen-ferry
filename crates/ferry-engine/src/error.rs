@@ -30,6 +30,10 @@ pub enum Error {
     AdvertisedMismatch,
     #[error("局域网里有多台未配对的服务端：{0}。请用 connect <地址> 指定一台")]
     AmbiguousServers(String),
+    #[error("服务端地址无效：{0}")]
+    BadAddress(String),
+    #[error(transparent)]
+    Ipc(#[from] ferry_ipc::Error),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

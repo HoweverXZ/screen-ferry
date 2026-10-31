@@ -1,0 +1,231 @@
+{
+  "notices": [
+    {
+      "type": "welcome",
+      "version": 1
+    },
+    {
+      "state": {
+        "activity": [
+          {
+            "clips": 3,
+            "connected_secs": 3600,
+            "hour": 1793476800,
+            "switches": 12
+          }
+        ],
+        "clipboard": {
+          "at": 1793480100000,
+          "bytes": 93,
+          "chars": 31,
+          "peer": "办公室 PC",
+          "preview": "周三例会纪要",
+          "to_peer": true
+        },
+        "found": [
+          {
+            "addr": "192.168.2.31",
+            "fingerprint": "7ab05cb238fbd60311223344556677889900aabbccddeeff0011223344556677",
+            "name": "会议室 Mac",
+            "paired": false,
+            "short": "7AB0-5CB2-38FB-D603"
+          }
+        ],
+        "link": {
+          "cursor_on_peer": true,
+          "peer": {
+            "addr": "192.168.2.18",
+            "fingerprint": "3f9a12c477e0b1d2aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55",
+            "name": "办公室 PC",
+            "short": "3F9A-12C4-77E0-B1D2"
+          },
+          "rtt_ms": [
+            0.31,
+            0.28,
+            0.5
+          ],
+          "since": 1793480000000,
+          "status": "connected"
+        },
+        "local": {
+          "data_dir": "/Users/me/Library/Application Support/ScreenFerry",
+          "fingerprint": "7ab05cb238fbd60311223344556677889900aabbccddeeff0011223344556677",
+          "name": "Mac Studio",
+          "role": "server",
+          "short": "7AB0-5CB2-38FB-D603",
+          "version": "0.1.0"
+        },
+        "peers": [
+          {
+            "fingerprint": "3f9a12c477e0b1d2aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55",
+            "last_seen": null,
+            "name": "办公室 PC",
+            "online": true,
+            "short": "3F9A-12C4-77E0-B1D2"
+          }
+        ],
+        "problem": null,
+        "settings": {
+          "accent": 2,
+          "announce": true,
+          "autostart": false,
+          "clipboard": true,
+          "name": "",
+          "server": "",
+          "side": "right",
+          "swap_cmd_ctrl": true,
+          "theme": "dark"
+        },
+        "sharing": true
+      },
+      "type": "state"
+    },
+    {
+      "state": {
+        "activity": [
+          {
+            "clips": 3,
+            "connected_secs": 3600,
+            "hour": 1793476800,
+            "switches": 12
+          }
+        ],
+        "clipboard": null,
+        "found": [
+          {
+            "addr": "192.168.2.31",
+            "fingerprint": "7ab05cb238fbd60311223344556677889900aabbccddeeff0011223344556677",
+            "name": "会议室 Mac",
+            "paired": false,
+            "short": "7AB0-5CB2-38FB-D603"
+          }
+        ],
+        "link": {
+          "cursor_on_peer": false,
+          "peer": null,
+          "rtt_ms": [],
+          "since": null,
+          "status": "stopped"
+        },
+        "local": {
+          "data_dir": "/Users/me/Library/Application Support/ScreenFerry",
+          "fingerprint": "7ab05cb238fbd60311223344556677889900aabbccddeeff0011223344556677",
+          "name": "Mac Studio",
+          "role": "server",
+          "short": "7AB0-5CB2-38FB-D603",
+          "version": "0.1.0"
+        },
+        "peers": [
+          {
+            "fingerprint": "3f9a12c477e0b1d2aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55",
+            "last_seen": null,
+            "name": "办公室 PC",
+            "online": true,
+            "short": "3F9A-12C4-77E0-B1D2"
+          }
+        ],
+        "problem": {
+          "kind": "permission",
+          "message": "需要在“隐私与安全性”中允许 ScreenFerry 控制电脑"
+        },
+        "settings": {
+          "accent": 2,
+          "announce": true,
+          "autostart": false,
+          "clipboard": true,
+          "name": "",
+          "server": "",
+          "side": "right",
+          "swap_cmd_ctrl": true,
+          "theme": "dark"
+        },
+        "sharing": false
+      },
+      "type": "state"
+    },
+    {
+      "entries": [
+        {
+          "at": 1793480200000,
+          "detail": "从本机右侧边缘",
+          "icon": "cursor",
+          "id": 9,
+          "kind": "cursor",
+          "text": "光标切到 办公室 PC"
+        }
+      ],
+      "type": "history"
+    },
+    {
+      "entry": {
+        "at": 1793480200000,
+        "detail": "从本机右侧边缘",
+        "icon": "cursor",
+        "id": 9,
+        "kind": "cursor",
+        "text": "光标切到 办公室 PC"
+      },
+      "type": "log"
+    },
+    {
+      "prompt": {
+        "code": "482 913",
+        "fingerprint": "3f9a12c477e0b1d2aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55",
+        "id": 3,
+        "peer_name": "会议室 PC",
+        "short": "3F9A-12C4-77E0-B1D2"
+      },
+      "type": "pairing"
+    },
+    {
+      "id": 3,
+      "type": "pairing_closed"
+    },
+    {
+      "text": "已暂停共享",
+      "type": "toast"
+    }
+  ],
+  "requests": [
+    {
+      "token": "abababababababababababababababababababababababababababababababab",
+      "type": "hello",
+      "version": 1
+    },
+    {
+      "on": false,
+      "type": "set_sharing"
+    },
+    {
+      "settings": {
+        "autostart": true,
+        "side": "left",
+        "theme": "light"
+      },
+      "type": "update_settings"
+    },
+    {
+      "fingerprint": "3f9a12c477e0b1d2aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55",
+      "type": "forget"
+    },
+    {
+      "accept": true,
+      "id": 3,
+      "type": "pair_reply"
+    },
+    {
+      "fingerprint": "7ab05cb238fbd60311223344556677889900aabbccddeeff0011223344556677",
+      "type": "connect"
+    },
+    {
+      "type": "open_permission_settings"
+    },
+    {
+      "type": "clear_log"
+    },
+    {
+      "type": "open_settings"
+    }
+  ],
+  "version": 1
+}

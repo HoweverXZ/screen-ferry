@@ -1,0 +1,83 @@
+//! 配置结构：`config.toml` 的内容。只有后台写入，读写由 `ferry-store` 负责，见 ADR 0004。
+
+use serde::{Deserialize, Serialize};
+
+use crate::Side;
+
+/// 本机在一对设备中的角色。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Role {
+    /// 键鼠在本机，光标可以切到对方。
+    Server,
+    /// 被对方控制。
+    Client,
+}
+
+impl Role {
+    /// 本机系统缺省的角色。目前 macOS 只能当服务端，Windows 只能当客户端。
+    pub fn native() -> Self {
+        if std::env::consts::OS == "windows" {
+            Self::Client
+        } else {
+            Self::Server
+        }
+    }
+}
+
+/// 设置界面的配色。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+/// `config.toml`。缺少的字段取缺省值，不认识的字段忽略。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Config {
+    /// 必须是文件的第一个字段，以后靠它做迁移。
+    pub schema_version: u32,
+    /// 设备名，空为计算机名。
+    pub name: String,
+    pub role: Role,
+    /// 服务端：对方屏幕在本机哪一侧。
+    pub side: Side,
+    /// 服务端：把 Command 当作对方的 Ctrl。
+    pub swap_cmd_ctrl: bool,
+    /// 服务端：在局域网里广播本机。
+    pub announce: bool,
+    /// 同步剪贴板。
+    pub clipboard: bool,
+    /// 客户端：服务端地址，空为在局域网里寻找。
+    pub server: String,
+    /// 设置界面的配色。
+    pub theme: Theme,
+    /// 设置界面的强调色，界面预设颜色的序号。
+    pub accent: u8,
+}
+
+impl Config {
+    /// 当前的配置结构版本。
+    pub const SCHEMA_VERSION: u32 = 1;
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            schema_version: Self::SCHEMA_VERSION,
+            name: String::new(),
+            role: Role::native(),
+            side: Side::Right,
+            swap_cmd_ctrl: true,
+            announce: true,
+            clipboard: true,
+            server: String::new(),
+            theme: Theme::System,
+            accent: 0,
+        }
+    }
+}

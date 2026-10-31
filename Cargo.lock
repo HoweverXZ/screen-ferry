@@ -171,6 +171,7 @@ dependencies = [
  "ferry-platform-windows",
  "ferry-store",
  "ferry-trust",
+ "ferry-types",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -199,6 +200,11 @@ name = "ferry-ipc"
 version = "0.1.0"
 dependencies = [
  "ferry-types",
+ "ring",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
 ]
 
 [[package]]
@@ -263,14 +269,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ferry-settings"
-version = "0.1.0"
-dependencies = [
- "ferry-ipc",
- "ferry-types",
-]
-
-[[package]]
 name = "ferry-store"
 version = "0.1.0"
 dependencies = [
@@ -297,6 +295,7 @@ name = "ferry-types"
 version = "0.1.0"
 dependencies = [
  "bitflags",
+ "serde",
 ]
 
 [[package]]

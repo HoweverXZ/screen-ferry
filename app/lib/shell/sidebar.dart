@@ -7,6 +7,7 @@ import 'dart:ui' show lerpDouble;
 import 'package:flutter/material.dart';
 
 import '../state/app_scope.dart';
+import '../state/app_state.dart';
 import '../theme/tokens.dart';
 import '../widgets/glyph.dart';
 import '../widgets/pressable.dart';
@@ -92,7 +93,7 @@ class Sidebar extends StatelessWidget {
           ),
           const Spacer(),
           Tooltip(
-            message: state.sharing ? '正在共享' : '已暂停共享',
+            message: _footer(state),
             child: AnimatedContainer(
               duration: Motion.medium,
               curve: Motion.ease,
@@ -102,7 +103,7 @@ class Sidebar extends StatelessWidget {
               decoration: ShapeDecoration(color: c.card2, shape: continuous(14)),
               child: Row(
                 children: [
-                  StatusDot(on: state.sharing),
+                  StatusDot(on: state.connected),
                   Expanded(
                     child: ClipRect(
                       child: AnimatedOpacity(
@@ -111,7 +112,7 @@ class Sidebar extends StatelessWidget {
                         child: Padding(
                           padding: const EdgeInsets.only(left: 10),
                           child: Text(
-                            state.sharing ? '共享中 · ${state.latestRtt.toStringAsFixed(2)} ms' : '已暂停共享',
+                            _footer(state),
                             maxLines: 1,
                             softWrap: false,
                             overflow: TextOverflow.clip,
@@ -284,4 +285,22 @@ class _NavButton extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 侧栏底部的一句话状态。
+String _footer(AppState state) {
+  if (state.daemon == null) {
+    return state.daemonLink == DaemonLink.connecting ? '正在连接后台' : '后台未运行';
+  }
+  if (state.disconnected) return '与后台断开';
+  final rtt = state.latestRtt;
+  return switch (state.status) {
+    LinkStatus.connected => rtt == null ? '共享中' : '共享中 · ${rtt.toStringAsFixed(2)} ms',
+    LinkStatus.paused => '已暂停共享',
+    LinkStatus.waiting => '等待对方连接',
+    LinkStatus.searching => '正在寻找对方',
+    LinkStatus.connecting => '正在连接',
+    LinkStatus.starting => '正在启动',
+    LinkStatus.stopped => '已停止',
+  };
 }

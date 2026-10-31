@@ -24,11 +24,12 @@ use ferry_store::Store;
 use ferry_trust::{Fingerprint, Peer};
 use ferry_types::{InputEvent, LockKeys, Point};
 use tokio::sync::watch;
-use tokio::time::{sleep, timeout};
+use tokio::time::{MissedTickBehavior, interval, sleep, timeout};
 use tracing::{debug, info, warn};
 
 use crate::clipboard::{self, ClipboardTask, SharedClipboard, Start};
 use crate::error::{Error, Result};
+use crate::events::{Event, Events, FoundServer};
 use crate::link::{CONNECT_TIMEOUT, HANDSHAKE_TIMEOUT, capabilities, send};
 use crate::pairing::{self, ConfirmPairing, Outcome};
 
@@ -40,6 +41,8 @@ const SILENCE_TIMEOUT: Duration = Duration::from_secs(2);
 const DISCOVERY_WAIT: Duration = Duration::from_secs(3);
 /// 一台服务端有多个地址时，每个地址的连接时限。
 const PER_ADDRESS_TIMEOUT: Duration = Duration::from_secs(2);
+/// 客户端自己测量往返延迟的间隔（服务端的 Ping 只用于判断连接存活）。
+const RTT_INTERVAL: Duration = Duration::from_secs(1);
 
 /// 服务端在哪里。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -58,6 +61,8 @@ pub struct ClientConfig {
     pub clipboard: bool,
     /// 数据目录：本机身份和已信任的设备。
     pub store: Store,
+    /// 对外报告的事件。
+    pub events: Events,
 }
 
 /// 运行客户端：连接服务端，断开后自动重连。
@@ -94,10 +99,13 @@ where
         active: watch::Sender::new(false),
         pressed: Pressed::new(),
         cursor: Point::default(),
+        events: config.events.clone(),
+        in_session: false,
     };
     let mut searching = false;
+    let mut seen = Vec::new();
     loop {
-        let target = match locate(&finder, &config.store, &mut searching).await {
+        let target = match locate(&finder, &config, &mut searching, &mut seen).await {
             Ok(Some(target)) => target,
             Ok(None) => continue,
             Err(e @ Error::AmbiguousServers(_)) => return Err(e),
@@ -110,6 +118,10 @@ where
         let result = client.session(&config, &displays, &target).await;
         client.release_all();
         client.active.send_replace(false);
+        if std::mem::take(&mut client.in_session) {
+            let reason = result.as_ref().err().map(ToString::to_string);
+            config.events.emit(Event::Disconnected { reason });
+        }
         match result {
             // 刚配对完，立即用新的信任关系重连。
             Ok(Ended::Paired) => continue,
@@ -136,7 +148,15 @@ enum Finder {
 }
 
 /// 确定这一次连哪里。局域网里暂时没找到时返回 `None`，调用方稍后再试。
-async fn locate(finder: &Finder, store: &Store, searching: &mut bool) -> Result<Option<Target>> {
+///
+/// `seen` 是上次报告出去的局域网服务端列表，变了才再报告。
+async fn locate(
+    finder: &Finder,
+    config: &ClientConfig,
+    searching: &mut bool,
+    seen: &mut Vec<FoundServer>,
+) -> Result<Option<Target>> {
+    let store = &config.store;
     let browser = match finder {
         Finder::Fixed(addr) => {
             info!(server = %addr, "正在连接服务端");
@@ -151,7 +171,20 @@ async fn locate(finder: &Finder, store: &Store, searching: &mut bool) -> Result<
     let deadline = Instant::now() + DISCOVERY_WAIT;
     loop {
         let peers = store.peers()?;
-        match pick(&browser.found(), &peers) {
+        let found = browser.found();
+        let list: Vec<FoundServer> = found
+            .iter()
+            .map(|d| FoundServer {
+                name: d.name.clone(),
+                fingerprint: d.fingerprint,
+                addrs: d.addrs.clone(),
+            })
+            .collect();
+        if list != *seen {
+            config.events.emit(Event::Found(list.clone()));
+            *seen = list;
+        }
+        match pick(&found, &peers) {
             Lookup::Trusted(server) | Lookup::Unpaired(server) => {
                 *searching = false;
                 info!(server = %server.name, addrs = ?server.addrs, "在局域网里找到服务端");
@@ -171,6 +204,7 @@ async fn locate(finder: &Finder, store: &Store, searching: &mut bool) -> Result<
                 }
                 if !*searching {
                     *searching = true;
+                    config.events.emit(Event::Searching);
                     if peers.is_empty() {
                         info!("正在局域网里寻找服务端…");
                     } else {
@@ -217,7 +251,7 @@ enum Ended {
     Paired,
 }
 
-struct Client<I, K, P> {
+struct Client<I: InputInject, K, P> {
     tls: Tls,
     fingerprint: Fingerprint,
     confirm: P,
@@ -229,6 +263,18 @@ struct Client<I, K, P> {
     active: watch::Sender<bool>,
     pressed: Pressed,
     cursor: Point,
+    events: Events,
+    /// 已建立会话、还没报告断开。
+    in_session: bool,
+}
+
+/// 无论因为什么停下（包括整个引擎被关掉），都松开对方按着的键，杜绝卡键。
+impl<I: InputInject, K, P> Drop for Client<I, K, P> {
+    fn drop(&mut self) {
+        for event in self.pressed.release_all(self.cursor) {
+            let _ = self.inject.inject(&event);
+        }
+    }
 }
 
 impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
@@ -238,6 +284,9 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
         displays: &D,
         target: &Target,
     ) -> Result<Ended> {
+        if let Some(&addr) = target.addrs.first() {
+            self.events.emit(Event::Connecting { addr });
+        }
         let (mut framed, server, addr) =
             connect_any(&self.tls, &target.addrs, Channel::Input).await?;
         if target.expected.is_some_and(|expected| expected != server) {
@@ -264,6 +313,12 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
             };
         send(&mut framed, &Message::Displays(displays.displays()?)).await?;
         info!(server = %welcome.name, fingerprint = %server, "已连接，等待光标进入");
+        self.in_session = true;
+        self.events.emit(Event::Connected {
+            name: welcome.name.clone(),
+            fingerprint: server,
+            addr,
+        });
 
         // 会话结束时随之丢弃，剪贴板同步也就停了。
         let _clipboard_task = if welcome.capabilities.contains(Capabilities::CLIPBOARD) {
@@ -281,14 +336,40 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
             None
         };
 
+        // 自己定时 Ping 服务端测往返延迟；同时据最后一次收到消息的时刻判断断线。
+        let epoch = Instant::now();
+        let mut last_heard = Instant::now();
+        let mut ping = interval(RTT_INTERVAL);
+        ping.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        let mut silence = interval(SILENCE_TIMEOUT / 4);
+        silence.set_missed_tick_behavior(MissedTickBehavior::Skip);
         loop {
-            let message = timeout(SILENCE_TIMEOUT, framed.recv())
-                .await
-                .map_err(|_| Error::HeartbeatTimeout)??;
+            let message = tokio::select! {
+                message = framed.recv() => message?,
+                _ = ping.tick() => {
+                    let nonce = epoch.elapsed().as_micros() as u64;
+                    send(&mut framed, &Message::Ping { nonce }).await?;
+                    continue;
+                }
+                _ = silence.tick() => {
+                    if last_heard.elapsed() > SILENCE_TIMEOUT {
+                        return Err(Error::HeartbeatTimeout);
+                    }
+                    continue;
+                }
+            };
+            last_heard = Instant::now();
             match message {
                 None | Some(Message::Bye(_)) => return Ok(Ended::Session),
                 Some(Message::Ping { nonce }) => {
                     send(&mut framed, &Message::Pong { nonce }).await?
+                }
+                Some(Message::Pong { nonce }) => {
+                    let sent = epoch + Duration::from_micros(nonce);
+                    let now = Instant::now();
+                    if sent <= now {
+                        self.events.emit(Event::Rtt(now - sent));
+                    }
                 }
                 Some(Message::Enter(enter)) => {
                     self.move_to(enter.position);
@@ -298,11 +379,19 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                     }
                     self.active.send_replace(true);
                     info!(at = ?enter.position, "光标进入本机");
+                    self.events.emit(Event::Cursor {
+                        here: true,
+                        hotkey: false,
+                    });
                 }
                 Some(Message::Leave { .. }) => {
                     self.release_all();
                     self.active.send_replace(false);
                     info!("光标离开本机");
+                    self.events.emit(Event::Cursor {
+                        here: false,
+                        hotkey: false,
+                    });
                 }
                 Some(Message::Input(event)) => self.apply(event),
                 Some(Message::Displays(_)) => {}
@@ -345,14 +434,26 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                 });
                 config.store.save_peers(&peers)?;
                 info!(server = %name, "配对成功，已记住这台设备");
+                self.events.emit(Event::Paired {
+                    name,
+                    fingerprint: server,
+                });
                 Ok(())
             }
             Outcome::RejectedHere => {
                 info!("已拒绝配对");
+                self.events.emit(Event::PairingRejected {
+                    name,
+                    by_peer: false,
+                });
                 Err(Error::PairingRejected)
             }
             Outcome::RejectedByPeer => {
                 info!(server = %name, "对方拒绝了配对");
+                self.events.emit(Event::PairingRejected {
+                    name,
+                    by_peer: true,
+                });
                 Err(Error::PairingRejected)
             }
         }
@@ -364,6 +465,7 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
             self.clipboard.clone(),
             self.active.subscribe(),
             Start::Quiet,
+            self.events.clone(),
         )
     }
 

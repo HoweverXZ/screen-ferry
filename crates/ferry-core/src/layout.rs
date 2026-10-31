@@ -2,14 +2,8 @@
 
 use ferry_types::{Display, Rect};
 
-/// 远端设备位于本机的哪一侧。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Side {
-    Left,
-    Right,
-    Top,
-    Bottom,
-}
+/// 远端设备位于本机的哪一侧；定义在 `ferry-types`，配置文件里也要用。
+pub use ferry_types::Side;
 
 /// 所有显示器的外接矩形。没有显示器时返回 `None`。
 ///

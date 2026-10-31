@@ -6,6 +6,8 @@
 
 mod app;
 mod cli;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+mod host;
 mod pairing;
 
 use std::process::ExitCode;

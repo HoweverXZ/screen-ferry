@@ -1,14 +1,19 @@
-// 界面状态。原型阶段是模拟数据：每秒一次延迟采样、每隔几秒切换一次光标。
-// 以后改由 ferry-settings（flutter_rust_bridge）把后台推来的事件写进这里，界面不用改。
+// 界面状态。业务数据全部来自后台（经 Backend），命令也经 Backend 发出；
+// 这里只多管导航、侧栏、提示等纯界面状态，以及“先显示、等后台确认”的乐观更新。
 
 import 'dart:async';
-import 'dart:math';
 
 import 'package:flutter/material.dart';
 
-enum SfPage { overview, devices, layout, log, settings, about }
+import '../ipc/messages.dart';
+import 'backend.dart';
+import 'demo_backend.dart';
 
-enum ScreenSide { left, right, top, bottom }
+export '../ipc/messages.dart';
+export 'backend.dart' show Backend, DaemonLink, IpcBackend;
+export 'demo_backend.dart' show DemoBackend;
+
+enum SfPage { overview, devices, layout, log, settings, about }
 
 extension ScreenSideLabel on ScreenSide {
   String get label => switch (this) {
@@ -21,8 +26,6 @@ extension ScreenSideLabel on ScreenSide {
 
 enum SwitchMode { instant, dwell }
 
-enum LogKind { cursor, clip, link }
-
 extension LogKindLabel on LogKind {
   String get label => switch (this) {
     LogKind.cursor => '光标',
@@ -31,42 +34,21 @@ extension LogKindLabel on LogKind {
   };
 }
 
-class LogEntry {
-  LogEntry(this.id, this.kind, this.icon, this.text, this.detail, this.at);
-
-  final int id;
-  final LogKind kind;
-  final IconData icon;
-  final String text;
-  final String detail;
-  final DateTime at;
-}
-
-class Device {
-  Device({
-    required this.id,
-    required this.name,
-    required this.fingerprint,
-    required this.os,
-    required this.address,
-    this.laptop = false,
-    this.online = false,
-    this.lastSeen = '',
-  });
-
-  final String id;
-  final String name;
-  final String fingerprint;
-  final String os;
-  final String address;
-  final bool laptop;
-  bool online;
-  String lastSeen;
-
-  /// 刚配对的时刻，用来播放卡片进场动画。
-  DateTime? pairedAt;
-
-  String get seen => online ? '在线 · $address' : lastSeen;
+extension LogIconData on LogIcon {
+  IconData get data => switch (this) {
+    LogIcon.power => Icons.power_settings_new_rounded,
+    LogIcon.link => Icons.link_rounded,
+    LogIcon.unlink => Icons.link_off_rounded,
+    LogIcon.lock => Icons.lock_rounded,
+    LogIcon.cursor => Icons.near_me_rounded,
+    LogIcon.clipboard => Icons.content_paste_rounded,
+    LogIcon.pause => Icons.pause_rounded,
+    LogIcon.play => Icons.play_arrow_rounded,
+    LogIcon.layout => Icons.splitscreen_rounded,
+    LogIcon.radar => Icons.radar_rounded,
+    LogIcon.warning => Icons.warning_amber_rounded,
+    LogIcon.settings => Icons.tune_rounded,
+  };
 }
 
 /// 外观单独通知，避免每秒的数据刷新重建整个 MaterialApp。
@@ -77,13 +59,12 @@ class Appearance extends ChangeNotifier {
   ThemeMode get mode => _mode;
   int get accent => _accent;
 
-  set mode(ThemeMode value) {
-    _mode = value;
-    notifyListeners();
-  }
-
-  set accent(int value) {
-    _accent = value;
+  void apply({ThemeMode? mode, int? accent}) {
+    final m = mode ?? _mode;
+    final a = accent ?? _accent;
+    if (m == _mode && a == _accent) return;
+    _mode = m;
+    _accent = a;
     notifyListeners();
   }
 }
@@ -96,120 +77,165 @@ class ToastMessage {
   final String text;
 }
 
+/// 今天（本地时区）的活动汇总。
+class TodayStats {
+  const TodayStats({required this.switches, required this.clips, required this.connectedHours, required this.hours});
+
+  final int switches;
+  final int clips;
+  final double connectedHours;
+
+  /// 0–23 时每小时的切换次数。
+  final List<int> hours;
+}
+
+/// 乐观更新等待后台确认的最长时间，超时就以后台为准。
+const _pendingTimeout = Duration(seconds: 3);
+
 class AppState extends ChangeNotifier {
-  AppState() {
-    final now = DateTime.now();
-    connectedAt = now.subtract(const Duration(hours: 1, minutes: 12, seconds: 14));
-    clipAt = now.subtract(const Duration(seconds: 12));
-    _seedLog(now);
+  AppState({Backend? backend}) : backend = backend ?? DemoBackend() {
+    _link = this.backend.link.value;
+    this.backend.link.addListener(_onLink);
+    _subscription = this.backend.notices.listen(_onNotice);
   }
+
+  final Backend backend;
+  late final StreamSubscription<Notice> _subscription;
 
   final appearance = Appearance();
   final toast = ValueNotifier<ToastMessage?>(null);
+  int _toastId = 0;
 
   // ── 导航 ──
   SfPage page = SfPage.overview;
   bool sidebarCollapsed = false;
 
+  // ── 与后台的连接 ──
+  late DaemonLink _link;
+  DaemonState? _daemon;
+
+  DaemonLink get daemonLink => _link;
+
+  /// 最近一次收到的状态快照；还没连上过后台时为 null。
+  DaemonState? get daemon => _daemon;
+
+  /// 已连上后台并拿到了状态，可以发命令。
+  bool get online => _link == DaemonLink.online && _daemon != null;
+
+  /// 连上过后台、现在断开了。
+  bool get disconnected => _daemon != null && _link != DaemonLink.online;
+
+  // ── 乐观更新 ──
+  SettingsPatch _pending = const SettingsPatch();
+  DateTime _pendingAt = DateTime.fromMillisecondsSinceEpoch(0);
+  bool? _pendingSharing;
+  DateTime _pendingSharingAt = DateTime.fromMillisecondsSinceEpoch(0);
+  final _forgotten = <String>{};
+  final _freshPeers = <String, DateTime>{};
+
+  // ── 配对与日志 ──
+  final _prompts = <PairingPrompt>[];
+  final List<LogEntry> log = [];
+
+  void start() => backend.start();
+
   // ── 本机 ──
-  final String localName = 'Mac Studio';
-  final String localFingerprint = '7AB0-5CB2-38FB-D603';
-  final String dataDir = '~/Library/Application Support/ScreenFerry';
+
+  Role get role => _daemon?.local.role ?? Role.server;
+  bool get isServer => role == Role.server;
+  String get localName => _daemon?.local.name ?? '';
+  String get localFingerprint => _daemon?.local.short ?? '';
+  String get dataDir => _daemon?.local.dataDir ?? '';
+  String get version => _daemon?.local.version ?? '';
 
   // ── 连接 ──
-  bool sharing = true;
-  bool cursorOnPeer = false;
-  final String peerName = '办公室 PC';
-  final String peerOs = 'Windows 11';
-  final String peerAddress = '192.168.2.18';
-  late DateTime connectedAt;
-  final List<double> rtt = List.generate(32, (i) => 0.30 + 0.05 * sin(i / 3));
 
-  double get latestRtt => rtt.last;
-  double get peakRtt => rtt.reduce(max);
-  double get avgRtt => rtt.reduce((a, b) => a + b) / rtt.length;
+  bool get sharing => _pendingSharing ?? _daemon?.sharing ?? false;
 
-  // ── 剪贴板 ──
-  late DateTime clipAt;
-  final String clipPreview = '周三例会纪要：确认屏幕布局、配对流程，以及剪贴板图片支持的排期。';
-  final String clipMeta = '文本 · 31 字';
+  LinkStatus get status {
+    if (_pendingSharing == false) return LinkStatus.paused;
+    if (_pendingSharing == true && _daemon?.link.status == LinkStatus.paused) return LinkStatus.starting;
+    return _daemon?.link.status ?? LinkStatus.starting;
+  }
 
-  // ── 今日 ──
-  int switchesToday = 128;
-  int clipsToday = 36;
-  final double sharedHours = 6.2;
-  final List<int> hours = [0, 0, 0, 0, 0, 0, 0, 0, 4, 12, 18, 15, 6, 9, 16, 21, 14, 10, 3, 0, 0, 0, 0, 0];
+  bool get connected => status == LinkStatus.connected;
+  PeerRef? get peer => connected ? _daemon?.link.peer : null;
+  DateTime? get connectedAt => connected ? _daemon?.link.since : null;
+  bool get cursorOnPeer => connected && (_daemon?.link.cursorOnPeer ?? false);
+  Problem? get problem => _daemon?.problem;
 
-  // ── 开关 ──
-  bool syncClipboard = true;
-  bool swapCommandControl = true;
-  bool announce = true;
-  bool launchAtLogin = false;
-  bool holdWhileDragging = true;
-  double clipboardLimitMb = 32;
+  /// 对方的名字；没连上时取第一台已配对的设备，再没有就叫“对方”。
+  String get peerName => peer?.name ?? peers.firstOrNull?.name ?? '对方';
 
-  // ── 布局 ──
-  ScreenSide side = ScreenSide.right;
-  SwitchMode switchMode = SwitchMode.instant;
+  List<double> get rtt => connected ? (_daemon?.link.rttMs ?? const []) : const [];
+  double? get latestRtt => rtt.isEmpty ? null : rtt.last;
+  double? get peakRtt => rtt.isEmpty ? null : rtt.reduce((a, b) => a > b ? a : b);
+  double? get avgRtt => rtt.isEmpty ? null : rtt.reduce((a, b) => a + b) / rtt.length;
+
+  ClipboardSync? get clipboard => _daemon?.clipboard;
 
   // ── 设备 ──
-  final List<Device> paired = [
-    Device(
-      id: 'pc',
-      name: '办公室 PC',
-      fingerprint: '3F9A-12C4-77E0-B1D2',
-      os: 'Windows 11',
-      address: '192.168.2.18',
-      online: true,
-    ),
-    Device(
-      id: 'nb',
-      name: '家里的笔记本',
-      fingerprint: 'C81E-0B57-94AD-2F60',
-      os: 'Windows 10',
-      address: '192.168.1.7',
-      laptop: true,
-      lastSeen: '3 天前连接过',
-    ),
-  ];
-  final List<Device> found = [
-    Device(id: 'mr', name: '会议室 PC', fingerprint: '5D21-9E0C-A4F7-3B88', os: 'Windows 11', address: '192.168.2.31'),
+
+  List<PeerInfo> get peers => [
+    for (final p in _daemon?.peers ?? const <PeerInfo>[])
+      if (!_forgotten.contains(p.fingerprint)) p,
   ];
 
-  // ── 日志 ──
-  final List<LogEntry> log = [];
-  int _nextLogId = 0;
+  List<FoundDevice> get found => [
+    for (final f in _daemon?.found ?? const <FoundDevice>[])
+      if (!f.paired) f,
+  ];
 
-  Timer? _timer;
-  final _random = Random(7);
-  int _tick = 0;
-  int _toastId = 0;
-
-  void start() {
-    _timer ??= Timer.periodic(const Duration(seconds: 1), (_) => _onTick());
+  /// 刚配对上的设备，用来播放卡片进场动画。
+  bool isFresh(String fingerprint) {
+    final at = _freshPeers[fingerprint];
+    return at != null && DateTime.now().difference(at) < const Duration(seconds: 2);
   }
 
-  void _onTick() {
-    _tick++;
-    if (sharing) {
-      rtt
-        ..removeAt(0)
-        ..add(0.26 + _random.nextDouble() * 0.12 + (_tick % 13 == 0 ? 0.3 : 0));
-      if (_tick % 6 == 0) {
-        cursorOnPeer = !cursorOnPeer;
-        switchesToday++;
-        hours[DateTime.now().hour]++;
-        addLog(
-          LogKind.cursor,
-          Icons.near_me_rounded,
-          cursorOnPeer ? '光标切到 $peerName' : '光标回到 本机',
-          cursorOnPeer ? '从本机${side.label}边缘' : '从对方屏幕边缘',
-          notify: false,
-        );
-      }
+  // ── 设置 ──
+
+  DaemonSettings get settings =>
+      (_daemon?.settings ??
+              const DaemonSettings(
+                name: '',
+                side: ScreenSide.right,
+                swapCmdCtrl: true,
+                announce: true,
+                clipboard: true,
+                server: '',
+                autostart: false,
+                theme: UiTheme.system,
+                accent: 0,
+              ))
+          .apply(_pending);
+
+  ScreenSide get side => settings.side;
+
+  // ── 今日 ──
+
+  TodayStats get today {
+    final now = DateTime.now();
+    final hours = List.filled(24, 0);
+    var (switches, clips, secs) = (0, 0, 0);
+    for (final a in _daemon?.activity ?? const <HourActivity>[]) {
+      final t = a.hour.toLocal();
+      if (t.year != now.year || t.month != now.month || t.day != now.day) continue;
+      hours[t.hour] += a.switches;
+      switches += a.switches;
+      clips += a.clips;
+      secs += a.connectedSecs;
     }
-    notifyListeners();
+    return TodayStats(switches: switches, clips: clips, connectedHours: secs / 3600, hours: hours);
   }
+
+  // ── 配对 ──
+
+  /// 还在等待用户核对的配对请求，先来的在前。
+  List<PairingPrompt> get prompts => List.unmodifiable(_prompts);
+
+  bool isPromptOpen(int id) => _prompts.any((p) => p.id == id);
+
+  // ── 界面状态 ──
 
   void update(VoidCallback change) {
     change();
@@ -224,88 +250,119 @@ class AppState extends ChangeNotifier {
 
   void showToast(String text) => toast.value = ToastMessage(++_toastId, text);
 
+  // ── 命令 ──
+
+  bool _send(Request request) {
+    if (online && backend.send(request)) return true;
+    showToast('还没连上后台，稍后再试');
+    return false;
+  }
+
   void setSharing(bool on) {
-    sharing = on;
-    if (!on) cursorOnPeer = false;
-    addLog(
-      LogKind.link,
-      on ? Icons.play_arrow_rounded : Icons.pause_rounded,
-      on ? '继续共享' : '暂停共享',
-      on ? '键鼠可以切到对方' : '键鼠留在本机',
-      notify: false,
-    );
+    if (!_send(SetSharingRequest(on))) return;
+    _pendingSharing = on;
+    _pendingSharingAt = DateTime.now();
     notifyListeners();
-    showToast(on ? '已继续共享' : '已暂停共享');
   }
 
-  void addLog(LogKind kind, IconData icon, String text, String detail, {bool notify = true}) {
-    log.insert(0, LogEntry(_nextLogId++, kind, icon, text, detail, DateTime.now()));
-    if (log.length > 200) log.removeLast();
-    if (notify) notifyListeners();
+  /// 修改设置：先按新值显示，等后台的状态确认。
+  void updateSettings(SettingsPatch patch) {
+    if (!_send(UpdateSettingsRequest(patch))) return;
+    _pending = _pending.merge(patch);
+    _pendingAt = DateTime.now();
+    _applyAppearance();
+    notifyListeners();
   }
 
-  void clearLog() {
-    log.clear();
-    notifyListeners();
-    showToast('日志已清空');
-  }
+  void setTheme(ThemeMode mode) => updateSettings(SettingsPatch(theme: UiTheme.values.byName(mode.name)));
+
+  void setAccent(int accent) => updateSettings(SettingsPatch(accent: accent));
 
   void moveScreen(ScreenSide to) {
-    if (to == side) return;
-    side = to;
-    addLog(LogKind.link, Icons.splitscreen_rounded, '$peerName 移到本机${to.label}', '布局已保存', notify: false);
+    if (to != side) updateSettings(SettingsPatch(side: to));
+  }
+
+  void forget(PeerInfo peer) {
+    if (!_send(ForgetRequest(peer.fingerprint))) return;
+    _forgotten.add(peer.fingerprint);
     notifyListeners();
   }
 
-  void removeDevice(Device device) {
-    paired.remove(device);
-    addLog(LogKind.link, Icons.link_off_rounded, '已移除 ${device.name}', '下次连接需要重新配对', notify: false);
-    notifyListeners();
-    showToast('已移除 ${device.name}');
+  void connectTo(FoundDevice device) {
+    if (_send(ConnectRequest(device.fingerprint))) showToast('正在连接 ${device.name}…');
   }
 
-  void completePairing(Device device) {
-    found.remove(device);
-    device
-      ..online = true
-      ..lastSeen = ''
-      ..pairedAt = DateTime.now();
-    paired.insert(0, device);
-    addLog(LogKind.link, Icons.lock_rounded, '已与 ${device.name} 配对', '指纹 ${device.fingerprint}', notify: false);
+  void replyPairing(int id, {required bool accept}) => _send(PairReplyRequest(id, accept: accept));
+
+  void clearLog() {
+    if (!_send(const ClearLogRequest())) return;
+    log.clear();
     notifyListeners();
-    showToast('已与 ${device.name} 配对');
   }
 
-  void _seedLog(DateTime now) {
-    final seed = [
-      (
-        LogKind.link,
-        Icons.power_settings_new_rounded,
-        'ScreenFerry 已启动',
-        '监听 0.0.0.0:24810',
-        const Duration(minutes: 73),
-      ),
-      (
-        LogKind.link,
-        Icons.link_rounded,
-        '已连接 $peerName',
-        'TLS 1.3 · 指纹 3F9A-12C4-77E0-B1D2',
-        const Duration(minutes: 72, seconds: 14),
-      ),
-      (LogKind.link, Icons.wifi_tethering_rounded, '在局域网里发现 会议室 PC', '192.168.2.31 · 未配对', const Duration(minutes: 30)),
-      (LogKind.clip, Icons.content_paste_rounded, '剪贴板同步到 本机', '文本 · 128 字', const Duration(minutes: 15)),
-      (LogKind.cursor, Icons.near_me_rounded, '光标回到 本机', '快捷键 Ctrl + Option + Esc', const Duration(minutes: 7)),
-      (LogKind.cursor, Icons.near_me_rounded, '光标切到 $peerName', '从本机右侧边缘', const Duration(minutes: 3, seconds: 10)),
-      (LogKind.clip, Icons.content_paste_rounded, '剪贴板同步到 $peerName', '文本 · 31 字', const Duration(seconds: 12)),
-    ];
-    for (final (kind, icon, text, detail, ago) in seed) {
-      log.insert(0, LogEntry(_nextLogId++, kind, icon, text, detail, now.subtract(ago)));
+  void openPermissionSettings() => _send(const OpenPermissionSettingsRequest());
+
+  // ── 后台推来的 ──
+
+  void _onLink() {
+    _link = backend.link.value;
+    notifyListeners();
+  }
+
+  void _onNotice(Notice notice) {
+    switch (notice) {
+      case StateNotice(:final state):
+        _onState(state);
+      case HistoryNotice(:final entries):
+        log
+          ..clear()
+          ..addAll(entries);
+      case LogNotice(:final entry):
+        log.insert(0, entry);
+        if (log.length > 500) log.removeLast();
+      case PairingNotice(:final prompt):
+        _prompts
+          ..removeWhere((p) => p.id == prompt.id)
+          ..add(prompt);
+      case PairingClosedNotice(:final id):
+        _prompts.removeWhere((p) => p.id == id);
+      case ToastNotice(:final text):
+        showToast(text);
+      case WelcomeNotice():
+        return;
     }
+    notifyListeners();
+  }
+
+  void _onState(DaemonState state) {
+    final before = _daemon?.peers.map((p) => p.fingerprint).toSet();
+    final now = DateTime.now();
+    if (before != null) {
+      for (final p in state.peers) {
+        if (!before.contains(p.fingerprint)) _freshPeers[p.fingerprint] = now;
+      }
+    }
+    _daemon = state;
+
+    // 后台已经确认的改动不再覆盖；等太久的以后台为准。
+    _pending = now.difference(_pendingAt) > _pendingTimeout ? const SettingsPatch() : _pending.without(state.settings);
+    if (_pendingSharing == state.sharing || now.difference(_pendingSharingAt) > _pendingTimeout) {
+      _pendingSharing = null;
+    }
+    _forgotten.retainWhere((fp) => state.peers.any((p) => p.fingerprint == fp));
+    _applyAppearance();
+  }
+
+  void _applyAppearance() {
+    final s = settings;
+    appearance.apply(mode: ThemeMode.values.byName(s.theme.name), accent: s.accent);
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
+    unawaited(_subscription.cancel());
+    backend.link.removeListener(_onLink);
+    unawaited(backend.dispose());
     appearance.dispose();
     toast.dispose();
     super.dispose();
@@ -318,11 +375,34 @@ String timeAgo(DateTime at) {
   if (s < 5) return '刚刚';
   if (s < 60) return '$s 秒前';
   if (s < 3600) return '${s ~/ 60} 分钟前';
-  return '${s ~/ 3600} 小时前';
+  if (s < 86400) return '${s ~/ 3600} 小时前';
+  return '${s ~/ 86400} 天前';
+}
+
+/// 已配对设备的在线情况：“在线”“5 分钟前连接过”“离线”。
+String seenText(PeerInfo p) {
+  if (p.online) return '在线';
+  final at = p.lastSeen;
+  return at == null ? '离线' : '${timeAgo(at)}连接过';
 }
 
 /// “14:32:05”这样的时刻。
 String clockTime(DateTime at) {
   String two(int v) => v.toString().padLeft(2, '0');
   return '${two(at.hour)}:${two(at.minute)}:${two(at.second)}';
+}
+
+/// “1 小时 12 分”这样的时长。
+String durationText(Duration d) {
+  final m = d.inMinutes;
+  if (m < 1) return '不到 1 分钟';
+  if (m < 60) return '$m 分钟';
+  return '${m ~/ 60} 小时 ${m % 60} 分';
+}
+
+/// 字节数写成“93 B”“1.2 MB”。
+String sizeText(int bytes) {
+  if (bytes < 1024) return '$bytes B';
+  if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+  return '${(bytes / 1024 / 1024).toStringAsFixed(1)} MB';
 }

@@ -131,6 +131,21 @@ impl EdgeSwitch {
         Some(Transition::Move(next))
     }
 
+    /// 远端所在的一侧。
+    pub fn side(&self) -> Side {
+        self.side
+    }
+
+    /// 改变远端所在的一侧。光标在远端时先回到本机，返回 `Leave`。
+    pub fn set_side(&mut self, side: Side) -> Option<Transition> {
+        if side == self.side {
+            return None;
+        }
+        let leave = self.leave();
+        self.side = side;
+        leave
+    }
+
     /// 主动回到本机（例如按了快捷键）。光标原本在远端时返回 `Leave`。
     pub fn leave(&mut self) -> Option<Transition> {
         let local_at = self.abort()?;

@@ -10,7 +10,7 @@ pub(crate) fn layer(name: &str) -> Option<u8> {
         "ferry-net" | "ferry-store" | "ferry-ipc" => Some(2),
         n if is_platform_impl(n) => Some(2),
         "ferry-engine" => Some(3),
-        "ferry-daemon" | "ferry-settings" | "ferry-service" => Some(4),
+        "ferry-daemon" | "ferry-service" => Some(4),
         _ => None,
     }
 }
@@ -24,8 +24,6 @@ pub(crate) fn is_platform_impl(name: &str) -> bool {
 pub(crate) fn may_use_target_os(name: &str) -> bool {
     is_platform_impl(name) || layer(name) == Some(4)
 }
-
-const SETTINGS_ALLOWED: &[&str] = &["ferry-ipc", "ferry-types"];
 
 pub(crate) fn check(ws: &Workspace, out: &mut Vec<String>) {
     for c in &ws.crates {
@@ -49,12 +47,6 @@ pub(crate) fn check(ws: &Workspace, out: &mut Vec<String>) {
             if c.name == "ferry-engine" && d.kind != DepKind::Dev && is_platform_impl(&d.name) {
                 out.push(format!(
                     "ferry-engine 不能依赖具体平台实现 {}：只依赖 ferry-platform 的 trait",
-                    d.name
-                ));
-            }
-            if c.name == "ferry-settings" && !SETTINGS_ALLOWED.contains(&d.name.as_str()) {
-                out.push(format!(
-                    "ferry-settings 不能依赖 {}：只能通过 ferry-ipc 与后台通信",
                     d.name
                 ));
             }

@@ -38,7 +38,9 @@ class _LogPageState extends State<LogPage> {
     final items = state.log.where(_match).toList();
     return PageScaffold(
       title: '日志',
-      actions: [PillButton(label: '清空', icon: Icons.delete_outline_rounded, onPressed: state.clearLog)],
+      actions: [
+        PillButton(label: '清空', icon: Icons.delete_outline_rounded, onPressed: state.online ? state.clearLog : null),
+      ],
       children: [
         Wrap(
           spacing: 12,
@@ -110,7 +112,7 @@ class _LogRow extends StatelessWidget {
             width: 34,
             height: 34,
             decoration: BoxDecoration(shape: BoxShape.circle, color: c.card2),
-            child: Icon(entry.icon, size: 17),
+            child: Icon(entry.icon.data, size: 17),
           ),
           const SizedBox(width: 14),
           Expanded(

@@ -28,23 +28,40 @@ use tracing::{debug, info, warn};
 
 use crate::clipboard::{self, ClipboardTask, SharedClipboard, Start};
 use crate::error::{Error, Result};
+use crate::events::{Event, Events};
 use crate::heartbeat::{self, Heartbeat};
 use crate::link::{HANDSHAKE_TIMEOUT, capabilities, primary_scale, send};
 use crate::pairing::{self, ConfirmPairing, Outcome};
 
 pub struct ServerConfig {
-    /// 客户端的屏幕位于本机的哪一侧。
-    pub side: Side,
+    /// 会话中途也能立即生效的设置。
+    pub live: watch::Receiver<Live>,
     /// 本机设备名，显示给对方。
     pub name: String,
-    /// 发送前对按键做的重映射，例如把 Command 当作对方的 Ctrl。
-    pub remap: KeyRemap,
     /// 是否同步剪贴板。
     pub clipboard: bool,
     /// 数据目录：本机身份和已信任的设备。
     pub store: Store,
     /// 是否在局域网里用 mDNS 广播本机，让客户端不填地址也能找到。
     pub announce: bool,
+    /// 对外报告的事件。
+    pub events: Events,
+}
+
+/// 会话中途也能立即生效的设置。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Live {
+    /// 客户端的屏幕位于本机的哪一侧。光标在对方屏幕时改变方向，会先回到本机。
+    pub side: Side,
+    /// 发送前对按键做的重映射，例如把 Command 当作对方的 Ctrl。
+    pub remap: KeyRemap,
+}
+
+impl Live {
+    /// 运行期间不会改变的设置。
+    pub fn fixed(self) -> watch::Receiver<Self> {
+        watch::channel(self).1
+    }
 }
 
 /// 运行服务端：在 `listener` 上一次服务一个客户端，断开后继续等待下一个。
@@ -85,6 +102,10 @@ where
         announced = advertiser.is_some(),
         "等待客户端连接",
     );
+    server.config.events.emit(Event::Listening {
+        port: addr.port(),
+        announced: advertiser.is_some(),
+    });
 
     let mut session = 0u64;
     loop {
@@ -104,6 +125,10 @@ where
         session += 1;
         let result = server.connection(stream, session, &listener).await;
         server.return_control();
+        if std::mem::take(&mut server.in_session) {
+            let reason = result.as_ref().err().map(ToString::to_string);
+            server.config.events.emit(Event::Disconnected { reason });
+        }
         match result {
             Ok(Ended::Session) => info!(%peer, "客户端已断开"),
             Ok(Ended::Other) => {}
@@ -136,6 +161,8 @@ struct Server<C, D, K, P> {
     /// 按着的鼠标键和（光标在对方屏幕时）按着的键。
     /// 按着鼠标键时不切换屏幕，避免拖拽到一半换了屏；按着的键用来识别快捷键。
     pressed: Pressed,
+    /// 已建立会话、还没报告断开。
+    in_session: bool,
 }
 
 impl<C, D, K, P> Server<C, D, K, P>
@@ -171,6 +198,7 @@ where
             events,
             switch: None,
             pressed: Pressed::new(),
+            in_session: false,
         })
     }
 
@@ -181,6 +209,7 @@ where
         id: u64,
         listener: &TcpListener,
     ) -> Result<Ended> {
+        let addr = stream.peer_addr()?;
         let (mut framed, peer) = timeout(HANDSHAKE_TIMEOUT, self.tls.accept(stream))
             .await
             .map_err(|_| Error::Timeout("TLS 握手"))??;
@@ -210,6 +239,12 @@ where
             return Ok(Ended::Other);
         }
         info!(peer = %hello.name, fingerprint = %peer, "客户端已连接");
+        self.in_session = true;
+        self.config.events.emit(Event::Connected {
+            name: hello.name.clone(),
+            fingerprint: peer,
+            addr,
+        });
         self.session(framed, peer, hello, welcome, listener).await?;
         Ok(Ended::Session)
     }
@@ -232,9 +267,23 @@ where
                 });
                 self.config.store.save_peers(&peers)?;
                 info!(peer = name, "配对成功，已记住这台设备");
+                self.config.events.emit(Event::Paired {
+                    name: name.to_owned(),
+                    fingerprint: peer,
+                });
             }
-            Outcome::RejectedHere => info!(peer = name, "已拒绝配对"),
-            Outcome::RejectedByPeer => info!(peer = name, "对方拒绝了配对"),
+            Outcome::RejectedHere | Outcome::RejectedByPeer => {
+                let by_peer = outcome == Outcome::RejectedByPeer;
+                if by_peer {
+                    info!(peer = name, "对方拒绝了配对");
+                } else {
+                    info!(peer = name, "已拒绝配对");
+                }
+                self.config.events.emit(Event::PairingRejected {
+                    name: name.to_owned(),
+                    by_peer,
+                });
+            }
         }
         Ok(())
     }
@@ -260,20 +309,17 @@ where
         let local_rect = bounds(&local).ok_or(Error::NoDisplays("本机"))?;
         let remote_rect = bounds(&remote).ok_or(Error::NoDisplays("对方"))?;
         let scale = relative_scale(&local, &remote);
+        let side = self.config.live.borrow_and_update().side;
         info!(
             peer = %hello.name,
             local = ?local_rect,
             remote = ?remote_rect,
             scale,
-            "握手完成：把光标推出本机 {:?} 侧边缘即可切换过去",
-            self.config.side,
+            "握手完成：把光标推出本机 {side:?} 侧边缘即可切换过去",
         );
-        self.switch = Some(EdgeSwitch::new(
-            local_rect,
-            remote_rect,
-            self.config.side,
-            scale,
-        ));
+        self.switch = Some(EdgeSwitch::new(local_rect, remote_rect, side, scale));
+        // 设置的发送方已经不在（命令行模式）时，不再等它的变化。
+        let mut live_open = true;
 
         self.active.send_replace(true);
         let clipboard = welcome.capabilities.contains(Capabilities::CLIPBOARD);
@@ -294,15 +340,33 @@ where
                 Some(data) = data_rx.recv() => {
                     info!("数据连接已建立，开始同步剪贴板");
                     let active = self.active.subscribe();
-                    let task = clipboard::spawn(data, self.clipboard.clone(), active, Start::Announce);
+                    let task = clipboard::spawn(
+                        data,
+                        self.clipboard.clone(),
+                        active,
+                        Start::Announce,
+                        self.config.events.clone(),
+                    );
                     _clipboard_task = Some(task);
                 }
                 event = self.events.recv() => {
                     let Some(event) = event else { return Ok(()) };
                     self.on_capture(event, &mut framed).await?;
                 }
+                changed = self.config.live.changed(), if live_open => {
+                    if changed.is_err() {
+                        live_open = false;
+                        continue;
+                    }
+                    let side = self.config.live.borrow_and_update().side;
+                    self.change_side(side, &mut framed).await?;
+                }
                 message = framed.recv() => match message? {
-                    Some(Message::Pong { nonce }) => heartbeat.pong(nonce),
+                    Some(Message::Pong { nonce }) => {
+                        if let Some(rtt) = heartbeat.pong(nonce) {
+                            self.config.events.emit(Event::Rtt(rtt));
+                        }
+                    }
                     Some(Message::Ping { nonce }) => send(&mut framed, &Message::Pong { nonce }).await?,
                     Some(Message::Displays(displays)) => self.update_remote(&local, &displays),
                     Some(Message::Bye(_)) | None => return Ok(()),
@@ -371,6 +435,7 @@ where
             return Ok(());
         };
 
+        let mut hotkey = false;
         let transition = match event {
             CaptureEvent::Pointer { position, dx, dy } => {
                 let free = !self.pressed.any_button();
@@ -420,15 +485,26 @@ where
                     && escape_hotkey(&self.pressed)
                 {
                     info!("快捷键 Ctrl + Option + Esc：回到本机");
+                    hotkey = true;
                     switch.leave()
                 } else {
-                    let code = self.config.remap.apply(code);
+                    let code = self.config.live.borrow().remap.apply(code);
                     send(framed, &Message::Input(InputEvent::Key { code, action })).await?;
                     None
                 }
             }
         };
 
+        self.perform(transition, framed, hotkey).await
+    }
+
+    /// 执行一次切换或移动。
+    async fn perform(
+        &mut self,
+        transition: Option<Transition>,
+        framed: &mut Framed<ServerStream>,
+        hotkey: bool,
+    ) -> Result<()> {
         match transition {
             Some(Transition::Enter { seq, at }) => {
                 // 先抓取再通知对方：抓取失败时，会话结束后会照常归还控制权。
@@ -441,6 +517,10 @@ where
                 send(framed, &Message::Enter(enter)).await?;
                 self.active.send_replace(false);
                 info!(?at, "光标进入对方屏幕");
+                self.config.events.emit(Event::Cursor {
+                    here: false,
+                    hotkey: false,
+                });
             }
             Some(Transition::Move(position)) => {
                 send(
@@ -457,10 +537,26 @@ where
                 self.active.send_replace(true);
                 send(framed, &Message::Leave { seq }).await?;
                 info!("光标回到本机");
+                self.config
+                    .events
+                    .emit(Event::Cursor { here: true, hotkey });
             }
             None => {}
         }
         Ok(())
+    }
+
+    /// 用户改了对方屏幕的方向。光标在对方屏幕时先回到本机。
+    async fn change_side(&mut self, side: Side, framed: &mut Framed<ServerStream>) -> Result<()> {
+        let Some(switch) = self.switch.as_mut() else {
+            return Ok(());
+        };
+        if switch.side() == side {
+            return Ok(());
+        }
+        let transition = switch.set_side(side);
+        info!(?side, "对方屏幕的方向已改变");
+        self.perform(transition, framed, false).await
     }
 
     fn is_remote(&self) -> bool {

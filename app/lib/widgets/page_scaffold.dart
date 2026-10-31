@@ -5,6 +5,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 
 import '../theme/tokens.dart';
+import 'status_banners.dart';
 
 class PageScaffold extends StatelessWidget {
   const PageScaffold({super.key, required this.title, this.leading, this.actions = const [], required this.children});
@@ -20,6 +21,8 @@ class PageScaffold extends StatelessWidget {
   Widget build(BuildContext context) {
     // 在这里读颜色：主题一变，本页就重建并换一个新的标题栏代理，标题栏才会跟着重绘。
     final c = SfColors.of(context);
+    // 后台出问题或断开时，提示条放在每页内容的最上面。
+    final children = [...statusBanners(context), ...this.children];
     return LayoutBuilder(
       builder: (context, box) {
         final narrow = box.maxWidth < 560;

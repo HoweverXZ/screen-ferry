@@ -73,7 +73,9 @@ class SfSegmented<T> extends StatelessWidget {
 
   final List<(T, String)> segments;
   final T value;
-  final ValueChanged<T> onChanged;
+
+  /// 为 null 时禁用：变淡、不能点。
+  final ValueChanged<T>? onChanged;
 
   /// 放在页面底色上时，底槽用卡片色。
   final bool onCard;
@@ -109,54 +111,60 @@ class SfSegmented<T> extends StatelessWidget {
   }
 
   Widget _build(SfColors c, double segW, int index) {
+    final change = onChanged;
     return Semantics(
       label: label,
-      child: Container(
-        padding: const EdgeInsets.all(_pad),
-        decoration: ShapeDecoration(color: onCard ? c.card : c.card2, shape: const StadiumBorder()),
-        child: SizedBox(
-          height: 36,
-          width: segW * segments.length + _gap * (segments.length - 1),
-          child: Stack(
-            children: [
-              AnimatedPositioned(
-                duration: Motion.slow,
-                curve: Motion.spring,
-                left: index * (segW + _gap),
-                top: 0,
-                bottom: 0,
-                width: segW,
-                child: DecoratedBox(
-                  decoration: ShapeDecoration(color: c.accent, shape: const StadiumBorder()),
+      enabled: change != null,
+      child: AnimatedOpacity(
+        duration: Motion.fast,
+        opacity: change == null ? 0.5 : 1,
+        child: Container(
+          padding: const EdgeInsets.all(_pad),
+          decoration: ShapeDecoration(color: onCard ? c.card : c.card2, shape: const StadiumBorder()),
+          child: SizedBox(
+            height: 36,
+            width: segW * segments.length + _gap * (segments.length - 1),
+            child: Stack(
+              children: [
+                AnimatedPositioned(
+                  duration: Motion.slow,
+                  curve: Motion.spring,
+                  left: index * (segW + _gap),
+                  top: 0,
+                  bottom: 0,
+                  width: segW,
+                  child: DecoratedBox(
+                    decoration: ShapeDecoration(color: c.accent, shape: const StadiumBorder()),
+                  ),
                 ),
-              ),
-              Row(
-                children: [
-                  for (var i = 0; i < segments.length; i++) ...[
-                    if (i > 0) const SizedBox(width: _gap),
-                    SizedBox(
-                      width: segW,
-                      child: Pressable(
-                        onTap: () => onChanged(segments[i].$1),
-                        radius: 999,
-                        selected: i == index,
-                        semanticLabel: segments[i].$2,
-                        child: Center(
-                          child: AnimatedDefaultTextStyle(
-                            duration: Motion.medium,
-                            style: _style.copyWith(color: i == index ? c.onAccent : c.fg),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 6),
-                              child: FittedBox(fit: BoxFit.scaleDown, child: Text(segments[i].$2, maxLines: 1)),
+                Row(
+                  children: [
+                    for (var i = 0; i < segments.length; i++) ...[
+                      if (i > 0) const SizedBox(width: _gap),
+                      SizedBox(
+                        width: segW,
+                        child: Pressable(
+                          onTap: change == null ? null : () => change(segments[i].$1),
+                          radius: 999,
+                          selected: i == index,
+                          semanticLabel: segments[i].$2,
+                          child: Center(
+                            child: AnimatedDefaultTextStyle(
+                              duration: Motion.medium,
+                              style: _style.copyWith(color: i == index ? c.onAccent : c.fg),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 6),
+                                child: FittedBox(fit: BoxFit.scaleDown, child: Text(segments[i].$2, maxLines: 1)),
+                              ),
                             ),
                           ),
                         ),
                       ),
-                    ),
+                    ],
                   ],
-                ],
-              ),
-            ],
+                ),
+              ],
+            ),
           ),
         ),
       ),

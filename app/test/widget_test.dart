@@ -17,13 +17,15 @@ Future<void> settle(WidgetTester tester, {int steps = 6}) async {
   }
 }
 
-Future<AppState> launch(WidgetTester tester, Size size) async {
+/// 用演示后台启动界面。默认不让演示数据自己跳动，测试结果才稳定。
+Future<AppState> launch(WidgetTester tester, Size size, {Backend? backend}) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
-  final state = AppState();
+  final state = AppState(backend: backend ?? DemoBackend(animate: false));
   addTearDown(state.dispose);
   await tester.pumpWidget(ScreenFerryApp(state: state));
+  state.start();
   await settle(tester);
   return state;
 }
@@ -70,20 +72,32 @@ void main() {
     expect(state.sharing, isTrue);
   });
 
-  testWidgets('配对局域网里发现的设备', (tester) async {
-    final state = await launch(tester, const Size(1160, 780));
+  testWidgets('客户端配对局域网里发现的服务端', (tester) async {
+    final backend = DemoBackend(role: Role.client, animate: false);
+    final state = await launch(tester, const Size(1160, 780), backend: backend);
     state.go(SfPage.devices);
     await settle(tester);
 
     await tester.tap(find.text('配对'));
     await settle(tester);
-    expect(find.text('与“会议室 PC”配对'), findsOneWidget);
+    expect(backend.sent.whereType<ConnectRequest>(), hasLength(1));
+    expect(find.text('与“会议室 Mac”配对'), findsOneWidget);
 
     await tester.tap(find.text('数字一致，配对'));
     await settle(tester, steps: 12);
-    expect(state.paired.first.name, '会议室 PC');
+    expect(backend.sent.whereType<PairReplyRequest>().single.accept, isTrue);
+    expect(state.peers.first.name, '会议室 Mac');
     expect(state.found, isEmpty);
+    expect(find.text('与“会议室 Mac”配对'), findsNothing, reason: '配对结束后对话框自动关闭');
     expect(find.text('局域网里没有其他设备'), findsOneWidget);
+  });
+
+  testWidgets('服务端不列出局域网设备，只说明怎么配对', (tester) async {
+    final state = await launch(tester, const Size(1160, 780));
+    state.go(SfPage.devices);
+    await settle(tester);
+    expect(find.text('等另一台电脑来找本机'), findsOneWidget);
+    expect(find.text('配对'), findsNothing);
   });
 
   testWidgets('移除设备前要在卡片上确认', (tester) async {
@@ -94,12 +108,12 @@ void main() {
     await tester.tap(find.text('移除').first);
     await settle(tester);
     expect(find.text('移除后需重新配对'), findsOneWidget);
-    expect(state.paired, hasLength(2), reason: '确认前不能移除');
+    expect(state.peers, hasLength(2), reason: '确认前不能移除');
 
     // 第一张卡片底部现在是“取消 / 移除”，它的“移除”仍是第一个。
     await tester.tap(find.text('移除').first);
     await settle(tester);
-    expect(state.paired.map((d) => d.name), isNot(contains('办公室 PC')));
+    expect(state.peers.map((d) => d.name), isNot(contains('办公室 PC')));
   });
 
   testWidgets('日志可以筛选和清空', (tester) async {
@@ -272,5 +286,95 @@ void main() {
     expect(find.byType(BottomNav), findsNothing);
     expect(find.byType(Sidebar), findsOneWidget);
     expect(state.page, SfPage.overview);
+  });
+
+  testWidgets('缺少权限时显示提示条，按钮请后台打开系统设置', (tester) async {
+    final backend = DemoBackend(
+      animate: false,
+      problem: const Problem(kind: ProblemKind.permission, message: '需要在“隐私与安全性”中允许 ScreenFerry 控制电脑'),
+    );
+    await launch(tester, const Size(1160, 780), backend: backend);
+    expect(find.text('需要键鼠控制权限'), findsOneWidget);
+    expect(find.text('暂时无法共享'), findsOneWidget, reason: '主卡也说明了状态');
+
+    await tester.tap(find.text('打开系统设置'));
+    await settle(tester);
+    expect(backend.sent.whereType<OpenPermissionSettingsRequest>(), hasLength(1));
+
+    backend.problem = null;
+    await settle(tester);
+    expect(find.text('需要键鼠控制权限'), findsNothing);
+  });
+
+  testWidgets('对方发起配对时弹出配对码，后台说结束就自动关闭', (tester) async {
+    final backend = DemoBackend(animate: false);
+    await launch(tester, const Size(1160, 780), backend: backend);
+
+    final id = backend.requestPairing('会议室 PC');
+    await settle(tester);
+    expect(find.text('与“会议室 PC”配对'), findsOneWidget);
+    expect(find.text('4'), findsOneWidget, reason: '配对码逐位显示');
+
+    backend.emit(PairingClosedNotice(id));
+    await settle(tester);
+    expect(find.text('与“会议室 PC”配对'), findsNothing);
+  });
+
+  testWidgets('拒绝配对会告诉后台并关闭对话框', (tester) async {
+    final backend = DemoBackend(animate: false);
+    await launch(tester, const Size(1160, 780), backend: backend);
+    final id = backend.requestPairing('会议室 PC');
+    await settle(tester);
+
+    await tester.tap(find.text('拒绝'));
+    await settle(tester);
+    final reply = backend.sent.whereType<PairReplyRequest>().single;
+    expect((reply.id, reply.accept), (id, false));
+    expect(find.text('与“会议室 PC”配对'), findsNothing);
+  });
+
+  testWidgets('后台没有运行时显示占位页，侧栏仍在', (tester) async {
+    final state = await launch(tester, const Size(1160, 780), backend: DemoBackend(animate: false, startOnline: false));
+    expect(find.text('后台没有运行'), findsOneWidget);
+    expect(find.text('请先启动 ScreenFerry，连上后会自动显示。'), findsOneWidget);
+    expect(navItem('设备'), findsOneWidget);
+    expect(find.text('往返延迟'), findsNothing);
+    expect(state.online, isFalse);
+  });
+
+  testWidgets('与后台断开后保留数据、提示重连，并禁用会发命令的控件', (tester) async {
+    final backend = DemoBackend(animate: false);
+    final state = await launch(tester, const Size(1160, 780), backend: backend);
+    expect(find.text('往返延迟'), findsOneWidget);
+
+    backend.goOffline();
+    await settle(tester);
+    expect(find.text('与后台的连接已断开，正在重连…'), findsOneWidget);
+    expect(find.text('往返延迟'), findsOneWidget, reason: '保留最后的数据');
+
+    final sentBefore = backend.sent.length;
+    await tester.tap(find.text('剪贴板同步'));
+    await tester.tap(find.byTooltip('暂停共享'));
+    await settle(tester);
+    expect(backend.sent, hasLength(sentBefore), reason: '断开时不发命令');
+    expect(state.settings.clipboard, isTrue);
+
+    backend.goOnline();
+    await settle(tester);
+    expect(find.text('与后台的连接已断开，正在重连…'), findsNothing);
+  });
+
+  testWidgets('设置开关立即生效，并把改动发给后台', (tester) async {
+    final backend = DemoBackend(animate: false);
+    final state = await launch(tester, const Size(1160, 780), backend: backend);
+    state.go(SfPage.settings);
+    await settle(tester);
+
+    // 同名的有标题文字和开关两处，开关在后。
+    await tester.tap(find.bySemanticsLabel('同步剪贴板').last);
+    await settle(tester);
+    expect(state.settings.clipboard, isFalse);
+    final patch = backend.sent.whereType<UpdateSettingsRequest>().last.settings;
+    expect(patch.toJson(), {'clipboard': false});
   });
 }

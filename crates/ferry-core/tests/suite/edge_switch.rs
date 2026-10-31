@@ -218,3 +218,25 @@ fn leave_on_demand_reports_the_same_seq() {
     );
     assert!(!s.is_remote());
 }
+
+#[test]
+fn changing_side_while_local_takes_effect_immediately() {
+    let mut s = switch(Side::Right);
+    assert_eq!(s.set_side(Side::Left), None);
+    assert_eq!(s.side(), Side::Left);
+    // 右边缘不再触发，左边缘触发。
+    assert_eq!(s.local_motion(Point::new(999, 400), 5, 0), None);
+    enter(&mut s, Point::new(0, 400), -5, 0);
+}
+
+#[test]
+fn changing_side_while_remote_returns_to_local_first() {
+    let mut s = switch(Side::Right);
+    enter(&mut s, Point::new(999, 400), 5, 0);
+    match s.set_side(Side::Top) {
+        Some(Transition::Leave { local_at, .. }) => assert_eq!(local_at.x, 999),
+        other => panic!("应先回到本机，实际 {other:?}"),
+    }
+    assert!(!s.is_remote());
+    assert_eq!(s.set_side(Side::Top), None, "同一侧不算变化");
+}

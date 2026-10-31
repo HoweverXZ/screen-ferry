@@ -42,3 +42,32 @@ async fn entering_syncs_caps_lock() {
         "只同步 Caps Lock"
     );
 }
+
+#[tokio::test]
+async fn keys_are_released_when_the_client_engine_is_stopped() {
+    use ferry_types::{KeyAction, KeyCode};
+
+    let rig = Rig::start().await;
+    rig.enter().await;
+    rig.key(KeyCode::LEFT_SHIFT, KeyAction::Down);
+    let down = InputEvent::Key {
+        code: KeyCode::LEFT_SHIFT,
+        action: KeyAction::Down,
+    };
+    eventually("客户端按下 Shift", || {
+        rig.inject.events().contains(&down)
+    })
+    .await;
+
+    // 常驻后台暂停共享、重启引擎时，会直接丢掉客户端的任务。
+    rig.client.abort();
+
+    let up = InputEvent::Key {
+        code: KeyCode::LEFT_SHIFT,
+        action: KeyAction::Up,
+    };
+    eventually("引擎停下时松开 Shift", || {
+        rig.inject.events().contains(&up)
+    })
+    .await;
+}

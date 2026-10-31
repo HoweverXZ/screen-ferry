@@ -72,8 +72,30 @@ class _HeroCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
-    final mins = DateTime.now().difference(state.connectedAt).inMinutes;
-    final onPeer = state.sharing && state.cursorOnPeer;
+    final c = SfColors.of(context);
+    final status = state.status;
+    final peer = state.peer;
+    final since = state.connectedAt;
+    final rtt = state.latestRtt;
+
+    final (title, pill, tone) = switch (status) {
+      LinkStatus.connected => (peer?.name ?? state.peerName, '共享中', PillTone.good),
+      LinkStatus.paused => ('已暂停共享', '已暂停', PillTone.plain),
+      LinkStatus.waiting => ('等待对方连接', '等待连接', PillTone.plain),
+      LinkStatus.searching => ('正在寻找对方', '寻找中', PillTone.plain),
+      LinkStatus.connecting => ('正在连接…', '连接中', PillTone.plain),
+      LinkStatus.starting => ('正在启动…', '启动中', PillTone.plain),
+      LinkStatus.stopped => ('暂时无法共享', '已停止', PillTone.plain),
+    };
+    final hint = switch (status) {
+      LinkStatus.connected => null,
+      LinkStatus.paused => '键鼠留在本机。点右边的按钮继续共享',
+      LinkStatus.waiting => state.settings.announce ? '已在局域网里广播本机，另一台电脑会自动找到这里' : '没有广播本机，另一台电脑需要手动填写本机地址',
+      LinkStatus.searching => '在局域网里寻找已配对的电脑',
+      LinkStatus.connecting => '找到了对方，正在建立加密连接',
+      LinkStatus.starting => '稍等片刻',
+      LinkStatus.stopped => state.problem?.message ?? '后台遇到了问题',
+    };
 
     final info = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -84,48 +106,75 @@ class _HeroCard extends StatelessWidget {
             const SizedBox(width: 10),
             const Text('状态', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
             const SizedBox(width: 10),
-            Pill(state.sharing ? '共享中' : '已暂停', tone: state.sharing ? PillTone.good : PillTone.plain),
+            Pill(pill, tone: tone),
           ],
         ),
         const SizedBox(height: 18),
         Row(
           children: [
-            const IconTile(Icons.desktop_windows_outlined, size: 66, radius: 22, iconSize: 32),
+            IconTile(
+              state.isServer ? Icons.desktop_windows_outlined : Icons.desktop_mac_outlined,
+              size: 66,
+              radius: 22,
+              iconSize: 32,
+              emphasized: state.connected,
+            ),
             const SizedBox(width: 16),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    state.peerName,
+                    title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontSize: wide ? 34 : 28, fontWeight: FontWeight.w800, height: 1.1),
                   ),
                   const SizedBox(height: 10),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      Pill(state.peerOs),
-                      Pill(state.latestRtt < 1 ? '延迟 优' : '延迟 一般', tone: PillTone.good),
-                      Pill(onPeer ? '光标在 ${state.peerName}' : '光标在本机', icon: Icons.near_me_rounded),
-                    ],
-                  ),
+                  if (hint != null)
+                    Text(hint, style: TextStyle(fontSize: 14, color: c.muted, height: 1.5))
+                  else
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        if (rtt != null)
+                          Pill(
+                            rtt < 1
+                                ? '延迟 优'
+                                : rtt < 5
+                                ? '延迟 良好'
+                                : '延迟 较高',
+                            tone: PillTone.good,
+                          ),
+                        Pill(
+                          state.cursorOnPeer ? '光标在 ${peer?.name ?? state.peerName}' : '光标在本机',
+                          icon: Icons.near_me_rounded,
+                        ),
+                      ],
+                    ),
                 ],
               ),
             ),
           ],
         ),
         const SizedBox(height: 20),
-        _Facts([('已连接', '${mins ~/ 60} 小时 ${mins % 60} 分'), ('地址', state.peerAddress), ('加密', 'TLS 1.3')]),
+        _Facts(
+          state.connected && peer != null
+              ? [
+                  ('已连接', since == null ? '—' : durationText(DateTime.now().difference(since))),
+                  ('地址', peer.addr.isEmpty ? '—' : peer.addr),
+                  ('加密', 'TLS 1.3'),
+                ]
+              : [('本机', state.localName), ('指纹', state.localFingerprint), ('加密', 'TLS 1.3')],
+        ),
       ],
     );
 
     final bloom = Bloom(
-      active: state.sharing,
+      active: state.sharing && state.online,
       size: wide ? 236 : 200,
-      center: _CoreButton(sharing: state.sharing, onTap: () => state.setSharing(!state.sharing)),
+      center: _CoreButton(sharing: state.sharing, onTap: state.online ? () => state.setSharing(!state.sharing) : null),
     );
 
     return SfCard(
@@ -232,7 +281,9 @@ class _CoreButton extends StatelessWidget {
   const _CoreButton({required this.sharing, required this.onTap});
 
   final bool sharing;
-  final VoidCallback onTap;
+
+  /// 没连上后台时为 null，按钮不可点。
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -279,17 +330,22 @@ class _LatencyCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
     final c = SfColors.of(context);
-    String ms(double v) => v.toStringAsFixed(2);
+    String ms(double? v) => v == null ? '—' : v.toStringAsFixed(2);
+    final rtt = state.rtt;
     return SfCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          CardHeader(icon: Icons.speed_rounded, title: '往返延迟', trailing: SideNote('峰值 ${ms(state.peakRtt)}')),
+          CardHeader(
+            icon: Icons.speed_rounded,
+            title: '往返延迟',
+            trailing: rtt.isEmpty ? null : SideNote('峰值 ${ms(state.peakRtt)}'),
+          ),
           const SizedBox(height: 10),
           Text.rich(
             TextSpan(
               children: [
-                TextSpan(text: state.sharing ? ms(state.latestRtt) : '—'),
+                TextSpan(text: ms(state.latestRtt)),
                 TextSpan(
                   text: ' ms',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: c.muted),
@@ -299,10 +355,10 @@ class _LatencyCard extends StatelessWidget {
             style: const TextStyle(fontSize: 40, fontWeight: FontWeight.w800, height: 1.05, fontFeatures: tabular),
           ),
           const SizedBox(height: 14),
-          LatencyBars(values: state.rtt, active: state.sharing),
+          LatencyBars(values: rtt, active: state.connected),
           const SizedBox(height: 10),
           Text(
-            '最近 ${state.rtt.length} 秒平均 ${ms(state.avgRtt)} ms',
+            rtt.isEmpty ? '连上对方后显示' : '最近 ${rtt.length} 秒平均 ${ms(state.avgRtt)} ms',
             style: TextStyle(fontSize: 14, color: c.muted, fontFeatures: tabular),
           ),
         ],
@@ -318,36 +374,63 @@ class _ClipboardCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
     final c = SfColors.of(context);
-    Widget chip(String text) => Container(
-      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
-      decoration: ShapeDecoration(color: c.card2, shape: const StadiumBorder()),
-      child: Text(text, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+    final clip = state.clipboard;
+    Widget chip(String text) => Flexible(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
+        decoration: ShapeDecoration(color: c.card2, shape: const StadiumBorder()),
+        child: Text(
+          text,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        ),
+      ),
     );
+    if (clip == null) {
+      return SfCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const CardHeader(icon: Icons.content_paste_rounded, title: '剪贴板'),
+            const SizedBox(height: 14),
+            const Text('还没有同步过剪贴板', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 4),
+            Text(
+              state.settings.clipboard ? '复制后把光标切过去，对方就能直接粘贴。' : '剪贴板同步已关闭，可以在设置里打开。',
+              style: TextStyle(fontSize: 14, color: c.muted, height: 1.5),
+            ),
+          ],
+        ),
+      );
+    }
+    final (from, to) = clip.toPeer ? ('本机', clip.peer) : (clip.peer, '本机');
+    final meta = clip.chars != null ? '文本 · ${clip.chars} 字' : sizeText(clip.bytes);
     return SfCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          CardHeader(icon: Icons.content_paste_rounded, title: '剪贴板', trailing: SideNote(timeAgo(state.clipAt))),
+          CardHeader(icon: Icons.content_paste_rounded, title: '剪贴板', trailing: SideNote(timeAgo(clip.at))),
           const SizedBox(height: 12),
           Row(
             children: [
-              chip('本机'),
+              chip(from),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 child: Icon(Icons.arrow_forward_rounded, size: 18, color: c.accent),
               ),
-              chip(state.peerName),
+              chip(to),
             ],
           ),
           const SizedBox(height: 12),
           Text(
-            state.clipPreview,
+            clip.preview.isEmpty ? '（不是纯文本）' : clip.preview,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 15, height: 1.55),
+            style: TextStyle(fontSize: 15, height: 1.55, color: clip.preview.isEmpty ? c.muted : null),
           ),
           const SizedBox(height: 8),
-          Text(state.clipMeta, style: TextStyle(fontSize: 14, color: c.muted)),
+          Text(meta, style: TextStyle(fontSize: 14, color: c.muted)),
         ],
       ),
     );
@@ -364,25 +447,35 @@ class _QuickTiles extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
+    final s = state.settings;
+    VoidCallback? toggle(SettingsPatch patch) => state.online ? () => state.updateSettings(patch) : null;
     final tiles = [
       _QuickTile(
         icon: Icons.content_paste_rounded,
         label: '剪贴板同步',
-        on: state.syncClipboard,
-        onTap: () => state.update(() => state.syncClipboard = !state.syncClipboard),
+        on: s.clipboard,
+        onTap: toggle(SettingsPatch(clipboard: !s.clipboard)),
       ),
-      _QuickTile(
-        icon: Icons.keyboard_command_key_rounded,
-        label: '⌘ 当作 Ctrl',
-        on: state.swapCommandControl,
-        onTap: () => state.update(() => state.swapCommandControl = !state.swapCommandControl),
-      ),
-      _QuickTile(
-        icon: Icons.wifi_tethering_rounded,
-        label: '局域网广播',
-        on: state.announce,
-        onTap: () => state.update(() => state.announce = !state.announce),
-      ),
+      if (state.isServer) ...[
+        _QuickTile(
+          icon: Icons.keyboard_command_key_rounded,
+          label: '⌘ 当作 Ctrl',
+          on: s.swapCmdCtrl,
+          onTap: toggle(SettingsPatch(swapCmdCtrl: !s.swapCmdCtrl)),
+        ),
+        _QuickTile(
+          icon: Icons.wifi_tethering_rounded,
+          label: '局域网广播',
+          on: s.announce,
+          onTap: toggle(SettingsPatch(announce: !s.announce)),
+        ),
+      ] else
+        _QuickTile(
+          icon: Icons.power_settings_new_rounded,
+          label: '开机自动启动',
+          on: s.autostart,
+          onTap: toggle(SettingsPatch(autostart: !s.autostart)),
+        ),
     ];
     if (!wide) {
       return Column(
@@ -406,7 +499,9 @@ class _QuickTile extends StatelessWidget {
   final IconData icon;
   final String label;
   final bool on;
-  final VoidCallback onTap;
+
+  /// 没连上后台时为 null，磁贴不可点。
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -462,6 +557,8 @@ class _DevicesCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
     final c = SfColors.of(context);
+    final peers = state.peers;
+    final found = state.found;
     return SfCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -472,40 +569,42 @@ class _DevicesCard extends StatelessWidget {
             trailing: TextLink(label: '管理', chevron: true, onPressed: () => state.go(SfPage.devices)),
           ),
           const SizedBox(height: 4),
-          if (state.paired.isEmpty)
+          if (peers.isEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 12),
               child: Text('还没有配对的设备', style: TextStyle(color: c.muted)),
             ),
-          for (var i = 0; i < state.paired.length; i++) ...[
+          for (var i = 0; i < peers.length; i++) ...[
             if (i > 0) Divider(height: 1, thickness: 1, color: c.line),
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 10),
               child: Row(
                 children: [
                   IconTile(
-                    state.paired[i].laptop ? Icons.laptop_windows_outlined : Icons.desktop_windows_outlined,
-                    emphasized: state.paired[i].online,
+                    state.isServer ? Icons.desktop_windows_outlined : Icons.desktop_mac_outlined,
+                    emphasized: peers[i].online,
                   ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(state.paired[i].name, style: const TextStyle(fontWeight: FontWeight.w600)),
                         Text(
-                          state.paired[i].online ? '在线' : state.paired[i].lastSeen,
-                          style: TextStyle(fontSize: 13, color: c.muted),
+                          peers[i].name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w600),
                         ),
+                        Text(seenText(peers[i]), style: TextStyle(fontSize: 13, color: c.muted)),
                       ],
                     ),
                   ),
-                  StatusDot(on: state.paired[i].online),
+                  StatusDot(on: peers[i].online),
                 ],
               ),
             ),
           ],
-          if (state.found.isNotEmpty) ...[
+          if (found.isNotEmpty) ...[
             const SizedBox(height: 10),
             Pressable(
               onTap: () => state.go(SfPage.devices),
@@ -520,7 +619,7 @@ class _DevicesCard extends StatelessWidget {
                       Icon(Icons.radar_rounded, size: 18, color: c.muted),
                       const SizedBox(width: 8),
                       Text(
-                        '局域网里发现 ${state.found.length} 台新设备',
+                        '局域网里发现 ${found.length} 台新设备',
                         style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: c.muted),
                       ),
                     ],
@@ -536,13 +635,21 @@ class _DevicesCard extends StatelessWidget {
             decoration: ShapeDecoration(color: c.card2, shape: continuous(18)),
             child: Row(
               children: [
-                const IconTile(Icons.desktop_mac_outlined, emphasized: true),
+                IconTile(
+                  state.isServer ? Icons.desktop_mac_outlined : Icons.desktop_windows_outlined,
+                  emphasized: true,
+                ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('${state.localName} · 本机', style: const TextStyle(fontWeight: FontWeight.w600)),
+                      Text(
+                        '${state.localName} · 本机',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
                       Text(
                         state.localFingerprint,
                         style: TextStyle(fontSize: 13, color: c.muted, fontFamily: monoFont),
@@ -571,6 +678,7 @@ class _TodayCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
     final c = SfColors.of(context);
+    final today = state.today;
     Widget stat(String value, String label) => Expanded(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -594,14 +702,14 @@ class _TodayCard extends StatelessWidget {
           const SizedBox(height: 12),
           Row(
             children: [
-              stat('${state.switchesToday}', '次屏幕切换'),
-              stat('${state.clipsToday}', '次剪贴板同步'),
-              stat('${state.sharedHours}', '小时共享'),
+              stat('${today.switches}', '次屏幕切换'),
+              stat('${today.clips}', '次剪贴板同步'),
+              stat(today.connectedHours.toStringAsFixed(1), '小时连接'),
             ],
           ),
           const Spacer(),
           const SizedBox(height: 20),
-          HourBars(counts: state.hours),
+          HourBars(counts: today.hours),
         ],
       ),
     );

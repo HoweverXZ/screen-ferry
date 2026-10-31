@@ -1,4 +1,4 @@
-//! 运行时数据目录的位置，见 AGENTS.md 第 10 节。
+//! 运行时数据目录与缓存目录的位置，见 AGENTS.md 第 10 节。
 
 use std::env;
 use std::path::PathBuf;
@@ -24,6 +24,26 @@ pub fn default_data_dir() -> Result<PathBuf> {
         _ => match var_dir("XDG_DATA_HOME") {
             Ok(dir) => Ok(dir.join("screenferry")),
             Err(_) => Ok(var_dir("HOME")?.join(".local/share/screenferry")),
+        },
+    }
+}
+
+/// 本机默认的缓存目录，可以随时清空：
+///
+/// - macOS：`~/Library/Caches/ScreenFerry/`
+/// - Windows：`%LOCALAPPDATA%\ScreenFerry\`
+///
+/// 这两处同样只有当前用户能访问。
+pub fn default_cache_dir() -> Result<PathBuf> {
+    match env::consts::OS {
+        "windows" => Ok(var_dir("LOCALAPPDATA")?.join(APP_DIR)),
+        "macos" => Ok(var_dir("HOME")?
+            .join("Library")
+            .join("Caches")
+            .join(APP_DIR)),
+        _ => match var_dir("XDG_CACHE_HOME") {
+            Ok(dir) => Ok(dir.join("screenferry")),
+            Err(_) => Ok(var_dir("HOME")?.join(".cache/screenferry")),
         },
     }
 }

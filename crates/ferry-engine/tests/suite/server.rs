@@ -179,3 +179,46 @@ async fn ctrl_option_escape_returns_to_local() {
         ],
     );
 }
+
+#[tokio::test]
+async fn changing_side_mid_session_takes_effect_without_reconnecting() {
+    use ferry_core::{KeyRemap, Side};
+    use ferry_engine::Live;
+    use tokio::sync::watch;
+
+    use crate::support::Setup;
+
+    let (tx, rx) = watch::channel(Live {
+        side: Side::Right,
+        remap: KeyRemap::none(),
+    });
+    let rig = Rig::with(Setup {
+        live: Some(rx),
+        ..Setup::default()
+    })
+    .await;
+    rig.enter().await;
+
+    // 光标在对方屏幕时改方向：先回到本机。
+    tx.send_modify(|live| live.side = Side::Left);
+    eventually("改方向后回到本机", || !rig.capture.is_grabbed()).await;
+
+    // 右边缘不再切换，左边缘可以。
+    for _ in 0..5 {
+        rig.push(5, 0);
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    assert!(!rig.capture.is_grabbed(), "右边缘已经不通了");
+    eventually("从左边缘进入", || {
+        if rig.capture.is_grabbed() {
+            return true;
+        }
+        rig.capture.emit(CaptureEvent::Pointer {
+            position: Point::new(0, 400),
+            dx: -5,
+            dy: 0,
+        });
+        false
+    })
+    .await;
+}

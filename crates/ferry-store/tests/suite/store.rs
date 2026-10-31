@@ -93,3 +93,59 @@ fn bad_peers_files_are_rejected() {
     fs::write(&path, "not toml at all [").unwrap();
     assert!(matches!(store.peers(), Err(Error::Format { .. })));
 }
+
+#[test]
+fn config_defaults_until_saved_then_round_trips() {
+    use ferry_types::{Config, Side};
+
+    let dir = TempDir::new();
+    let store = Store::open(dir.path()).unwrap();
+    assert_eq!(store.config().unwrap(), Config::default());
+    assert!(!dir.path().join("config.toml").exists(), "只读不写");
+
+    let config = Config {
+        name: "书房 Mac".into(),
+        side: Side::Left,
+        clipboard: false,
+        ..Config::default()
+    };
+    store.save_config(&config).unwrap();
+    let text = fs::read_to_string(dir.path().join("config.toml")).unwrap();
+    assert!(
+        text.starts_with("schema_version = 1\n"),
+        "第一行必须是 schema_version：{text}"
+    );
+    assert_eq!(store.config().unwrap(), config);
+}
+
+#[test]
+fn config_tolerates_missing_and_unknown_fields() {
+    let dir = TempDir::new();
+    let store = Store::open(dir.path()).unwrap();
+    fs::write(
+        dir.path().join("config.toml"),
+        "schema_version = 1\nside = \"top\"\nfuture_field = 3\n",
+    )
+    .unwrap();
+    let config = store.config().unwrap();
+    assert_eq!(config.side, ferry_types::Side::Top);
+    assert!(config.clipboard, "缺少的字段取缺省值");
+}
+
+#[test]
+fn config_from_a_newer_version_is_refused() {
+    let dir = TempDir::new();
+    let store = Store::open(dir.path()).unwrap();
+    fs::write(dir.path().join("config.toml"), "schema_version = 2\n").unwrap();
+    assert!(matches!(
+        store.config(),
+        Err(Error::TooNew { found: 2, .. })
+    ));
+}
+
+#[test]
+fn a_custom_data_dir_keeps_its_runtime_files_inside() {
+    let dir = TempDir::new();
+    let store = Store::open(dir.path()).unwrap();
+    assert_eq!(store.ipc_endpoint_path(), dir.path().join("ipc.json"));
+}

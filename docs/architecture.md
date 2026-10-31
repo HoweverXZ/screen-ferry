@@ -7,9 +7,15 @@
 | 进程 | 可执行文件 | 生命周期 | 职责 |
 |---|---|---|---|
 | 后台 | `screenferry` | 常驻 | 键鼠捕获与注入、网络、同步、托盘 |
-| 设置界面 | `screenferry-settings` | 按需启动，关闭即退出 | 设备布局、设置、剪贴板历史 |
+| 设置界面 | Flutter 程序（`app/`） | 按需启动，关闭即退出 | 状态、设备与配对、布局、日志、设置 |
 
-两者通过本机 IPC 通信。配置只由后台写入。
+设置界面直接连接后台：后台监听 `127.0.0.1` 的随机端口，把端口和令牌写进缓存目录的 `ipc.json`，
+界面读取后连接，每行一条 JSON（协议见 [ipc.md](ipc.md)，决策见 ADR 0004）。
+后台推送完整的状态快照和日志，界面只发命令；配置只由后台写入。
+
+后台不带参数时常驻运行（`ferry-engine` 的 `resident` 模块）：读 `config.toml` 启动引擎，
+暂停共享即停止引擎，改了需要重新握手的设置就重启引擎，屏幕方向等设置即时生效；
+首次配对的配对码在设置界面上核对。
 
 ## 网络连接
 
@@ -44,7 +50,7 @@ graph BT
   daemon[ferry-daemon · L4] --> engine
   daemon -.按平台注入.-> win
   daemon -.按平台注入.-> mac
-  settings[ferry-settings · L4] --> ipc
+  app[设置界面 app/ · Flutter] -.本机回环 TCP.-> ipc
 ```
 
 `ferry-engine` 只认识 `ferry-platform` 的 trait；`ferry-daemon` 在编译时按目标平台选择实现并注入。场景测试中用 `ferry-platform-mock` 替代真实平台。

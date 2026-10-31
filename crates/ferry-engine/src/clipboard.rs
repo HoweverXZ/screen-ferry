@@ -28,6 +28,7 @@ use tokio::time::{MissedTickBehavior, interval};
 use tracing::{debug, info, warn};
 
 use crate::error::{Error, Result};
+use crate::events::{ClipSummary, Event, Events};
 use crate::link::send;
 
 /// 活动端检查本机剪贴板的间隔。
@@ -66,13 +67,14 @@ pub(crate) fn spawn<S, C>(
     clipboard: SharedClipboard<C>,
     active: watch::Receiver<bool>,
     start: Start,
+    events: Events,
 ) -> ClipboardTask
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     C: Clipboard,
 {
     ClipboardTask(tokio::spawn(async move {
-        let mut sync = ClipboardSync::new(framed, clipboard, active);
+        let mut sync = ClipboardSync::new(framed, clipboard, active, events);
         match sync.run(start).await {
             Ok(()) => debug!("数据连接已关闭"),
             Err(e) => warn!("剪贴板同步中断：{e}"),
@@ -93,6 +95,9 @@ struct ClipboardSync<S, C> {
     offer: Option<ClipboardOffer>,
     fetch: Option<Fetch>,
     next_transfer: u32,
+    events: Events,
+    /// 最近一次报告“已被对方拉走”的通告序号，同一份内容的几个格式只报告一次。
+    reported: Option<u32>,
 }
 
 /// 正在拉取的一份对方内容。各格式都到齐后一次写入本机剪贴板。
@@ -112,6 +117,7 @@ where
         framed: Framed<S>,
         clipboard: SharedClipboard<C>,
         active: watch::Receiver<bool>,
+        events: Events,
     ) -> Self {
         Self {
             framed,
@@ -123,6 +129,8 @@ where
             offer: None,
             fetch: None,
             next_transfer: 1,
+            events,
+            reported: None,
         }
     }
 
@@ -287,6 +295,15 @@ where
             };
             send(&mut self.framed, &Message::Chunk(chunk)).await?;
         }
+        if self.reported != Some(request.seq)
+            && let Some((_, content)) = &self.offered
+        {
+            self.reported = Some(request.seq);
+            self.events.emit(Event::Clipboard {
+                to_peer: true,
+                summary: ClipSummary::of(content),
+            });
+        }
         Ok(())
     }
 
@@ -329,6 +346,10 @@ where
                     bytes = fetch.done.total_len(),
                     "已同步对方的剪贴板"
                 );
+                self.events.emit(Event::Clipboard {
+                    to_peer: false,
+                    summary: ClipSummary::of(&fetch.done),
+                });
             }
             Err(e) => warn!("写入本机剪贴板失败：{e}"),
         }

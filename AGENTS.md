@@ -20,12 +20,12 @@
 | 传输 | TCP + rustls（TLS 1.3）；输入连接与数据连接分离；不兼容 Deskflow 协议 |
 | 发现与配对 | mDNS 发现；配对码配对；配对后固定对方证书 |
 | 进程模型 | 后台常驻（含托盘）；设置界面为独立进程，按需启动，关闭即退出 |
-| 界面 | Flutter（自定义设计，见 ADR 0003）；工程在 `app/`，经 flutter_rust_bridge 调用 `ferry-settings` 与后台通信 |
+| 界面 | Flutter（自定义设计，见 ADR 0003）；工程在 `app/`，直接经本机通信连接后台（ADR 0004） |
 | 托盘 | tray-icon |
 | Windows | windows-rs + Win32 API |
 | macOS | objc2 系列 crate |
 | 存储 | TOML 配置 + SQLite；图片和文件存磁盘 |
-| 本机进程通信 | 命名管道（Windows）/ Unix Domain Socket（macOS） |
+| 本机进程通信 | 本机回环 TCP（`127.0.0.1`）+ 令牌，每行一条 JSON；协议见 `docs/ipc.md`（ADR 0004） |
 | 按键编码 | 协议中传物理键（USB HID Usage），两端各自转换成本地键码 |
 | 点击与滚轮 | 事件携带当时的光标绝对位置，接收端先定位再执行 |
 
@@ -90,8 +90,7 @@ crates/
 │  ── L3 组装 ───────────────────────────────────
 ├─ ferry-engine             # 把 core、platform、net、store、ipc 组装成运行时
 │  ── L4 应用（二进制）────────────────────────────
-├─ ferry-daemon             # → screenferry：后台常驻 + 托盘
-└─ ferry-settings           # 设置界面的 Rust 侧：供 app/ 经 flutter_rust_bridge 调用
+└─ ferry-daemon             # → screenferry：后台常驻 + 托盘
 ```
 
 按规则预留、尚未创建的 crate：
@@ -104,7 +103,7 @@ crates/
 1. 只能依赖更低层，不能依赖同层或上层。
 2. L2 之间互不依赖：每个适配器只依赖 L0 和 L1。
 3. `ferry-engine` 只依赖 `ferry-platform` 中的 trait，不依赖任何具体平台实现。具体实现由 L4 应用按 `cfg` 选择后注入。
-4. `ferry-settings` 只通过 `ferry-ipc` 与后台通信，不依赖 engine、store、net。配置只有 daemon 一个写入方。
+4. 设置界面（`app/`）只通过 `ferry-ipc` 定义的协议与后台通信，不直接读写配置；配置只有后台一个写入方。
 5. `#[cfg(target_os = …)]` 只允许出现在 `ferry-platform-*` 和 L4 应用中。
 6. `unsafe` 只允许出现在 `ferry-platform-*` 中，其余 crate 一律 `#![forbid(unsafe_code)]`。
 7. L0 和 L1 不引入 tokio，不做文件或网络 IO。
@@ -116,7 +115,7 @@ crates/
 |---|---|---|
 | crate 目录 | 等于 package 名，`ferry-<名词>`，kebab-case | `ferry-net` |
 | 平台 crate 后缀 | 与 `cfg(target_os)` 的值完全一致 | `-windows` `-macos` `-linux` |
-| 可执行文件 | `screenferry[-<角色>]` | `screenferry`、`screenferry-settings` |
+| 可执行文件 | `screenferry[-<角色>]` | `screenferry`、`screenferry-service` |
 | 源文件 / 模块 | snake_case；不使用 `mod.rs`，采用 `foo.rs` + `foo/` | `edge_switch.rs` |
 | 测试文件 | 与被测模块同名，不加任何后缀 | `tests/suite/edge_switch.rs` |
 | ADR | 4 位序号 + kebab 标题 | `0001-use-tcp-transport.md` |
@@ -202,6 +201,7 @@ ferry-platform/src/              ferry-platform-{windows,macos,mock}/src/
 
 缓存目录   macOS:   ~/Library/Caches/ScreenFerry/
           Windows: %LOCALAPPDATA%\ScreenFerry\
+├─ ipc.json          # 后台运行时写下的端口与令牌，退出时删除（ADR 0004）
 ├─ logs/
 └─ partial/          # 传输中的分块，可以随时清空
 ```

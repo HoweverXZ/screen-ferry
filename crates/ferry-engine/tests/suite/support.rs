@@ -10,7 +10,8 @@ use std::time::Duration;
 
 use ferry_core::{KeyRemap, Side};
 use ferry_engine::{
-    ClientConfig, ConfirmPairing, Error, PairingRequest, ServerAddr, ServerConfig, connect, serve,
+    ClientConfig, ConfirmPairing, Error, Events, Live, PairingRequest, ServerAddr, ServerConfig,
+    connect, serve,
 };
 use ferry_platform::CaptureEvent;
 use ferry_platform_mock::{MockCapture, MockClipboard, MockDisplays, MockInject};
@@ -79,6 +80,10 @@ pub struct Setup {
     pub start_client: bool,
     /// 服务端在局域网广播、客户端不填地址自己找。需要本机网络支持组播。
     pub discover: bool,
+    /// 服务端可随时修改的设置；`None` 为固定的“右侧、互换 ⌘ 与 Ctrl”。
+    pub live: Option<tokio::sync::watch::Receiver<Live>>,
+    pub mac_events: Events,
+    pub pc_events: Events,
 }
 
 impl Default for Setup {
@@ -92,6 +97,9 @@ impl Default for Setup {
             pc_confirm: AutoConfirm::answering(true),
             start_client: true,
             discover: false,
+            live: None,
+            mac_events: Events::none(),
+            pc_events: Events::none(),
         }
     }
 }
@@ -157,12 +165,18 @@ impl Rig {
             let clipboard = setup.mac_clipboard.clone();
             let confirm = setup.mac_confirm.clone();
             let config = ServerConfig {
-                side: Side::Right,
+                live: setup.live.clone().unwrap_or_else(|| {
+                    Live {
+                        side: Side::Right,
+                        remap: KeyRemap::swap_command_control(),
+                    }
+                    .fixed()
+                }),
                 name: "mac".into(),
-                remap: KeyRemap::swap_command_control(),
                 clipboard: true,
                 store: setup.mac.store.clone(),
                 announce: setup.discover,
+                events: setup.mac_events.clone(),
             };
             async move {
                 let displays = MockDisplays(vec![display(1000, 800, 100)]);
@@ -204,6 +218,7 @@ impl Rig {
             name: "pc".into(),
             clipboard: true,
             store: setup.pc.store.clone(),
+            events: setup.pc_events.clone(),
         };
         tokio::spawn(async move {
             let displays = MockDisplays(vec![display(1920, 1080, 150)]);

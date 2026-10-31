@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 mod clipboard;
+mod config;
 mod display;
 mod geometry;
 mod input;
@@ -14,8 +15,9 @@ mod key;
 mod pointer;
 
 pub use clipboard::{ClipboardContent, ClipboardFormat};
+pub use config::{Config, Role, Theme};
 pub use display::{Display, DisplayId};
-pub use geometry::{Point, Rect};
+pub use geometry::{Point, Rect, Side};
 pub use input::InputEvent;
 pub use key::{KeyAction, KeyCode, LockKeys};
 pub use pointer::{MouseButton, WHEEL_NOTCH};

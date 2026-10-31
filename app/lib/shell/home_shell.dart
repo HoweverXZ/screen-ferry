@@ -12,6 +12,8 @@ import '../pages/settings_page.dart';
 import '../state/app_scope.dart';
 import '../state/app_state.dart';
 import '../theme/tokens.dart';
+import '../widgets/daemon_offline.dart';
+import '../widgets/pairing_dialog.dart';
 import '../widgets/toast.dart';
 import 'bottom_nav.dart';
 import 'sidebar.dart';
@@ -47,7 +49,10 @@ class HomeShell extends StatelessWidget {
               duration: _FadeThrough.duration,
               transitionBuilder: _FadeThrough.wrap,
               layoutBuilder: (current, previous) => Stack(fit: StackFit.expand, children: [...previous, ?current]),
-              child: KeyedSubtree(key: ValueKey(state.page), child: _page(state.page)),
+              // 还没连上过后台时没有数据可显示，先放占位页。
+              child: state.daemon == null
+                  ? const KeyedSubtree(key: ValueKey('offline'), child: DaemonOffline())
+                  : KeyedSubtree(key: ValueKey(state.page), child: _page(state.page)),
             ),
           ),
           Positioned(
@@ -61,23 +66,25 @@ class HomeShell extends StatelessWidget {
     );
     return Scaffold(
       backgroundColor: c.bg,
-      body: LayoutBuilder(
-        builder: (context, box) {
-          if (box.maxWidth < phoneWidth) {
-            return Column(
+      body: PairingHost(
+        child: LayoutBuilder(
+          builder: (context, box) {
+            if (box.maxWidth < phoneWidth) {
+              return Column(
+                children: [
+                  Expanded(child: pages),
+                  const BottomNav(),
+                ],
+              );
+            }
+            return Row(
               children: [
+                Sidebar(forceCollapsed: box.maxWidth < 900),
                 Expanded(child: pages),
-                const BottomNav(),
               ],
             );
-          }
-          return Row(
-            children: [
-              Sidebar(forceCollapsed: box.maxWidth < 900),
-              Expanded(child: pages),
-            ],
-          );
-        },
+          },
+        ),
       ),
     );
   }

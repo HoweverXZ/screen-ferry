@@ -1,6 +1,5 @@
 //! 常驻运行：用真实的本机通信当“设置界面”，平台换成 mock。
 
-use std::net::TcpListener as StdListener;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Duration;
@@ -21,6 +20,7 @@ use crate::support::{AutoConfirm, Device};
 
 #[derive(Clone, Default)]
 struct MockHost {
+    /// 服务端监听的端口；默认 0，由系统分配，实际端口从状态里的 `local.port` 读。
     port: u16,
     deny_permissions: Arc<AtomicBool>,
     autostart: Arc<AtomicBool>,
@@ -83,14 +83,6 @@ struct Daemon {
     host: MockHost,
     handle: resident::Handle,
     task: JoinHandle<ferry_engine::Result<()>>,
-}
-
-fn free_port() -> u16 {
-    StdListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
 }
 
 impl Daemon {
@@ -176,11 +168,7 @@ impl Ui {
 
 #[tokio::test]
 async fn the_ui_sees_the_state_and_can_pause_sharing() {
-    let daemon = Daemon::start(MockHost {
-        port: free_port(),
-        ..MockHost::default()
-    })
-    .await;
+    let daemon = Daemon::start(MockHost::default()).await;
     let mut ui = daemon.ui().await;
 
     let state = ui
@@ -214,11 +202,7 @@ async fn the_ui_sees_the_state_and_can_pause_sharing() {
 
 #[tokio::test]
 async fn settings_are_saved_and_reported_back() {
-    let daemon = Daemon::start(MockHost {
-        port: free_port(),
-        ..MockHost::default()
-    })
-    .await;
+    let daemon = Daemon::start(MockHost::default()).await;
     let mut ui = daemon.ui().await;
     ui.send(Request::UpdateSettings {
         settings: SettingsPatch {
@@ -245,17 +229,14 @@ async fn settings_are_saved_and_reported_back() {
 
 #[tokio::test]
 async fn first_pairing_is_confirmed_in_the_ui() {
-    let port = free_port();
-    let daemon = Daemon::start(MockHost {
-        port,
-        ..MockHost::default()
-    })
-    .await;
+    let daemon = Daemon::start(MockHost::default()).await;
     let mut ui = daemon.ui().await;
-    ui.state_where("开始等待连接", |s| {
-        s.link.status == LinkStatus::Waiting
-    })
-    .await;
+    let state = ui
+        .state_where("开始等待连接", |s| {
+            s.link.status == LinkStatus::Waiting
+        })
+        .await;
+    let port = state.local.port.expect("等待连接时报告监听的端口");
 
     // 一台全新的客户端连过来，需要配对。
     let pc = Device::new();
@@ -326,7 +307,6 @@ async fn first_pairing_is_confirmed_in_the_ui() {
 #[tokio::test]
 async fn missing_permission_is_reported_and_retried() {
     let host = MockHost {
-        port: free_port(),
         deny_permissions: Arc::new(AtomicBool::new(true)),
         ..MockHost::default()
     };
@@ -349,11 +329,7 @@ async fn missing_permission_is_reported_and_retried() {
 
 #[tokio::test]
 async fn a_second_launch_hands_over_to_the_running_one() {
-    let daemon = Daemon::start(MockHost {
-        port: free_port(),
-        ..MockHost::default()
-    })
-    .await;
+    let daemon = Daemon::start(MockHost::default()).await;
     assert!(resident::hand_over_to_running(&daemon.device.store).await);
     let opened = daemon.host.settings_opened.clone();
     crate::support::eventually("请运行中的那份打开设置界面", || {
@@ -369,11 +345,7 @@ async fn a_second_launch_hands_over_to_the_running_one() {
 
 #[tokio::test]
 async fn quitting_removes_the_endpoint_file() {
-    let daemon = Daemon::start(MockHost {
-        port: free_port(),
-        ..MockHost::default()
-    })
-    .await;
+    let daemon = Daemon::start(MockHost::default()).await;
     let path = daemon.device.store.ipc_endpoint_path();
     assert!(path.exists());
     daemon.handle.send(Command::Quit);
@@ -384,12 +356,20 @@ async fn quitting_removes_the_endpoint_file() {
 
 #[tokio::test]
 async fn pairing_with_no_ui_open_opens_the_settings() {
-    let port = free_port();
-    let host = MockHost {
-        port,
-        ..MockHost::default()
-    };
+    let host = MockHost::default();
     let daemon = Daemon::start(host.clone()).await;
+    // 先用界面看一眼监听的端口，再关掉界面。
+    let port = {
+        let mut ui = daemon.ui().await;
+        let state = ui
+            .state_where("开始等待连接", |s| {
+                s.link.status == LinkStatus::Waiting
+            })
+            .await;
+        state.local.port.expect("等待连接时报告监听的端口")
+    };
+    // 等后台处理完界面断开，否则它会以为还有界面在看。
+    sleep(Duration::from_millis(200)).await;
     let pc = Device::new();
     let client = tokio::spawn(connect(
         ClientConfig {
@@ -418,5 +398,25 @@ async fn pairing_with_no_ui_open_opens_the_settings() {
     })
     .await;
     client.abort();
+    daemon.task.abort();
+}
+
+#[tokio::test]
+async fn the_listening_port_is_reported_and_cleared_when_paused() {
+    let daemon = Daemon::start(MockHost::default()).await;
+    let mut ui = daemon.ui().await;
+    let state = ui
+        .state_where("开始等待连接", |s| {
+            s.link.status == LinkStatus::Waiting
+        })
+        .await;
+    assert!(
+        state.local.port.is_some_and(|p| p != 0),
+        "报告系统分配的实际端口"
+    );
+
+    ui.send(Request::SetSharing { on: false }).await;
+    ui.state_where("暂停后不再监听", |s| s.local.port.is_none())
+        .await;
     daemon.task.abort();
 }

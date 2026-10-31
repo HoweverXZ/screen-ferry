@@ -88,6 +88,9 @@ pub struct Local {
     pub data_dir: String,
     /// 后台的版本号。
     pub version: String,
+    /// 服务端正在监听的端口；客户端、或还没开始监听时为 `null`。
+    #[serde(default)]
+    pub port: Option<u16>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

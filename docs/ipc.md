@@ -51,7 +51,7 @@
 `state` 的结构（字段含义见 `crates/ferry-ipc/src/message.rs`）：
 
 ```text
-local     name · fingerprint · short · role(server|client) · data_dir · version
+local     name · fingerprint · short · role(server|client) · data_dir · version · port（服务端监听的端口，否则 null）
 sharing   用户没有暂停共享
 problem   null | { kind(permission|port_in_use|other), message }
 link      status(paused|starting|waiting|searching|connecting|connected|stopped)

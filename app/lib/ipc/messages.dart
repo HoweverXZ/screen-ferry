@@ -92,6 +92,7 @@ class Local {
     required this.role,
     required this.dataDir,
     required this.version,
+    this.port,
   });
 
   factory Local.fromJson(Json j) => Local(
@@ -101,6 +102,7 @@ class Local {
     role: _enum(Role.values, j['role'], Role.server),
     dataDir: _str(j['data_dir']),
     version: _str(j['version']),
+    port: j['port'] is num ? _int(j['port']) : null,
   );
 
   final String name;
@@ -109,6 +111,9 @@ class Local {
   final Role role;
   final String dataDir;
   final String version;
+
+  /// 服务端正在监听的端口；客户端、或还没开始监听时为 null。
+  final int? port;
 }
 
 class Problem {

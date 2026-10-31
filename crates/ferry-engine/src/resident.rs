@@ -49,7 +49,7 @@ pub trait Host: Send + Sync + 'static {
     fn open_settings(&self);
     /// 打开系统中授予键鼠控制权限的页面。
     fn open_permission_settings(&self);
-    /// 服务端监听的端口。
+    /// 服务端监听的端口；0 表示由系统分配（测试用），实际端口见状态里的 `local.port`。
     fn listen_port(&self) -> u16 {
         crate::DEFAULT_PORT
     }

@@ -60,6 +60,7 @@ fn state() -> State {
             role: Role::Server,
             data_dir: "/Users/me/Library/Application Support/ScreenFerry".into(),
             version: "0.1.0".into(),
+            port: Some(24810),
         },
         sharing: true,
         problem: None,

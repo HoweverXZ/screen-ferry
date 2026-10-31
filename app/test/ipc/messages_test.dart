@@ -52,6 +52,7 @@ void main() {
     expect(s.local.role, Role.server);
     expect(s.local.short, '7AB0-5CB2-38FB-D603');
     expect(s.local.version, '0.1.0');
+    expect(s.local.port, 24810);
     expect(s.sharing, isTrue);
     expect(s.problem, isNull);
     expect(s.link.status, LinkStatus.connected);

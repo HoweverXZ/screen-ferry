@@ -64,6 +64,8 @@ pub(crate) struct Runtime<H> {
     problem: Option<Problem>,
 
     status: LinkStatus,
+    /// 服务端正在监听的端口。
+    port: Option<u16>,
     peer: Option<PeerRef>,
     peer_fingerprint: Option<Fingerprint>,
     since: Option<i64>,
@@ -112,6 +114,7 @@ impl<H: Host> Runtime<H> {
             retry_at: None,
             problem: None,
             status: LinkStatus::Starting,
+            port: None,
             peer: None,
             peer_fingerprint: None,
             since: None,
@@ -314,6 +317,9 @@ impl<H: Host> Runtime<H> {
 
     /// 连接没了：记下对方最后在线的时刻，清空与连接有关的状态。
     fn drop_link(&mut self) {
+        if self.engine.is_none() {
+            self.port = None;
+        }
         if let Some(fingerprint) = self.peer_fingerprint.take() {
             self.last_seen.insert(fingerprint, now_ms());
         }
@@ -339,6 +345,7 @@ impl<H: Host> Runtime<H> {
         match event {
             Event::Listening { port, announced } => {
                 self.status = LinkStatus::Waiting;
+                self.port = Some(port);
                 self.clear_problem();
                 let detail = if announced {
                     format!("等待另一台电脑连接 · 端口 {port}")
@@ -814,6 +821,7 @@ impl<H: Host> Runtime<H> {
                 role: self.config.role,
                 data_dir: self.store.root().display().to_string(),
                 version: env!("CARGO_PKG_VERSION").to_owned(),
+                port: self.port,
             },
             sharing: !self.paused,
             problem: self.problem.clone(),

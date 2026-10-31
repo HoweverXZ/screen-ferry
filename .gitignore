@@ -1,0 +1,18 @@
+# 构建产物
+/target/
+/fuzz/target/
+/fuzz/artifacts/
+/fuzz/coverage/
+
+# 本地工具目录
+/.spec-workflow/
+
+# 系统与编辑器
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+
+# 性能与覆盖率数据
+*.profraw
+*.profdata

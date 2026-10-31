@@ -1,0 +1,25 @@
+[package]
+name = "ferry-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+test = false
+
+[dependencies]
+ferry-core.workspace = true
+ferry-ipc.workspace = true
+ferry-net.workspace = true
+ferry-platform.workspace = true
+ferry-proto.workspace = true
+ferry-store.workspace = true
+ferry-types.workspace = true
+
+[dev-dependencies]
+ferry-platform-mock.workspace = true
+
+[lints]
+workspace = true

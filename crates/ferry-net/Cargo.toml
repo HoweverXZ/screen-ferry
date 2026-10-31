@@ -1,0 +1,18 @@
+[package]
+name = "ferry-net"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+test = false
+
+[dependencies]
+ferry-proto.workspace = true
+ferry-trust.workspace = true
+ferry-types.workspace = true
+
+[lints]
+workspace = true

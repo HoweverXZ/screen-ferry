@@ -652,7 +652,12 @@ class _DevicesCard extends StatelessWidget {
                       ),
                       Text(
                         state.localFingerprint,
-                        style: TextStyle(fontSize: 13, color: c.muted, fontFamily: monoFont),
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: c.muted,
+                          fontFamily: monoFont,
+                          fontFamilyFallback: monoFallback,
+                        ),
                       ),
                     ],
                   ),

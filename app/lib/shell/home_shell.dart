@@ -18,6 +18,7 @@ import '../widgets/pairing_dialog.dart';
 import '../widgets/toast.dart';
 import 'bottom_nav.dart';
 import 'sidebar.dart';
+import 'window_frame.dart';
 
 /// 窗口窄于这个宽度（手机大小）时，侧栏换成底部标签栏。
 const phoneWidth = 560.0;
@@ -26,7 +27,10 @@ const phoneWidth = 560.0;
 final String? _daemon = daemonLocation();
 
 class HomeShell extends StatelessWidget {
-  const HomeShell({super.key});
+  const HomeShell({super.key, this.windowFrame});
+
+  /// 是否自己画窗口按钮与拖动区域；为 null 时按系统决定（只有 Windows 需要）。
+  final bool? windowFrame;
 
   static final _pagesKey = GlobalKey();
 
@@ -71,7 +75,7 @@ class HomeShell extends StatelessWidget {
         ],
       ),
     );
-    return Scaffold(
+    final shell = Scaffold(
       backgroundColor: c.bg,
       body: PairingHost(
         child: LayoutBuilder(
@@ -93,6 +97,14 @@ class HomeShell extends StatelessWidget {
           },
         ),
       ),
+    );
+    if (!(windowFrame ?? drawsWindowFrame)) return shell;
+    // Windows：窗口按钮与拖动区域盖在最上面，占的正是 macOS 红绿灯那一行。
+    return Stack(
+      children: [
+        shell,
+        const Positioned(left: 0, top: 0, right: 0, child: WindowFrame()),
+      ],
     );
   }
 }

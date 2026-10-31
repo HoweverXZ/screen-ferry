@@ -13,6 +13,7 @@ class SfColors extends ThemeExtension<SfColors> {
     required this.card3,
     required this.navPill,
     required this.navHover,
+    required this.closeHover,
     required this.fg,
     required this.muted,
     required this.line,
@@ -37,6 +38,9 @@ class SfColors extends ThemeExtension<SfColors> {
   /// 侧栏：选中项的胶囊、悬停时的底色。两者要和侧栏底色拉开差距，悬停比选中浅。
   final Color navPill;
   final Color navHover;
+
+  /// Windows 窗口“关闭”按钮悬停时的红色。
+  final Color closeHover;
   final Color fg;
   final Color muted;
   final Color line;
@@ -61,6 +65,7 @@ class SfColors extends ThemeExtension<SfColors> {
     card3: Color(0xFFE1DFE4),
     navPill: Color(0xFFD2CFD7),
     navHover: Color(0xFFE0DDE3),
+    closeHover: Color(0xFFE5484D),
     fg: Color(0xFF1C1B1F),
     muted: Color(0xFF625F67),
     line: Color(0xFFE2DFE4),
@@ -84,6 +89,7 @@ class SfColors extends ThemeExtension<SfColors> {
     card3: Color(0xFF35333A),
     navPill: Color(0xFF34323B),
     navHover: Color(0xFF242328),
+    closeHover: Color(0xFFE5484D),
     fg: Color(0xFFEEECF1),
     muted: Color(0xFFA9A5AF),
     line: Color(0xFF302E35),
@@ -114,6 +120,7 @@ class SfColors extends ThemeExtension<SfColors> {
     card3: card3,
     navPill: navPill,
     navHover: navHover,
+    closeHover: closeHover,
     fg: fg,
     muted: muted,
     line: line,
@@ -141,6 +148,7 @@ class SfColors extends ThemeExtension<SfColors> {
       card3: c(card3, other.card3),
       navPill: c(navPill, other.navPill),
       navHover: c(navHover, other.navHover),
+      closeHover: c(closeHover, other.closeHover),
       fg: c(fg, other.fg),
       muted: c(muted, other.muted),
       line: c(line, other.line),
@@ -188,5 +196,7 @@ abstract final class Motion {
 OutlinedBorder continuous(double radius, {BorderSide side = BorderSide.none}) =>
     RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(radius), side: side);
 
+/// 等宽字体：macOS 用 Menlo，Windows 上没有它，退到 Consolas。
 const monoFont = 'Menlo';
+const monoFallback = ['Consolas', 'Cascadia Mono'];
 const tabular = [FontFeature.tabularFigures()];

@@ -1,4 +1,4 @@
-//! `cargo xtask bundle`：把后台与设置界面打成一个应用。
+//! `cargo xtask bundle`：把后台与设置界面打成一个应用。在哪个系统上运行就打哪个系统的包。
 //!
 //! macOS 产物是 `target/bundle/macos/ScreenFerry.app`：
 //!
@@ -11,6 +11,14 @@
 //! ```
 //!
 //! 签名用临时签名（ad-hoc），只适合本机使用；正式发布时换成开发者证书并公证。
+//!
+//! Windows 产物是 `target/bundle/windows/ScreenFerry/` 目录：
+//!
+//! ```text
+//! ScreenFerry\
+//! ├─ screenferry.exe                后台
+//! └─ settings\                      Flutter 设置界面（screenferry_settings.exe 及其运行库）
+//! ```
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -19,13 +27,48 @@ use std::process::Command;
 type Result<T = ()> = std::result::Result<T, String>;
 
 pub(crate) fn run() -> Result {
-    if std::env::consts::OS != "macos" {
-        return Err("目前只能在 macOS 上打包 macOS 版；Windows 版见第四阶段".into());
-    }
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .ok_or("找不到仓库根目录")?
         .to_path_buf();
+    match std::env::consts::OS {
+        "macos" => macos(&root),
+        "windows" => windows(&root),
+        other => Err(format!("还不支持在 {other} 上打包")),
+    }
+}
+
+fn windows(root: &Path) -> Result {
+    step("编译后台（release）");
+    cargo(root, &["build", "--release", "-p", "ferry-daemon"])?;
+
+    step("编译设置界面（flutter build windows --release）");
+    let app_dir = root.join("app");
+    flutter(&app_dir, &["build", "windows", "--release"])?;
+    let built = app_dir.join("build/windows/x64/runner/Release");
+
+    step("组装 ScreenFerry 目录");
+    let out = root.join("target/bundle/windows/ScreenFerry");
+    if out.exists() {
+        fs::remove_dir_all(&out).map_err(|e| io(&out, e))?;
+    }
+    fs::create_dir_all(&out).map_err(|e| io(&out, e))?;
+    copy(
+        &root.join("target/release/screenferry.exe"),
+        &out.join("screenferry.exe"),
+    )?;
+    copy_dir(&built, &out.join("settings"))?;
+
+    println!("\n✓ {}", out.display());
+    println!("  运行：双击 screenferry.exe（会打开设置界面，任务栏右下角出现图标）");
+    println!(
+        "  整个 ScreenFerry 目录可以放到任意位置，例如 %LOCALAPPDATA%\\Programs\\ScreenFerry。"
+    );
+    Ok(())
+}
+
+fn macos(root: &Path) -> Result {
+    let root = root.to_path_buf();
     let version = workspace_version(&root)?;
 
     step("编译后台（release）");
@@ -33,7 +76,7 @@ pub(crate) fn run() -> Result {
 
     step("编译设置界面（flutter build macos --release）");
     let app_dir = root.join("app");
-    run_in(&app_dir, "flutter", &["build", "macos", "--release"])?;
+    flutter(&app_dir, &["build", "macos", "--release"])?;
     let settings = app_dir.join("build/macos/Build/Products/Release/ScreenFerry.app");
 
     step("组装 ScreenFerry.app");
@@ -157,6 +200,33 @@ fn run_in(dir: &Path, program: &str, args: &[&str]) -> Result {
         .success()
         .then_some(())
         .ok_or_else(|| format!("{program} {} 失败", args.join(" ")))
+}
+
+/// Windows 上的 flutter 是批处理文件，要经 cmd 运行。
+fn flutter(dir: &Path, args: &[&str]) -> Result {
+    if std::env::consts::OS == "windows" {
+        let mut all = vec!["/C", "flutter"];
+        all.extend_from_slice(args);
+        run_in(dir, "cmd", &all)
+    } else {
+        run_in(dir, "flutter", args)
+    }
+}
+
+/// 递归复制目录。
+fn copy_dir(from: &Path, to: &Path) -> Result {
+    fs::create_dir_all(to).map_err(|e| io(to, e))?;
+    for entry in fs::read_dir(from).map_err(|e| io(from, e))? {
+        let entry = entry.map_err(|e| io(from, e))?;
+        let path = entry.path();
+        let target = to.join(entry.file_name());
+        if path.is_dir() {
+            copy_dir(&path, &target)?;
+        } else {
+            copy(&path, &target)?;
+        }
+    }
+    Ok(())
 }
 
 fn copy(from: &Path, to: &Path) -> Result {

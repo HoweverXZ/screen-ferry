@@ -194,7 +194,7 @@ class _PairingDialogState extends State<_PairingDialog> with TickerProviderState
               children: [
                 TextSpan(
                   text: _p.short,
-                  style: const TextStyle(fontFamily: monoFont),
+                  style: const TextStyle(fontFamily: monoFont, fontFamilyFallback: monoFallback),
                 ),
               ],
             ),
@@ -284,7 +284,13 @@ class _PairingDialogState extends State<_PairingDialog> with TickerProviderState
                 decoration: ShapeDecoration(color: c.card2, shape: continuous(16)),
                 child: Text(
                   code[i],
-                  style: TextStyle(fontFamily: monoFont, fontSize: 30, fontWeight: FontWeight.w700, color: c.fg),
+                  style: TextStyle(
+                    fontFamily: monoFont,
+                    fontFamilyFallback: monoFallback,
+                    fontSize: 30,
+                    fontWeight: FontWeight.w700,
+                    color: c.fg,
+                  ),
                 ),
               ),
             ),

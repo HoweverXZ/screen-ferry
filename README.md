@@ -75,6 +75,24 @@ open target/bundle/macos/ScreenFerry.app
 后台没在运行时显示“后台没有运行”，后台启动后自动连上。另一台电脑第一次连接时，
 配对码在设置界面里核对；没有打开设置界面时，后台会自动打开它。
 
+## Windows
+
+Windows 版的设置界面必须在 Windows 上编译（Flutter 不能在 macOS 上交叉编译 Windows 应用）。需要：
+
+- Flutter 3.47（`flutter doctor` 全部打勾）；
+- Visual Studio 2022，安装“使用 C++ 的桌面开发”；
+- Rust（rustup，默认的 MSVC 工具链）。
+
+在仓库根目录运行：
+
+```bash
+cargo xtask bundle
+```
+
+产物是 `target/bundle/windows/ScreenFerry/` 目录：`screenferry.exe` 是后台，`settings\` 里是设置界面。
+双击 `screenferry.exe` 即可：任务栏右下角出现图标，并打开设置界面。设置里的“开机自动启动”
+写在当前用户的启动项里（`HKCU\...\Run`）。日志在 `%LOCALAPPDATA%\ScreenFerry\logs\`。
+
 ## 许可证
 
 可任选以下一种许可证使用：

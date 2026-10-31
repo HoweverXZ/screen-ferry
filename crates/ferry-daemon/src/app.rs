@@ -20,8 +20,11 @@ type AppResult = Result<Infallible, Box<dyn std::error::Error>>;
 /// 日志文件超过这个大小时，启动时把它改名为 `.1` 重新开始。
 const LOG_LIMIT: u64 = 2 * 1024 * 1024;
 
-/// 有终端时写到终端；常驻运行而没有终端（双击启动、登录时启动）时写到缓存目录的日志文件。
+/// 常驻运行时总是写日志文件（缓存目录的 `logs/`），从终端运行时同时写到终端；
+/// 其他命令只写到终端。Windows 上双击启动时控制台会被关掉，所以不能只看启动时有没有终端。
 pub(crate) fn init_logging(options: &Options) {
+    use tracing_subscriber::fmt::writer::MakeWriterExt;
+
     let level = if options.verbose {
         tracing::Level::DEBUG
     } else {
@@ -32,20 +35,21 @@ pub(crate) fn init_logging(options: &Options) {
         .with_target(false)
         .with_timer(tracing_subscriber::fmt::time::uptime());
     let terminal = std::io::stderr().is_terminal();
-    if !terminal
-        && matches!(options.mode, Mode::Resident { .. })
-        && let Some(file) = log_file(options)
-    {
-        builder
+    let file = matches!(options.mode, Mode::Resident { .. })
+        .then(|| log_file(options))
+        .flatten()
+        .map(std::sync::Mutex::new);
+    match file {
+        Some(file) if terminal => builder
             .with_ansi(false)
-            .with_writer(std::sync::Mutex::new(file))
-            .init();
-        return;
+            .with_writer(file.and(std::io::stderr))
+            .init(),
+        Some(file) => builder.with_ansi(false).with_writer(file).init(),
+        None => builder
+            .with_ansi(terminal)
+            .with_writer(std::io::stderr)
+            .init(),
     }
-    builder
-        .with_ansi(terminal)
-        .with_writer(std::io::stderr)
-        .init();
 }
 
 fn log_file(options: &Options) -> Option<std::fs::File> {

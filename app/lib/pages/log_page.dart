@@ -105,7 +105,7 @@ class _LogRow extends StatelessWidget {
             width: 70,
             child: Text(
               clockTime(entry.at),
-              style: TextStyle(fontFamily: monoFont, fontSize: 13, color: c.muted),
+              style: TextStyle(fontFamily: monoFont, fontFamilyFallback: monoFallback, fontSize: 13, color: c.muted),
             ),
           ),
           Container(

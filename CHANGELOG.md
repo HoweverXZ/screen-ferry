@@ -38,6 +38,12 @@
   - 设备身份存于数据目录的 `identity/`，已信任设备存于 `peers.toml`（`schema_version = 1`）。
   - 新增 `screenferry peers`、`screenferry forget`，以及 `--data-dir`。
   - 协议：新增配对连接（`channel = 3`）、`PairCommit` / `PairNonce` / `PairResult` 消息、`Reject` 原因 `NOT_PAIRED`。
+- Windows 设置界面：
+  - 新增 `app/windows` 宿主工程：去掉系统标题栏（保留左、右、下边框的拖动缩放、贴边分屏和窗口阴影），Windows 11 圆角，最小 375×667，默认 1160×780 居中。
+  - 右上角画最小化、最大化（最大化后变为还原）、关闭按钮，顶部 32 点可拖动、双击最大化；与 macOS 红绿灯那一行占同样的位置，页面布局完全一致。
+  - 字体用系统的微软雅黑，等宽字体退到 Consolas。
+  - 后台在资源管理器里双击或登录时启动，不再留下控制台窗口；常驻时总是写日志文件。
+  - `cargo xtask bundle` 在 Windows 上生成 `target/bundle/windows/ScreenFerry/`（后台 + `settings\` 设置界面）。
 - 托盘与打包：
   - 菜单栏（任务栏）图标显示共享状态，菜单可以暂停或继续共享、打开设置、退出；暂停或出问题时图标变淡。
   - 开机自动启动：macOS 写 LaunchAgent，Windows 写当前用户的 Run 键；登录时启动不弹出设置界面。

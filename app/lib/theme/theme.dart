@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import 'tokens.dart';
@@ -12,7 +14,15 @@ ThemeData buildTheme(SfColors colors, Brightness brightness) {
     outlineVariant: colors.line,
     error: colors.danger,
   );
-  final base = ThemeData(useMaterial3: true, colorScheme: scheme, brightness: brightness);
+  // 各用系统字体：macOS 默认就是苹方；Windows 指定微软雅黑，英文环境的系统里中文也不会落到日文字体上。
+  final windows = Platform.isWindows;
+  final base = ThemeData(
+    useMaterial3: true,
+    colorScheme: scheme,
+    brightness: brightness,
+    fontFamily: windows ? 'Microsoft YaHei UI' : null,
+    fontFamilyFallback: windows ? const ['Microsoft YaHei', 'Segoe UI'] : null,
+  );
   return base.copyWith(
     extensions: [colors],
     scaffoldBackgroundColor: colors.bg,

@@ -50,7 +50,7 @@ class DevicesPage extends StatelessWidget {
                     children: [
                       TextSpan(
                         text: state.localFingerprint,
-                        style: const TextStyle(fontFamily: monoFont),
+                        style: const TextStyle(fontFamily: monoFont, fontFamilyFallback: monoFallback),
                       ),
                     ],
                   ),
@@ -214,7 +214,7 @@ class _PairedCardState extends State<_PairedCard> {
               children: [
                 TextSpan(
                   text: d.short,
-                  style: const TextStyle(fontFamily: monoFont),
+                  style: const TextStyle(fontFamily: monoFont, fontFamilyFallback: monoFallback),
                 ),
               ],
             ),

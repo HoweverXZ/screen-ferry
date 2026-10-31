@@ -279,8 +279,9 @@ mod win {
         }
 
         fn open_settings(&self) {
+            // 安装目录：screenferry.exe 旁边的 settings\screenferry_settings.exe。
             let candidates: Vec<_> = exe_dir()
-                .map(|dir| vec![dir.join("ScreenFerry Settings").join("ScreenFerry.exe")])
+                .map(|dir| vec![dir.join("settings").join("screenferry_settings.exe")])
                 .unwrap_or_default();
             match settings_app(&candidates) {
                 Some(exe) => {

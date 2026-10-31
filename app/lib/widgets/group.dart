@@ -62,7 +62,12 @@ class SfRow extends StatelessWidget {
                   padding: const EdgeInsets.only(top: 2),
                   child: Text(
                     subtitle!,
-                    style: TextStyle(fontSize: 14, color: c.muted, fontFamily: mono ? monoFont : null),
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: c.muted,
+                      fontFamily: mono ? monoFont : null,
+                      fontFamilyFallback: mono ? monoFallback : null,
+                    ),
                   ),
                 ),
             ],

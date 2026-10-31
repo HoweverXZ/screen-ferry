@@ -2,9 +2,13 @@
 //!
 //! 主线程运行消息循环。其他线程的任务投递给一个只收消息的隐藏窗口：
 //! 托盘菜单弹出时的模态循环同样会分发窗口消息，任务不会丢。
+//!
+//! 后台是控制台程序，从资源管理器双击或登录时启动会带出一个黑色的控制台窗口；
+//! 创建事件循环时，如果这个控制台只属于本进程，就把它关掉。从终端运行时不受影响。
 
 use ferry_platform::{Dispatcher, Error, EventLoop, MainTask, Result};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::System::Console::{FreeConsole, GetConsoleProcessList};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, HWND_MESSAGE, MSG,
@@ -23,6 +27,7 @@ pub struct WinEventLoop {
 impl WinEventLoop {
     /// 只能在主线程上调用：窗口属于创建它的线程，任务也在这个线程上执行。
     pub fn new() -> Result<Self> {
+        detach_own_console();
         let class = w!("ScreenFerryMainThread");
         // SAFETY: 参数都是有效的常量或刚取得的句柄；窗口过程只处理本模块投递的消息。
         let hwnd = unsafe {
@@ -105,6 +110,17 @@ impl EventLoop for WinEventLoop {
             }
         }
         std::process::exit(0)
+    }
+}
+
+/// 控制台只连着本进程（不是从终端启动的）时关掉它。
+fn detach_own_console() {
+    let mut processes = [0u32; 2];
+    // SAFETY: 缓冲区有效；返回值是连在这个控制台上的进程数。
+    let attached = unsafe { GetConsoleProcessList(&mut processes) };
+    if attached == 1 {
+        // SAFETY: 只是与控制台断开，之后写到标准输出的内容被丢弃（日志写到文件）。
+        let _ = unsafe { FreeConsole() };
     }
 }
 

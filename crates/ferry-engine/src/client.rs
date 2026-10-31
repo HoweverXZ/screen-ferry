@@ -382,8 +382,9 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                     }
                 }
                 Some(Message::Enter(enter)) => {
-                    self.hide_cursor(false);
+                    // 先把光标移到入口再显示，免得它先在藏身处闪一下。
                     self.move_to(enter.position);
+                    self.hide_cursor(false);
                     // 只同步 Caps Lock：对方可能没有 Num Lock（例如 Mac），同步它会误关本机的小键盘。
                     if let Err(e) = self.inject.sync_locks(enter.locks, LockKeys::CAPS) {
                         warn!("同步锁定键失败：{e}");

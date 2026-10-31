@@ -19,7 +19,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Once, mpsc};
 use std::thread::{self, JoinHandle};
 
-use ferry_platform::{CaptureEvent, CaptureSink, Error, InputCapture, Result};
+use ferry_platform::{CaptureEvent, CaptureSink, Captured, Error, InputCapture, Result};
 use ferry_types::{KeyAction, KeyCode, LockKeys, MouseButton, Point, WHEEL_NOTCH};
 use objc2::rc::autoreleasepool;
 use objc2_app_kit::NSEvent;
@@ -216,7 +216,6 @@ impl InputCapture for MacCapture {
     }
 
     fn release(&self, at: Point) -> Result<()> {
-        self.grabbed.store(false, Ordering::SeqCst);
         let to = CGPoint::new(f64::from(at.x), f64::from(at.y));
         let warped = check(CGWarpMouseCursorPosition(to), "CGWarpMouseCursorPosition");
         // 无论光标是否移动成功都要重新关联，否则本机鼠标会一直失灵。
@@ -225,6 +224,8 @@ impl InputCapture for MacCapture {
             CGAssociateMouseAndMouseCursorPosition(true),
             "CGAssociateMouseAndMouseCursorPosition",
         );
+        // 光标放好之后才结束抓取：从这一刻起标记为未抓取的事件，位置都是回来之后的。
+        self.grabbed.store(false, Ordering::SeqCst);
         // 光标已经放到回来的位置，再让它出现。
         self.show_cursor();
         warped.and(associated)
@@ -378,7 +379,7 @@ unsafe extern "C-unwind" fn on_event(
         }
     }
 
-    emit(state, captured);
+    emit(state, captured, grabbed);
     if captured
         == (CaptureEvent::Key {
             code: KeyCode::CAPS_LOCK,
@@ -392,14 +393,17 @@ unsafe extern "C-unwind" fn on_event(
                 code: KeyCode::CAPS_LOCK,
                 action: KeyAction::Up,
             },
+            grabbed,
         );
     }
     verdict
 }
 
-/// 把事件交给 sink。panic 不能穿过系统框架，这里截住。
-fn emit(state: &mut TapState, event: CaptureEvent) {
-    let _ = catch_unwind(AssertUnwindSafe(|| (state.sink)(event)));
+/// 把事件交给 sink，标明它是否被抓取吞掉了。panic 不能穿过系统框架，这里截住。
+fn emit(state: &mut TapState, event: CaptureEvent, grabbed: bool) {
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        (state.sink)(Captured { event, grabbed })
+    }));
 }
 
 fn translate(ty: CGEventType, event: &CGEvent) -> Option<CaptureEvent> {

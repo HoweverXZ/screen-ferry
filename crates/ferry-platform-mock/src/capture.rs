@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use ferry_platform::{CaptureEvent, CaptureSink, InputCapture, Result};
+use ferry_platform::{CaptureEvent, CaptureSink, Captured, InputCapture, Result};
 use ferry_types::{LockKeys, Point};
 
 /// 假的输入捕获：测试用 [`emit`](Self::emit) 模拟本机输入。
@@ -24,10 +24,21 @@ impl MockCapture {
         Self::default()
     }
 
-    /// 模拟一个本机输入。尚未开始捕获时丢弃。
+    /// 模拟一个本机输入，按当前是否抓取打上标记。尚未开始捕获时丢弃。
     pub fn emit(&self, event: CaptureEvent) {
-        if let Some(sink) = self.lock().sink.as_mut() {
-            sink(event);
+        let mut state = self.lock();
+        let grabbed = state.grabbed;
+        if let Some(sink) = state.sink.as_mut() {
+            sink(Captured { event, grabbed });
+        }
+    }
+
+    /// 模拟一个发生在切换之前、此刻才送到的输入：标记与当前的抓取状态相反。
+    pub fn emit_stale(&self, event: CaptureEvent) {
+        let mut state = self.lock();
+        let grabbed = !state.grabbed;
+        if let Some(sink) = state.sink.as_mut() {
+            sink(Captured { event, grabbed });
         }
     }
 

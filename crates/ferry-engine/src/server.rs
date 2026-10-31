@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use ferry_core::{EdgeSwitch, KeyRemap, Pressed, Side, Transition, bounds};
 use ferry_net::discovery::Advertiser;
 use ferry_net::{Framed, ServerStream, Tls};
-use ferry_platform::{CaptureEvent, Clipboard, Displays, InputCapture};
+use ferry_platform::{CaptureEvent, Captured, Clipboard, Displays, InputCapture};
 use ferry_proto::{
     Bye, ByeReason, Capabilities, Channel, Enter, Hello, Message, RejectReason, Welcome,
 };
@@ -156,7 +156,7 @@ struct Server<C, D, K, P> {
     clipboard: SharedClipboard<K>,
     /// 光标是否在本机，供剪贴板同步判断谁是活动端。
     active: watch::Sender<bool>,
-    events: UnboundedReceiver<CaptureEvent>,
+    events: UnboundedReceiver<Captured>,
     switch: Option<EdgeSwitch>,
     /// 按着的鼠标键和（光标在对方屏幕时）按着的键。
     /// 按着鼠标键时不切换屏幕，避免拖拽到一半换了屏；按着的键用来识别快捷键。
@@ -428,16 +428,23 @@ where
 
     async fn on_capture(
         &mut self,
-        event: CaptureEvent,
+        captured: Captured,
         framed: &mut Framed<ServerStream>,
     ) -> Result<()> {
         let Some(switch) = self.switch.as_mut() else {
             return Ok(());
         };
+        // 切换那一刻还在路上的事件，发生时光标在另一边：本机已经处理过它，或者它已被吞掉。
+        // 按现在的状态解释它，会拿过时的位置判断边缘、把光标立刻推回去，所以不再使用；
+        // 鼠标键照样记录，免得以为某个键一直按着。
+        let current = captured.grabbed == switch.is_remote();
 
         let mut hotkey = false;
-        let transition = match event {
+        let transition = match captured.event {
             CaptureEvent::Pointer { position, dx, dy } => {
+                if !current {
+                    return Ok(());
+                }
                 let free = !self.pressed.any_button();
                 if switch.is_remote() {
                     switch.remote_motion(dx, dy, free)
@@ -454,7 +461,7 @@ where
                     position: Point::default(),
                 };
                 self.pressed.track(&event);
-                if let Some(position) = switch.remote_position() {
+                if current && let Some(position) = switch.remote_position() {
                     let event = InputEvent::Button {
                         button,
                         pressed,
@@ -465,7 +472,7 @@ where
                 None
             }
             CaptureEvent::Wheel { dx, dy } => {
-                if let Some(position) = switch.remote_position() {
+                if current && let Some(position) = switch.remote_position() {
                     send(
                         framed,
                         &Message::Input(InputEvent::Wheel { dx, dy, position }),

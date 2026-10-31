@@ -40,9 +40,9 @@ fn enters_only_when_pushing_past_the_edge() {
         s.local_motion(Point::new(999, 400), 4, 0),
         Some(Transition::Enter {
             seq: 1,
-            at: Point::new(0, 540)
+            at: Point::new(3, 540)
         }),
-        "纵坐标按比例换算：400/800 → 540/1080",
+        "越过边缘 4，带到远端是第 4 个单位；纵坐标按比例换算：400/800 → 540/1080",
     );
     assert!(s.is_remote());
     assert_eq!(
@@ -55,31 +55,31 @@ fn enters_only_when_pushing_past_the_edge() {
 #[test]
 fn enters_on_every_side() {
     let cases = [
-        (Side::Left, Point::new(0, 0), (-1, 0), Point::new(1919, 0)),
+        (Side::Left, Point::new(0, 0), (-1, 0), Point::new(1918, 0)),
         (
             Side::Right,
             Point::new(999, 799),
             (1, 0),
-            Point::new(0, 1078),
+            Point::new(1, 1078),
         ),
         (
             Side::Top,
             Point::new(500, 0),
             (0, -1),
-            Point::new(960, 1079),
+            Point::new(960, 1078),
         ),
         (
             Side::Bottom,
             Point::new(500, 799),
             (0, 1),
-            Point::new(960, 0),
+            Point::new(960, 1),
         ),
     ];
     for (side, position, (dx, dy), expected) in cases {
         assert_eq!(
             enter(&mut switch(side), position, dx, dy),
             expected,
-            "{side:?}"
+            "{side:?}：落在离远端边缘一个单位的地方"
         );
     }
 }
@@ -91,7 +91,7 @@ fn moves_inside_remote_and_stops_at_its_far_edges() {
 
     assert_eq!(
         s.remote_motion(30, -40, true),
-        Some(Transition::Move(Point::new(30, 500)))
+        Some(Transition::Move(Point::new(31, 500)))
     );
     assert_eq!(
         s.remote_motion(5000, 0, true),
@@ -116,19 +116,19 @@ fn leaves_through_the_edge_facing_local() {
     s.remote_motion(10, 0, true);
 
     assert_eq!(
-        s.remote_motion(-11, 0, true),
+        s.remote_motion(-12, 0, true),
         Some(Transition::Leave {
             seq: 1,
-            local_at: Point::new(999, 400)
+            local_at: Point::new(998, 400)
         }),
-        "纵坐标换算回本机：540/1080 → 400/800",
+        "落在离本机边缘一个单位的地方；纵坐标换算回本机：540/1080 → 400/800",
     );
     assert!(!s.is_remote());
 
     let at = enter(&mut s, Point::new(999, 0), 1, 0);
-    assert_eq!(at, Point::new(0, 0));
+    assert_eq!(at, Point::new(1, 0));
     assert!(matches!(
-        s.remote_motion(-1, 0, true),
+        s.remote_motion(-2, 0, true),
         Some(Transition::Leave { seq: 2, .. })
     ));
 }
@@ -137,6 +137,11 @@ fn leaves_through_the_edge_facing_local() {
 fn holding_a_button_keeps_the_cursor_on_remote() {
     let mut s = switch(Side::Right);
     enter(&mut s, Point::new(999, 400), 1, 0);
+    assert_eq!(
+        s.remote_motion(-50, 0, false),
+        Some(Transition::Move(Point::new(0, 540))),
+        "顶到边缘为止"
+    );
     assert_eq!(s.remote_motion(-50, 0, false), None, "停在边缘，位置不变");
     assert!(s.is_remote());
     assert!(matches!(
@@ -157,16 +162,16 @@ fn scales_motion_and_carries_the_remainder() {
 
     assert_eq!(
         s.remote_motion(10, 0, true),
-        Some(Transition::Move(Point::new(15, 0)))
+        Some(Transition::Move(Point::new(16, 0)))
     );
     assert_eq!(
         s.remote_motion(1, 0, true),
-        Some(Transition::Move(Point::new(16, 0))),
+        Some(Transition::Move(Point::new(17, 0))),
         "1.5 → 1，余 0.5"
     );
     assert_eq!(
         s.remote_motion(1, 0, true),
-        Some(Transition::Move(Point::new(18, 0))),
+        Some(Transition::Move(Point::new(19, 0))),
         "1.5 + 0.5 → 2"
     );
 }
@@ -177,7 +182,7 @@ fn abort_returns_control_to_local() {
     assert_eq!(s.abort(), None, "本来就在本机");
 
     enter(&mut s, Point::new(999, 400), 1, 0);
-    assert_eq!(s.abort(), Some(Point::new(999, 400)));
+    assert_eq!(s.abort(), Some(Point::new(998, 400)));
     assert!(!s.is_remote());
     assert_eq!(s.remote_motion(5, 5, true), None);
 }
@@ -213,7 +218,7 @@ fn leave_on_demand_reports_the_same_seq() {
         s.leave(),
         Some(Transition::Leave {
             seq: 1,
-            local_at: Point::new(999, 400)
+            local_at: Point::new(998, 400)
         })
     );
     assert!(!s.is_remote());
@@ -234,9 +239,85 @@ fn changing_side_while_remote_returns_to_local_first() {
     let mut s = switch(Side::Right);
     enter(&mut s, Point::new(999, 400), 5, 0);
     match s.set_side(Side::Top) {
-        Some(Transition::Leave { local_at, .. }) => assert_eq!(local_at.x, 999),
+        Some(Transition::Leave { local_at, .. }) => assert_eq!(local_at.x, 998),
         other => panic!("应先回到本机，实际 {other:?}"),
     }
     assert!(!s.is_remote());
     assert_eq!(s.set_side(Side::Top), None, "同一侧不算变化");
+}
+
+#[test]
+fn a_one_unit_wobble_at_the_edge_does_not_bounce_back() {
+    let mut s = switch(Side::Right);
+    enter(&mut s, Point::new(999, 400), 1, 0);
+
+    assert_eq!(
+        s.remote_motion(-1, 0, true),
+        Some(Transition::Move(Point::new(0, 540))),
+        "刚进来往回抖一下：仍在远端"
+    );
+    let Some(Transition::Leave { local_at, .. }) = s.remote_motion(-1, 0, true) else {
+        panic!("再往回走就回到本机");
+    };
+    assert_eq!(local_at, Point::new(998, 400));
+
+    assert_eq!(
+        s.local_motion(local_at, 1, 0),
+        None,
+        "刚回来往外抖一下：还没到边缘"
+    );
+    enter(&mut s, Point::new(999, 400), 1, 0);
+}
+
+#[test]
+fn a_fast_crossing_carries_the_overshoot_to_the_other_side() {
+    let mut s = switch(Side::Right);
+    assert_eq!(
+        enter(&mut s, Point::new(999, 400), 30, 0),
+        Point::new(29, 540),
+        "越过边缘 30，到远端是第 30 个单位"
+    );
+    assert_eq!(
+        s.remote_motion(-50, 0, true),
+        Some(Transition::Leave {
+            seq: 1,
+            local_at: Point::new(979, 400)
+        }),
+        "29 - 50：推出边缘 21，回到本机是第 21 个单位"
+    );
+
+    let mut s = switch(Side::Left);
+    assert_eq!(enter(&mut s, Point::new(0, 0), -5000, 0), Point::new(0, 0));
+    assert_eq!(
+        s.remote_motion(9000, 0, true),
+        Some(Transition::Leave {
+            seq: 1,
+            local_at: Point::new(999, 0)
+        }),
+        "越过的距离再长也只落在屏幕范围内"
+    );
+}
+
+#[test]
+fn the_overshoot_is_scaled_between_the_two_sides() {
+    // 远端移动的单位是本机的一半。
+    let mut s = EdgeSwitch::new(
+        Rect::new(0, 0, 1000, 800),
+        Rect::new(0, 0, 1920, 1080),
+        Side::Right,
+        50,
+    );
+    assert_eq!(
+        enter(&mut s, Point::new(999, 400), 20, 0),
+        Point::new(9, 540),
+        "本机越过 20 → 远端 10"
+    );
+    assert_eq!(
+        s.remote_motion(-30, 0, true),
+        Some(Transition::Leave {
+            seq: 1,
+            local_at: Point::new(988, 400)
+        }),
+        "9 - 15：远端推出 6 → 本机 12"
+    );
 }

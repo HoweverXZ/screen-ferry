@@ -1,7 +1,8 @@
 //! 把本机光标藏起来：光标停在一个 1×1 的窗口上，这个窗口的光标是全透明的，于是看不见。
 //! 本机用户一动鼠标，光标离开这一个像素就会重新出现，不需要额外处理。
 //!
-//! 窗口要有消息循环才能设置光标形状，所以它跑在自己的线程上；其他线程只给它投递消息。
+//! 窗口要有消息循环才能设置光标形状，所以它跑在自己的线程上。藏起和收起都同步等它做完：
+//! 调用方紧接着注入的移动必须排在后面，否则光标刚移到入口，又被挪回屏幕中央。
 
 use std::sync::mpsc;
 use std::thread;
@@ -12,9 +13,9 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateCursor, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW,
     GetSystemMetrics, HWND_TOPMOST, MSG, PostMessageW, PostQuitMessage, RegisterClassW,
-    SM_CXCURSOR, SM_CXSCREEN, SM_CYCURSOR, SM_CYSCREEN, SW_HIDE, SWP_NOACTIVATE, SWP_SHOWWINDOW,
-    SetCursorPos, SetWindowPos, ShowWindow, TranslateMessage, WM_APP, WM_DESTROY, WNDCLASSW,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    SM_CXCURSOR, SM_CXSCREEN, SM_CYCURSOR, SM_CYSCREEN, SMTO_ABORTIFHUNG, SW_HIDE, SWP_NOACTIVATE,
+    SWP_SHOWWINDOW, SendMessageTimeoutW, SetCursorPos, SetWindowPos, ShowWindow, TranslateMessage,
+    WM_APP, WM_DESTROY, WNDCLASSW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::w;
 
@@ -24,10 +25,12 @@ const WM_HIDE_CURSOR: u32 = WM_APP + 10;
 const WM_SHOW_CURSOR: u32 = WM_APP + 11;
 /// 销毁窗口，结束线程。
 const WM_STOP: u32 = WM_APP + 12;
+/// 等隐藏窗口处理完一条消息最多等这么久（毫秒）。正常情况下不到一毫秒。
+const SEND_TIMEOUT_MS: u32 = 200;
 
 #[derive(Debug)]
 pub(crate) struct CursorHider {
-    /// 窗口句柄本身不是 Send，以整数保存；PostMessageW 可以在任何线程调用。
+    /// 窗口句柄本身不是 Send，以整数保存；给窗口发消息可以在任何线程进行。
     hwnd: isize,
 }
 
@@ -65,12 +68,32 @@ impl CursorHider {
         Ok(Self { hwnd })
     }
 
+    /// 藏起或收起，返回时已经做完。
     pub(crate) fn set_hidden(&self, hidden: bool) -> Result<()> {
-        self.post(if hidden {
+        let msg = if hidden {
             WM_HIDE_CURSOR
         } else {
             WM_SHOW_CURSOR
-        })
+        };
+        // SAFETY: 窗口在本对象存在期间一直存在；不需要结果，结果指针为空。
+        let done = unsafe {
+            SendMessageTimeoutW(
+                HWND(self.hwnd as *mut _),
+                msg,
+                WPARAM(0),
+                LPARAM(0),
+                SMTO_ABORTIFHUNG,
+                SEND_TIMEOUT_MS,
+                None,
+            )
+        };
+        if done.0 == 0 {
+            return Err(Error::Os {
+                call: "SendMessageTimeoutW",
+                detail: "隐藏光标的窗口没有及时响应".into(),
+            });
+        }
+        Ok(())
     }
 
     fn post(&self, msg: u32) -> Result<()> {

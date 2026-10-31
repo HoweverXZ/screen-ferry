@@ -22,9 +22,11 @@ use tokio::task::JoinHandle;
 use tokio::time::sleep;
 
 /// 服务端本机 1000×800（100%），客户端 1920×1080（150%），客户端在右侧。
-/// 服务端在右边缘 y = 400 处推出去，进入客户端的 (0, 540)。
+/// 服务端在右边缘 y = 400 处推出去一个单位，进入客户端的 (1, 540)：离边缘留出一个单位。
 pub const EDGE: Point = Point::new(999, 400);
-pub const ENTRY: Point = Point::new(0, 540);
+pub const ENTRY: Point = Point::new(1, 540);
+/// 断开或按快捷键交还控制时，本机光标落在边缘往里一个单位。
+pub const RETURN: Point = Point::new(998, 400);
 
 /// 一台测试设备的数据目录。可以跨多个 `Rig` 复用，模拟重启后再连。
 #[derive(Clone)]
@@ -255,7 +257,7 @@ impl Rig {
             if self.capture.is_grabbed() {
                 return true;
             }
-            self.push(5, 0);
+            self.push(1, 0);
             false
         })
         .await;

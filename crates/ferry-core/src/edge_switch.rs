@@ -4,6 +4,12 @@ use ferry_types::{Point, Rect};
 
 use crate::layout::Side;
 
+/// 切换之后，光标离边缘至少留出这么多个坐标单位。
+///
+/// 正好落在边缘上时，手轻轻一抖、往回退一个单位就会立刻切回去，在两边来回弹。
+/// 留出一点距离后，要真的往回走才会切回去。
+const INSET: i64 = 1;
+
 /// 一次切换或移动，由调用方执行。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Transition {
@@ -20,6 +26,9 @@ pub enum Transition {
 /// 光标在本机时，撞到远端所在一侧的边缘并继续向外推，就进入远端；
 /// 在远端时，从朝向本机的那条边缘推出去，就回到本机。
 /// 进出位置沿边缘按比例换算，所以两边分辨率不同也能对齐。
+///
+/// 越过边缘的那一段位移会带到另一边：快速划过时光标是连贯的，不会在边缘停一下。
+/// 落点离边缘至少留出一个单位，免得在边缘来回弹。
 #[derive(Clone, Debug)]
 pub struct EdgeSwitch {
     local: Rect,
@@ -66,6 +75,8 @@ impl EdgeSwitch {
     }
 
     /// 光标在本机时的一次移动。需要进入远端时返回 `Enter`。
+    ///
+    /// `position` 是光标被边缘挡住后的位置，`dx`、`dy` 是这次的位移。
     pub fn local_motion(&mut self, position: Point, dx: i32, dy: i32) -> Option<Transition> {
         if self.is_remote() || is_empty(self.remote) {
             return None;
@@ -81,12 +92,25 @@ impl EdgeSwitch {
             return None;
         }
 
-        let at = match self.side {
-            Side::Right => Point::new(r.x, along_y(position.y, l, r)),
-            Side::Left => Point::new(r.right() - 1, along_y(position.y, l, r)),
-            Side::Bottom => Point::new(along_x(position.x, l, r), r.y),
-            Side::Top => Point::new(along_x(position.x, l, r), r.bottom() - 1),
+        // 没有边缘挡着的话，这次位移会把光标带出边缘多远。
+        let (x, y) = (
+            i64::from(position.x) + i64::from(dx),
+            i64::from(position.y) + i64::from(dy),
+        );
+        let beyond = match self.side {
+            Side::Right => x - i64::from(l.right() - 1),
+            Side::Left => i64::from(l.x) - x,
+            Side::Bottom => y - i64::from(l.bottom() - 1),
+            Side::Top => i64::from(l.y) - y,
         };
+        let depth = (self.to_remote(beyond) - 1).max(INSET);
+        let at = match self.side {
+            Side::Right => Point::new(offset(r.x, depth), along_y(position.y, l, r)),
+            Side::Left => Point::new(offset(r.right() - 1, -depth), along_y(position.y, l, r)),
+            Side::Bottom => Point::new(along_x(position.x, l, r), offset(r.y, depth)),
+            Side::Top => Point::new(along_x(position.x, l, r), offset(r.bottom() - 1, -depth)),
+        };
+        let at = clamp_into(at, r);
         self.seq = self.seq.wrapping_add(1);
         self.remote_at = Some(at);
         self.carry = (0, 0);
@@ -104,26 +128,27 @@ impl EdgeSwitch {
         }
         let r = self.remote;
         let (x, y) = (i64::from(at.x) + sx, i64::from(at.y) + sy);
-
-        let leaving = can_leave
-            && match self.side {
-                Side::Right => x < i64::from(r.x),
-                Side::Left => x > i64::from(r.right() - 1),
-                Side::Bottom => y < i64::from(r.y),
-                Side::Top => y > i64::from(r.bottom() - 1),
-            };
-        if leaving {
-            self.remote_at = None;
-            return Some(Transition::Leave {
-                seq: self.seq,
-                local_at: self.local_point(at),
-            });
-        }
-
         let next = Point::new(
             x.clamp(i64::from(r.x), i64::from(r.right() - 1)) as i32,
             y.clamp(i64::from(r.y), i64::from(r.bottom() - 1)) as i32,
         );
+
+        // 从朝向本机的边缘推出去多远。
+        let beyond = match self.side {
+            Side::Right => i64::from(r.x) - x,
+            Side::Left => x - i64::from(r.right() - 1),
+            Side::Bottom => i64::from(r.y) - y,
+            Side::Top => y - i64::from(r.bottom() - 1),
+        };
+        if can_leave && beyond > 0 {
+            self.remote_at = None;
+            let depth = (self.to_local(beyond) - 1).max(INSET);
+            return Some(Transition::Leave {
+                seq: self.seq,
+                local_at: self.local_point(next, depth),
+            });
+        }
+
         if next == at {
             return None;
         }
@@ -158,18 +183,29 @@ impl EdgeSwitch {
     /// 连接中断等情况下立即回到本机。光标原本在远端时，返回本机光标应放到的位置。
     pub fn abort(&mut self) -> Option<Point> {
         let at = self.remote_at.take()?;
-        Some(self.local_point(at))
+        Some(self.local_point(at, INSET))
     }
 
-    /// 远端位置 `at` 对应的本机边缘位置。
-    fn local_point(&self, at: Point) -> Point {
+    /// 回到本机时光标的位置：沿边缘与远端位置 `at` 对齐，离边缘 `depth` 个单位。
+    fn local_point(&self, at: Point, depth: i64) -> Point {
         let (l, r) = (self.local, self.remote);
-        match self.side {
-            Side::Right => Point::new(l.right() - 1, along_y(at.y, r, l)),
-            Side::Left => Point::new(l.x, along_y(at.y, r, l)),
-            Side::Bottom => Point::new(along_x(at.x, r, l), l.bottom() - 1),
-            Side::Top => Point::new(along_x(at.x, r, l), l.y),
-        }
+        let p = match self.side {
+            Side::Right => Point::new(offset(l.right() - 1, -depth), along_y(at.y, r, l)),
+            Side::Left => Point::new(offset(l.x, depth), along_y(at.y, r, l)),
+            Side::Bottom => Point::new(along_x(at.x, r, l), offset(l.bottom() - 1, -depth)),
+            Side::Top => Point::new(along_x(at.x, r, l), offset(l.y, depth)),
+        };
+        clamp_into(p, l)
+    }
+
+    /// 本机的一段距离换算到远端。
+    fn to_remote(&self, v: i64) -> i64 {
+        v * self.scale_percent / 100
+    }
+
+    /// 远端的一段距离换算回本机。
+    fn to_local(&self, v: i64) -> i64 {
+        v * 100 / self.scale_percent.max(1)
     }
 
     fn scale(&mut self, dx: i32, dy: i32) -> (i64, i64) {
@@ -184,6 +220,11 @@ impl EdgeSwitch {
 
 fn is_empty(r: Rect) -> bool {
     r.width == 0 || r.height == 0
+}
+
+/// 从 `edge` 移动 `by` 个单位，超出 `i32` 时取边界值。
+fn offset(edge: i32, by: i64) -> i32 {
+    (i64::from(edge) + by).clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
 }
 
 fn clamp_into(p: Point, r: Rect) -> Point {

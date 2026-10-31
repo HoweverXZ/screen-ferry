@@ -28,8 +28,19 @@ pub enum CaptureEvent {
     },
 }
 
+/// 交给 sink 的一个捕获事件，带着它发生时是否处于抓取状态。
+///
+/// 事件从捕获线程送到处理方要花一点时间，切换屏幕的那一刻总有几个事件还在路上。
+/// 处理方靠 `grabbed` 判断它当时是交给了本机还是被吞掉了，和现在的状态对不上就是过时的。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Captured {
+    pub event: CaptureEvent,
+    /// 事件发生时是否处于抓取状态：为真时本机没有收到它，光标也没有动。
+    pub grabbed: bool,
+}
+
 /// 接收捕获事件的回调。在捕获线程上调用，必须立即返回。
-pub type CaptureSink = Box<dyn FnMut(CaptureEvent) + Send>;
+pub type CaptureSink = Box<dyn FnMut(Captured) + Send>;
 
 /// 本机键鼠捕获。
 pub trait InputCapture: Send {
@@ -43,6 +54,8 @@ pub trait InputCapture: Send {
     fn grab(&self) -> Result<()>;
 
     /// 结束抓取，并把本机光标放到 `at`。
+    ///
+    /// 必须先放好光标再结束抓取：标记为未抓取的事件，位置都应当是放好之后的。
     fn release(&self, at: Point) -> Result<()>;
 
     /// 本机当前的锁定键状态。平台没有的锁定键视为关闭。

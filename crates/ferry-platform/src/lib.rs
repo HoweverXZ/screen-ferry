@@ -17,7 +17,7 @@ mod keymap;
 mod permission;
 
 pub use autostart::Autostart;
-pub use capture::{CaptureEvent, CaptureSink, InputCapture};
+pub use capture::{CaptureEvent, CaptureSink, Captured, InputCapture};
 pub use clipboard::Clipboard;
 pub use display::Displays;
 pub use error::{Error, Result};

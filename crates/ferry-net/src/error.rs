@@ -24,6 +24,8 @@ pub enum Error {
     WrongProtocol,
     #[error("对方没有出示证书")]
     NoPeerCertificate,
+    #[error("局域网发现失败：{0}")]
+    Discovery(String),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

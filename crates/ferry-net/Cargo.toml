@@ -13,6 +13,7 @@ test = false
 ferry-proto.workspace = true
 ferry-trust.workspace = true
 ferry-types.workspace = true
+mdns-sd.workspace = true
 rustls.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["io-util", "net"] }

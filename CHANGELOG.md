@@ -38,3 +38,8 @@
   - 设备身份存于数据目录的 `identity/`，已信任设备存于 `peers.toml`（`schema_version = 1`）。
   - 新增 `screenferry peers`、`screenferry forget`，以及 `--data-dir`。
   - 协议：新增配对连接（`channel = 3`）、`PairCommit` / `PairNonce` / `PairResult` 消息、`Reject` 原因 `NOT_PAIRED`。
+- 局域网自动发现（mDNS）：
+  - 服务端广播 `_screenferry._tcp`，TXT 记录带指纹、设备名、协议版本；`--no-announce` 关闭。
+  - `connect` 不填地址时自动寻找：优先已配对的服务端；从未配对过时，局域网里只有一台才自动连，多台则提示指定地址。
+  - 广播的指纹必须与 TLS 证书一致，否则跳过这台，防止冒充。
+  - 每次重连都重新寻找，服务端换了 IP 也能找回来；一台服务端有多个地址时依次尝试。

@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 use std::process::ExitCode;
 
 use ferry_core::KeyRemap;
-use ferry_engine::{ClientConfig, ServerConfig};
+use ferry_engine::{ClientConfig, ServerAddr, ServerConfig};
 use ferry_store::Store;
 use ferry_trust::Fingerprint;
 use tracing::{error, info};
@@ -67,6 +67,7 @@ pub(crate) fn run(options: Options) -> ExitCode {
                     listen,
                     side,
                     swap_cmd_ctrl,
+                    announce,
                 } => {
                     let remap = if swap_cmd_ctrl {
                         KeyRemap::swap_command_control()
@@ -79,12 +80,13 @@ pub(crate) fn run(options: Options) -> ExitCode {
                         remap,
                         clipboard: options.clipboard,
                         store,
+                        announce,
                     };
                     serve(listen, config).await
                 }
                 Mode::Connect { server } => {
                     let config = ClientConfig {
-                        server,
+                        server: server.map_or(ServerAddr::Discover, ServerAddr::Fixed),
                         name: options.name,
                         clipboard: options.clipboard,
                         store,

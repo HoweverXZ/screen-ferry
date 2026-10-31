@@ -8,14 +8,15 @@ use ferry_engine::DEFAULT_PORT;
 
 pub(crate) const USAGE: &str = "\
 用法：
-  screenferry serve   [--listen 地址] [--side 方向] [--no-cmd-ctrl-swap] [通用选项]
-  screenferry connect <服务端地址> [通用选项]
+  screenferry serve   [--listen 地址] [--side 方向] [--no-cmd-ctrl-swap] [--no-announce] [通用选项]
+  screenferry connect [服务端地址] [通用选项]
   screenferry peers   [--data-dir 目录]
   screenferry forget  <设备名或指纹> [--data-dir 目录]
 
 命令：
   serve      在拥有键鼠的电脑上运行，等待另一台连接
-  connect    在被控制的电脑上运行，连接到运行 serve 的那台
+  connect    在被控制的电脑上运行，连接到运行 serve 的那台。
+             不填地址时在局域网里自动寻找：优先已配对的；从未配对过时，只有一台才自动连
   peers      列出已配对的设备
   forget     删除一台已配对的设备，下次连接需要重新配对
 
@@ -24,6 +25,8 @@ serve 的选项：
   --side     对方屏幕在本机的哪一侧：right、left、top、bottom，默认 right
   --no-cmd-ctrl-swap
              不互换 Command 与 Ctrl。默认互换，在 Windows 上 ⌘C、⌘V 即复制粘贴
+  --no-announce
+             不在局域网里广播本机，客户端须手动填写地址
 
 通用选项：
   --name     显示给对方的设备名，默认取计算机名
@@ -56,9 +59,11 @@ pub(crate) enum Mode {
         listen: SocketAddr,
         side: Side,
         swap_cmd_ctrl: bool,
+        announce: bool,
     },
     Connect {
-        server: SocketAddr,
+        /// 不填时在局域网里寻找。
+        server: Option<SocketAddr>,
     },
     Peers,
     Forget {
@@ -78,6 +83,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, St
     let mut listen = SocketAddr::from(([0, 0, 0, 0], DEFAULT_PORT));
     let mut side = Side::Right;
     let mut swap_cmd_ctrl = true;
+    let mut announce = true;
     let mut clipboard = true;
     let mut positional = None;
     let mut name = None;
@@ -95,6 +101,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, St
             "--listen" if command == "serve" => listen = resolve(&value("--listen")?)?,
             "--side" if command == "serve" => side = parse_side(&value("--side")?)?,
             "--no-cmd-ctrl-swap" if command == "serve" => swap_cmd_ctrl = false,
+            "--no-announce" if command == "serve" => announce = false,
             other
                 if matches!(command.as_str(), "connect" | "forget")
                     && positional.is_none()
@@ -111,9 +118,10 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, St
             listen,
             side,
             swap_cmd_ctrl,
+            announce,
         },
         "connect" => Mode::Connect {
-            server: resolve(&positional.ok_or("connect 需要服务端地址，例如 192.168.1.5")?)?,
+            server: positional.as_deref().map(resolve).transpose()?,
         },
         "peers" => Mode::Peers,
         _ => Mode::Forget {

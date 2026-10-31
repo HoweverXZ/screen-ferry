@@ -149,3 +149,24 @@ async fn a_stranger_cannot_join_someone_elses_session() {
     rig.leave().await;
     rig.enter().await;
 }
+
+/// 不填地址：服务端广播，客户端在局域网里找到它、配对、开始会话。
+/// 需要本机网络支持组播，默认跳过：`cargo test -p ferry-engine -- --ignored`
+#[tokio::test]
+#[ignore = "需要本机网络支持组播"]
+async fn a_client_without_an_address_finds_and_pairs_with_the_server() {
+    let rig = Rig::with(Setup {
+        discover: true,
+        ..Setup::default()
+    })
+    .await;
+    // 发现需要一点时间，多推几次。
+    for _ in 0..5 {
+        if rig.mac_confirm.requests().len() == 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    rig.enter().await;
+    assert_eq!(rig.pc_confirm.requests().len(), 1);
+}

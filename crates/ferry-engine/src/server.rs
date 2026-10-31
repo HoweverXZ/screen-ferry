@@ -11,6 +11,7 @@ use std::convert::Infallible;
 use std::sync::{Arc, Mutex};
 
 use ferry_core::{EdgeSwitch, KeyRemap, Pressed, Side, Transition, bounds};
+use ferry_net::discovery::Advertiser;
 use ferry_net::{Framed, ServerStream, Tls};
 use ferry_platform::{CaptureEvent, Clipboard, Displays, InputCapture};
 use ferry_proto::{
@@ -42,6 +43,8 @@ pub struct ServerConfig {
     pub clipboard: bool,
     /// 数据目录：本机身份和已信任的设备。
     pub store: Store,
+    /// 是否在局域网里用 mDNS 广播本机，让客户端不填地址也能找到。
+    pub announce: bool,
 }
 
 /// 运行服务端：在 `listener` 上一次服务一个客户端，断开后继续等待下一个。
@@ -63,9 +66,23 @@ where
     P: ConfirmPairing,
 {
     let mut server = Server::start(config, capture, displays, clipboard, confirm)?;
+    let addr = listener.local_addr()?;
+    // 广播失败（例如网络不支持组播）不影响按地址连接。
+    let advertiser = if server.config.announce {
+        match Advertiser::start(&server.config.name, server.fingerprint, addr.port()) {
+            Ok(advertiser) => Some(advertiser),
+            Err(e) => {
+                warn!("{e}；客户端需要手动指定本机地址");
+                None
+            }
+        }
+    } else {
+        None
+    };
     info!(
-        addr = %listener.local_addr()?,
+        %addr,
         fingerprint = %server.fingerprint,
+        announced = advertiser.is_some(),
         "等待客户端连接",
     );
 

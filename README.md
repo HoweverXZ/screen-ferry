@@ -42,8 +42,10 @@ cargo xtask lint
 3. 把 `target/x86_64-pc-windows-gnu/release/screenferry.exe` 拷到 Windows，在终端中运行：
 
    ```bash
-   screenferry.exe connect <Mac 的局域网 IP>
+   screenferry.exe connect
    ```
+
+   不填地址时会在局域网里自动寻找 Mac（mDNS），Mac 换了 IP 也能找回来。网络不支持组播时，改用 `connect <Mac 的局域网 IP>`。
 
 4. 把 Mac 的光标推出屏幕右边缘，光标就会出现在 Windows 上；从 Windows 屏幕左边缘推回来即可返回。Mac 终端每 5 秒打印一次往返延迟。
 

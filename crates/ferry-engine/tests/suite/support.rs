@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use ferry_core::{KeyRemap, Side};
 use ferry_engine::{
-    ClientConfig, ConfirmPairing, Error, PairingRequest, ServerConfig, connect, serve,
+    ClientConfig, ConfirmPairing, Error, PairingRequest, ServerAddr, ServerConfig, connect, serve,
 };
 use ferry_platform::CaptureEvent;
 use ferry_platform_mock::{MockCapture, MockClipboard, MockDisplays, MockInject};
@@ -77,6 +77,8 @@ pub struct Setup {
     pub mac_confirm: AutoConfirm,
     pub pc_confirm: AutoConfirm,
     pub start_client: bool,
+    /// 服务端在局域网广播、客户端不填地址自己找。需要本机网络支持组播。
+    pub discover: bool,
 }
 
 impl Default for Setup {
@@ -89,6 +91,7 @@ impl Default for Setup {
             mac_confirm: AutoConfirm::answering(true),
             pc_confirm: AutoConfirm::answering(true),
             start_client: true,
+            discover: false,
         }
     }
 }
@@ -138,7 +141,13 @@ impl Rig {
     }
 
     pub async fn with(setup: Setup) -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        // 广播出去的是本机的局域网地址，所以发现模式要监听所有网卡。
+        let bind = if setup.discover {
+            "0.0.0.0:0"
+        } else {
+            "127.0.0.1:0"
+        };
+        let listener = TcpListener::bind(bind).await.unwrap();
         let addr = listener.local_addr().unwrap();
         let capture = MockCapture::new();
         let inject = MockInject::new();
@@ -153,6 +162,7 @@ impl Rig {
                 remap: KeyRemap::swap_command_control(),
                 clipboard: true,
                 store: setup.mac.store.clone(),
+                announce: setup.discover,
             };
             async move {
                 let displays = MockDisplays(vec![display(1000, 800, 100)]);
@@ -186,7 +196,11 @@ impl Rig {
         let clipboard = setup.pc_clipboard.clone();
         let confirm = setup.pc_confirm.clone();
         let config = ClientConfig {
-            server: addr,
+            server: if setup.discover {
+                ServerAddr::Discover
+            } else {
+                ServerAddr::Fixed(addr)
+            },
             name: "pc".into(),
             clipboard: true,
             store: setup.pc.store.clone(),

@@ -6,13 +6,17 @@
 //! 先发起配对，由两边的用户核对配对码，确认后才建立会话。
 //!
 //! 双方都支持剪贴板时，握手后再连一条数据连接同步剪贴板；它失败不影响键鼠。
+//!
+//! 不指定地址时，每次连接前都在局域网里用 mDNS 寻找服务端（见 [`ferry_net::discovery`]），
+//! 对方换了 IP 也能找回来。
 
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use ferry_core::Pressed;
+use ferry_net::discovery::{Browser, Lookup, pick};
 use ferry_net::{ClientStream, Framed, Tls};
 use ferry_platform::{Clipboard, Displays, Error as PlatformError, InputInject};
 use ferry_proto::{Capabilities, Channel, Hello, Message, RejectReason};
@@ -32,9 +36,22 @@ use crate::pairing::{self, ConfirmPairing, Outcome};
 const RETRY_DELAY: Duration = Duration::from_secs(1);
 /// 超过这么久收不到任何消息（服务端至少每 0.5 秒发一次 Ping），视为断线。
 const SILENCE_TIMEOUT: Duration = Duration::from_secs(2);
+/// 每轮在局域网里寻找服务端的时长。
+const DISCOVERY_WAIT: Duration = Duration::from_secs(3);
+/// 一台服务端有多个地址时，每个地址的连接时限。
+const PER_ADDRESS_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// 服务端在哪里。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ServerAddr {
+    /// 固定地址。
+    Fixed(SocketAddr),
+    /// 在局域网里用 mDNS 寻找：优先已配对的服务端；从未配对过时，局域网里只有一台才自动选它。
+    Discover,
+}
 
 pub struct ClientConfig {
-    pub server: SocketAddr,
+    pub server: ServerAddr,
     /// 本机设备名，显示给对方。
     pub name: String,
     /// 是否同步剪贴板。
@@ -61,6 +78,10 @@ where
     P: ConfirmPairing,
 {
     displays.displays()?;
+    let finder = match config.server {
+        ServerAddr::Fixed(addr) => Finder::Fixed(addr),
+        ServerAddr::Discover => Finder::Discover(Browser::start()?),
+    };
     let identity = config.store.identity(&config.name)?;
     info!(fingerprint = %identity.fingerprint(), "本机身份");
     let mut client = Client {
@@ -74,9 +95,19 @@ where
         pressed: Pressed::new(),
         cursor: Point::default(),
     };
+    let mut searching = false;
     loop {
-        info!(server = %config.server, "正在连接服务端");
-        let result = client.session(&config, &displays).await;
+        let target = match locate(&finder, &config.store, &mut searching).await {
+            Ok(Some(target)) => target,
+            Ok(None) => continue,
+            Err(e @ Error::AmbiguousServers(_)) => return Err(e),
+            Err(e) => {
+                warn!("{e}");
+                sleep(RETRY_DELAY).await;
+                continue;
+            }
+        };
+        let result = client.session(&config, &displays, &target).await;
         client.release_all();
         client.active.send_replace(false);
         match result {
@@ -88,6 +119,97 @@ where
         }
         sleep(RETRY_DELAY).await;
     }
+}
+
+/// 这一次要连的服务端。
+struct Target {
+    addrs: Vec<SocketAddr>,
+    /// 局域网广播中对方自称的指纹，连上后必须与证书一致。
+    expected: Option<Fingerprint>,
+}
+
+/// 找服务端的方式。
+enum Finder {
+    Fixed(SocketAddr),
+    /// 在后台持续收集局域网里的服务端。
+    Discover(Browser),
+}
+
+/// 确定这一次连哪里。局域网里暂时没找到时返回 `None`，调用方稍后再试。
+async fn locate(finder: &Finder, store: &Store, searching: &mut bool) -> Result<Option<Target>> {
+    let browser = match finder {
+        Finder::Fixed(addr) => {
+            info!(server = %addr, "正在连接服务端");
+            return Ok(Some(Target {
+                addrs: vec![*addr],
+                expected: None,
+            }));
+        }
+        Finder::Discover(browser) => browser,
+    };
+
+    let deadline = Instant::now() + DISCOVERY_WAIT;
+    loop {
+        let peers = store.peers()?;
+        match pick(&browser.found(), &peers) {
+            Lookup::Trusted(server) | Lookup::Unpaired(server) => {
+                *searching = false;
+                info!(server = %server.name, addrs = ?server.addrs, "在局域网里找到服务端");
+                return Ok(Some(Target {
+                    addrs: server.addrs,
+                    expected: Some(server.fingerprint),
+                }));
+            }
+            Lookup::Nothing { others } if Instant::now() >= deadline => {
+                if peers.is_empty() && others.len() > 1 {
+                    let list = others
+                        .iter()
+                        .map(|s| format!("{}（{}）", s.name, s.addrs[0].ip()))
+                        .collect::<Vec<_>>()
+                        .join("、");
+                    return Err(Error::AmbiguousServers(list));
+                }
+                if !*searching {
+                    *searching = true;
+                    if peers.is_empty() {
+                        info!("正在局域网里寻找服务端…");
+                    } else {
+                        info!("正在局域网里寻找已配对的服务端…");
+                        if !others.is_empty() {
+                            info!(
+                                "局域网里另有 {} 台未配对的服务端；要与新的服务端配对，请用 connect <地址>",
+                                others.len()
+                            );
+                        }
+                    }
+                }
+                return Ok(None);
+            }
+            Lookup::Nothing { .. } => sleep(Duration::from_millis(200)).await,
+        }
+    }
+}
+
+/// 依次尝试各个地址，返回第一个连通的。
+async fn connect_any(
+    tls: &Tls,
+    addrs: &[SocketAddr],
+    channel: Channel,
+) -> Result<(Framed<ClientStream>, Fingerprint, SocketAddr)> {
+    let per = if addrs.len() > 1 {
+        PER_ADDRESS_TIMEOUT
+    } else {
+        CONNECT_TIMEOUT
+    };
+    let mut last = Error::Timeout("连接");
+    for &addr in addrs {
+        match timeout(per, tls.connect(addr, channel)).await {
+            Ok(Ok((framed, peer))) => return Ok((framed, peer, addr)),
+            Ok(Err(e)) => last = e.into(),
+            Err(_) => last = Error::Timeout("连接"),
+        }
+    }
+    Err(last)
 }
 
 enum Ended {
@@ -110,16 +232,20 @@ struct Client<I, K, P> {
 }
 
 impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
-    async fn session<D: Displays>(&mut self, config: &ClientConfig, displays: &D) -> Result<Ended> {
-        let (mut framed, server) = timeout(
-            CONNECT_TIMEOUT,
-            self.tls.connect(config.server, Channel::Input),
-        )
-        .await
-        .map_err(|_| Error::Timeout("连接"))??;
+    async fn session<D: Displays>(
+        &mut self,
+        config: &ClientConfig,
+        displays: &D,
+        target: &Target,
+    ) -> Result<Ended> {
+        let (mut framed, server, addr) =
+            connect_any(&self.tls, &target.addrs, Channel::Input).await?;
+        if target.expected.is_some_and(|expected| expected != server) {
+            return Err(Error::AdvertisedMismatch);
+        }
         if self.repair || !config.store.peers()?.contains(&server) {
             drop(framed);
-            self.pair(config).await?;
+            self.pair(config, addr, server).await?;
             self.repair = false;
             return Ok(Ended::Paired);
         }
@@ -141,7 +267,7 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
 
         // 会话结束时随之丢弃，剪贴板同步也就停了。
         let _clipboard_task = if welcome.capabilities.contains(Capabilities::CLIPBOARD) {
-            match connect_data(&self.tls, config, caps, welcome.session, server).await {
+            match connect_data(&self.tls, config, addr, caps, welcome.session, server).await {
                 Ok(data) => {
                     info!("数据连接已建立，开始同步剪贴板");
                     Some(self.sync_clipboard(data))
@@ -186,13 +312,20 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
     }
 
     /// 在单独的配对连接上与服务端核对配对码。任何一方拒绝都返回 [`Error::PairingRejected`]。
-    async fn pair(&mut self, config: &ClientConfig) -> Result<()> {
-        let (mut framed, server) = timeout(
-            CONNECT_TIMEOUT,
-            self.tls.connect(config.server, Channel::Pair),
-        )
-        .await
-        .map_err(|_| Error::Timeout("连接"))??;
+    ///
+    /// `expected` 是刚才输入连接上看到的指纹：配对连接必须连到同一台设备。
+    async fn pair(
+        &mut self,
+        config: &ClientConfig,
+        addr: SocketAddr,
+        expected: Fingerprint,
+    ) -> Result<()> {
+        let (mut framed, server) = timeout(CONNECT_TIMEOUT, self.tls.connect(addr, Channel::Pair))
+            .await
+            .map_err(|_| Error::Timeout("连接"))??;
+        if server != expected {
+            return Err(Error::PeerMismatch);
+        }
         let hello = Hello::new(Channel::Pair, Capabilities::empty(), 0, config.name.clone());
         let welcome = timeout(HANDSHAKE_TIMEOUT, ferry_net::initiate(&mut framed, hello))
             .await
@@ -273,12 +406,13 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
 async fn connect_data(
     tls: &Tls,
     config: &ClientConfig,
+    addr: SocketAddr,
     caps: Capabilities,
     session: u64,
     server: Fingerprint,
 ) -> Result<Framed<ClientStream>> {
     let handshake = async {
-        let (mut framed, peer) = tls.connect(config.server, Channel::Data).await?;
+        let (mut framed, peer) = tls.connect(addr, Channel::Data).await?;
         if peer != server {
             return Err(Error::PeerMismatch);
         }

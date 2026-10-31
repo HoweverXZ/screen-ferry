@@ -26,6 +26,7 @@ ferry-engine = { path = "crates/ferry-engine" }
 
 # ── 第三方 ──────────────────────────────────
 bitflags = "2"
+mdns-sd = { version = "0.21.6", default-features = false }
 rcgen = { version = "0.14.10", default-features = false, features = ["crypto", "ring"] }
 ring = "0.17.14"
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std"] }

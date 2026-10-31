@@ -15,7 +15,7 @@ mod link;
 mod pairing;
 mod server;
 
-pub use client::{ClientConfig, connect};
+pub use client::{ClientConfig, ServerAddr, connect};
 pub use error::{Error, Result};
 pub use link::DEFAULT_PORT;
 pub use pairing::{ConfirmPairing, PairingRequest};

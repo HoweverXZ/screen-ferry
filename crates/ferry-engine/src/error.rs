@@ -24,8 +24,12 @@ pub enum Error {
     PairingRejected,
     #[error("配对失败：{0}")]
     PairingFailed(&'static str),
-    #[error("数据连接的对方与输入连接不是同一台设备")]
+    #[error("同一会话的几条连接连到了不同的设备")]
     PeerMismatch,
+    #[error("局域网广播的指纹与对方的证书不符，可能有设备在冒充，已跳过")]
+    AdvertisedMismatch,
+    #[error("局域网里有多台未配对的服务端：{0}。请用 connect <地址> 指定一台")]
+    AmbiguousServers(String),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

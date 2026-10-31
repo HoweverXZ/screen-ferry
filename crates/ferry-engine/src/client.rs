@@ -9,7 +9,7 @@ use std::time::Duration;
 use ferry_core::Pressed;
 use ferry_platform::{Displays, Error as PlatformError, InputInject};
 use ferry_proto::{Channel, Hello, Message};
-use ferry_types::{InputEvent, Point};
+use ferry_types::{InputEvent, LockKeys, Point};
 use tokio::time::{sleep, timeout};
 use tracing::{debug, info, warn};
 
@@ -85,6 +85,10 @@ impl<I: InputInject> Client<I> {
                 }
                 Some(Message::Enter(enter)) => {
                     self.move_to(enter.position);
+                    // 只同步 Caps Lock：对方可能没有 Num Lock（例如 Mac），同步它会误关本机的小键盘。
+                    if let Err(e) = self.inject.sync_locks(enter.locks, LockKeys::CAPS) {
+                        warn!("同步锁定键失败：{e}");
+                    }
                     info!(at = ?enter.position, "光标进入本机");
                 }
                 Some(Message::Leave { .. }) => {

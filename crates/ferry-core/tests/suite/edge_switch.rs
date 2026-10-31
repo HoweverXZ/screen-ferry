@@ -202,3 +202,19 @@ fn never_enters_an_empty_remote() {
     );
     assert_eq!(s.local_motion(Point::new(999, 0), 1, 0), None);
 }
+
+#[test]
+fn leave_on_demand_reports_the_same_seq() {
+    let mut s = switch(Side::Right);
+    assert_eq!(s.leave(), None);
+
+    enter(&mut s, Point::new(999, 400), 1, 0);
+    assert_eq!(
+        s.leave(),
+        Some(Transition::Leave {
+            seq: 1,
+            local_at: Point::new(999, 400)
+        })
+    );
+    assert!(!s.is_remote());
+}

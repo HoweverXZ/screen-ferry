@@ -1,5 +1,5 @@
 use ferry_platform::CaptureEvent;
-use ferry_types::{InputEvent, MouseButton, Point};
+use ferry_types::{InputEvent, KeyAction, KeyCode, MouseButton, Point};
 
 use crate::support::{EDGE, ENTRY, Rig, eventually};
 
@@ -84,4 +84,65 @@ async fn control_returns_when_the_client_disconnects() {
     })
     .await;
     assert_eq!(rig.capture.last_release(), Some(EDGE));
+}
+
+fn key(code: KeyCode, action: KeyAction) -> InputEvent {
+    InputEvent::Key { code, action }
+}
+
+#[tokio::test]
+async fn keys_are_forwarded_with_command_as_control() {
+    let rig = Rig::start().await;
+    let letter_c = KeyCode::keyboard(0x06);
+
+    rig.key(letter_c, KeyAction::Down);
+    rig.key(letter_c, KeyAction::Up);
+    rig.enter().await;
+    rig.key(KeyCode::LEFT_GUI, KeyAction::Down);
+    rig.key(letter_c, KeyAction::Down);
+    rig.key(letter_c, KeyAction::Repeat);
+    rig.key(letter_c, KeyAction::Up);
+    rig.key(KeyCode::LEFT_GUI, KeyAction::Up);
+
+    eventually("客户端收到按键", || rig.inject.events().len() >= 6).await;
+    assert_eq!(
+        rig.inject.events(),
+        [
+            motion(ENTRY.x, ENTRY.y),
+            key(KeyCode::LEFT_CTRL, KeyAction::Down),
+            key(letter_c, KeyAction::Down),
+            key(letter_c, KeyAction::Repeat),
+            key(letter_c, KeyAction::Up),
+            key(KeyCode::LEFT_CTRL, KeyAction::Up),
+        ],
+        "光标进入前的按键不转发；⌘ 换成 Ctrl",
+    );
+}
+
+#[tokio::test]
+async fn ctrl_option_escape_returns_to_local() {
+    let rig = Rig::start().await;
+    rig.enter().await;
+
+    rig.key(KeyCode::LEFT_CTRL, KeyAction::Down);
+    rig.key(KeyCode::RIGHT_ALT, KeyAction::Down);
+    rig.key(KeyCode::ESCAPE, KeyAction::Down);
+
+    eventually("快捷键回到本机", || !rig.capture.is_grabbed()).await;
+    assert_eq!(rig.capture.last_release(), Some(EDGE));
+
+    // 客户端收到 Leave 后松开按着的修饰键（Ctrl 已被映射成 Win），Esc 本身不转发。
+    eventually("客户端松开修饰键", || {
+        rig.inject.events().len() >= 5
+    })
+    .await;
+    assert_eq!(
+        rig.inject.events()[1..],
+        [
+            key(KeyCode::LEFT_GUI, KeyAction::Down),
+            key(KeyCode::RIGHT_ALT, KeyAction::Down),
+            key(KeyCode::LEFT_GUI, KeyAction::Up),
+            key(KeyCode::RIGHT_ALT, KeyAction::Up),
+        ],
+    );
 }

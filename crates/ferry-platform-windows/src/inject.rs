@@ -1,15 +1,17 @@
 //! 输入注入：`InputInject` 的 Windows 实现，基于 `SendInput`。
 //!
 //! 绝对移动使用整个虚拟桌面的归一化坐标（0–65535），换算时落在目标像素的中心，避免差一像素。
-//! 键盘注入尚未实现。
+//! 键盘用扫描码注入，不受键盘布局和输入法影响。
 
 use ferry_platform::{Error, InputInject, Result};
-use ferry_types::{InputEvent, MouseButton, Point};
+use ferry_types::{InputEvent, KeyAction, KeyCode, LockKeys, MouseButton, Point};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    INPUT, INPUT_0, INPUT_MOUSE, MOUSE_EVENT_FLAGS, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_HWHEEL,
-    MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP,
-    MOUSEEVENTF_MOVE, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_VIRTUALDESK,
-    MOUSEEVENTF_WHEEL, MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, MOUSEINPUT, SendInput,
+    GetKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBD_EVENT_FLAGS, KEYBDINPUT,
+    KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, MOUSE_EVENT_FLAGS,
+    MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_HWHEEL, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP,
+    MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_MOVE, MOUSEEVENTF_RIGHTDOWN,
+    MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_VIRTUALDESK, MOUSEEVENTF_WHEEL, MOUSEEVENTF_XDOWN,
+    MOUSEEVENTF_XUP, MOUSEINPUT, SendInput, VIRTUAL_KEY, VK_CAPITAL, VK_NUMLOCK, VK_SCROLL,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
@@ -17,6 +19,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::display::{ensure_dpi_aware, last_error};
+use crate::keymap::{WinKey, win_key};
 
 /// 本机键鼠注入。
 #[derive(Debug)]
@@ -65,8 +68,65 @@ impl InputInject for WinInject {
                 }
                 Ok(())
             }
-            InputEvent::Key { .. } => Err(Error::Unsupported("键盘注入")),
+            InputEvent::Key { code, action } => {
+                let key = win_key(code).ok_or(Error::Unsupported("没有对应 Windows 按键的键"))?;
+                send(keyboard(key, action == KeyAction::Up))
+            }
         }
+    }
+
+    fn sync_locks(&mut self, wanted: LockKeys, mask: LockKeys) -> Result<()> {
+        let locks = [
+            (LockKeys::CAPS, VK_CAPITAL, KeyCode::CAPS_LOCK),
+            (LockKeys::NUM, VK_NUMLOCK, KeyCode::NUM_LOCK),
+            (LockKeys::SCROLL, VK_SCROLL, KeyCode::SCROLL_LOCK),
+        ];
+        for (lock, vk, code) in locks {
+            if !mask.contains(lock) {
+                continue;
+            }
+            // SAFETY: 只读查询键盘状态；最低位表示锁定键是否打开。
+            let on = unsafe { GetKeyState(i32::from(vk.0)) } & 1 != 0;
+            if on != wanted.contains(lock) {
+                let key = win_key(code).ok_or(Error::Unsupported("锁定键"))?;
+                send(keyboard(key, false))?;
+                send(keyboard(key, true))?;
+            }
+        }
+        Ok(())
+    }
+}
+
+fn keyboard(key: WinKey, up: bool) -> INPUT {
+    let (vk, scan, mut flags) = match key {
+        WinKey::Scan {
+            code,
+            extended: false,
+        } => (VIRTUAL_KEY(0), code, KEYEVENTF_SCANCODE),
+        WinKey::Scan {
+            code,
+            extended: true,
+        } => (
+            VIRTUAL_KEY(0),
+            code,
+            KEYEVENTF_SCANCODE | KEYEVENTF_EXTENDEDKEY,
+        ),
+        WinKey::Virtual(vk) => (VIRTUAL_KEY(vk), 0, KEYBD_EVENT_FLAGS(0)),
+    };
+    if up {
+        flags |= KEYEVENTF_KEYUP;
+    }
+    INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: vk,
+                wScan: scan,
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
     }
 }
 

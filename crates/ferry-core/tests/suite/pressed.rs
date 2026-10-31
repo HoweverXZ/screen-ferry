@@ -63,3 +63,15 @@ fn tracks_buttons_separately_from_keys() {
     pressed.track(&button(MouseButton::RIGHT, false));
     assert!(!pressed.any_button());
 }
+
+#[test]
+fn clear_keys_keeps_buttons() {
+    let mut pressed = Pressed::new();
+    pressed.track(&key(KeyCode::LEFT_CTRL, KeyAction::Down));
+    pressed.track(&button(MouseButton::LEFT, true));
+    assert!(pressed.is_held(KeyCode::LEFT_CTRL));
+
+    pressed.clear_keys();
+    assert!(!pressed.is_held(KeyCode::LEFT_CTRL));
+    assert!(pressed.any_button());
+}

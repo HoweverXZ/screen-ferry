@@ -131,6 +131,15 @@ impl EdgeSwitch {
         Some(Transition::Move(next))
     }
 
+    /// 主动回到本机（例如按了快捷键）。光标原本在远端时返回 `Leave`。
+    pub fn leave(&mut self) -> Option<Transition> {
+        let local_at = self.abort()?;
+        Some(Transition::Leave {
+            seq: self.seq,
+            local_at,
+        })
+    }
+
     /// 连接中断等情况下立即回到本机。光标原本在远端时，返回本机光标应放到的位置。
     pub fn abort(&mut self) -> Option<Point> {
         let at = self.remote_at.take()?;

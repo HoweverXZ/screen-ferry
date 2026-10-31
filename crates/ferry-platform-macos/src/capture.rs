@@ -4,8 +4,10 @@
 //! - 光标与鼠标解耦，光标停在原地，事件里仍带有相对位移；
 //! - 事件被吞掉，本机程序收不到。
 //!
-//! 键盘事件暂不拦截，原型阶段键盘仍作用于本机。
+//! 键盘：光标在本机时只记录哪些键按着，不交给 sink；抓取期间转交 sink 并吞掉。
+//! 抓取前就按着的键，之后的连发和松开仍交给本机，免得本机以为它一直按着。
 
+use std::collections::BTreeSet;
 use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr::{self, NonNull};
@@ -15,21 +17,22 @@ use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 
 use ferry_platform::{CaptureEvent, CaptureSink, Error, InputCapture, Result};
-use ferry_types::{MouseButton, Point, WHEEL_NOTCH};
+use ferry_types::{KeyAction, KeyCode, LockKeys, MouseButton, Point, WHEEL_NOTCH};
 use objc2_core_foundation::{
     CFMachPort, CFRetained, CFRunLoop, CGPoint, kCFRunLoopCommonModes, kCFRunLoopDefaultMode,
 };
 use objc2_core_graphics::{
-    CGAssociateMouseAndMouseCursorPosition, CGEvent, CGEventField, CGEventTapLocation,
-    CGEventTapOptions, CGEventTapPlacement, CGEventTapProxy, CGEventType,
-    CGWarpMouseCursorPosition,
+    CGAssociateMouseAndMouseCursorPosition, CGEvent, CGEventField, CGEventFlags, CGEventSource,
+    CGEventSourceStateID, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
+    CGEventTapProxy, CGEventType, CGWarpMouseCursorPosition,
 };
 
 use crate::display::check;
+use crate::keymap::{hid_code, modifier_flag};
 use crate::permission::ACCESSIBILITY;
 
 /// 拦截的事件类型。
-const EVENTS: [CGEventType; 11] = [
+const EVENTS: [CGEventType; 14] = [
     CGEventType::MouseMoved,
     CGEventType::LeftMouseDown,
     CGEventType::LeftMouseUp,
@@ -41,6 +44,9 @@ const EVENTS: [CGEventType; 11] = [
     CGEventType::OtherMouseUp,
     CGEventType::OtherMouseDragged,
     CGEventType::ScrollWheel,
+    CGEventType::KeyDown,
+    CGEventType::KeyUp,
+    CGEventType::FlagsChanged,
 ];
 
 /// 捕获线程每隔这么久检查一次是否该退出（同时也会被立即唤醒）。
@@ -68,6 +74,8 @@ struct TapState {
     sink: CaptureSink,
     grabbed: Arc<AtomicBool>,
     tap: Option<CFRetained<CFMachPort>>,
+    /// 交给本机处理、尚未松开的键。
+    local_keys: BTreeSet<KeyCode>,
 }
 
 impl MacCapture {
@@ -150,6 +158,16 @@ impl InputCapture for MacCapture {
         );
         warped.and(associated)
     }
+
+    fn lock_keys(&self) -> LockKeys {
+        // macOS 只有 Caps Lock。
+        let flags = CGEventSource::flags_state(CGEventSourceStateID::CombinedSessionState);
+        if flags.contains(CGEventFlags::MaskAlphaShift) {
+            LockKeys::CAPS
+        } else {
+            LockKeys::empty()
+        }
+    }
 }
 
 impl Drop for MacCapture {
@@ -176,6 +194,7 @@ fn run(
         sink,
         grabbed,
         tap: None,
+        local_keys: BTreeSet::new(),
     }));
     let mask = EVENTS.iter().fold(0u64, |mask, ty| mask | (1 << ty.0));
 
@@ -250,17 +269,60 @@ unsafe extern "C-unwind" fn on_event(
         return event.as_ptr();
     }
 
-    // SAFETY: 系统保证回调期间事件有效。
-    if let Some(captured) = translate(ty, unsafe { event.as_ref() }) {
-        // panic 不能穿过系统框架，这里截住。
-        let _ = catch_unwind(AssertUnwindSafe(|| (state.sink)(captured)));
-    }
-
-    if state.grabbed.load(Ordering::Relaxed) {
+    let grabbed = state.grabbed.load(Ordering::Relaxed);
+    // 抓取期间吞掉事件，否则交给本机。
+    let verdict = if grabbed {
         ptr::null_mut()
     } else {
         event.as_ptr()
+    };
+    // SAFETY: 系统保证回调期间事件有效。
+    let Some(captured) = translate(ty, unsafe { event.as_ref() }) else {
+        return verdict;
+    };
+
+    if let CaptureEvent::Key { code, action } = captured {
+        if !grabbed {
+            // 光标在本机：按键照常交给本机，只记下哪些键按着。Caps Lock 没有松开事件，不记录。
+            if code != KeyCode::CAPS_LOCK {
+                match action {
+                    KeyAction::Up => state.local_keys.remove(&code),
+                    KeyAction::Down | KeyAction::Repeat => state.local_keys.insert(code),
+                };
+            }
+            return event.as_ptr();
+        }
+        if state.local_keys.contains(&code) {
+            // 抓取前就按着的键：连发和松开都交给本机。
+            if action == KeyAction::Up {
+                state.local_keys.remove(&code);
+            }
+            return event.as_ptr();
+        }
     }
+
+    emit(state, captured);
+    if captured
+        == (CaptureEvent::Key {
+            code: KeyCode::CAPS_LOCK,
+            action: KeyAction::Down,
+        })
+    {
+        // Caps Lock 每按一次只报告一次，转发成一次完整的按下与松开。
+        emit(
+            state,
+            CaptureEvent::Key {
+                code: KeyCode::CAPS_LOCK,
+                action: KeyAction::Up,
+            },
+        );
+    }
+    verdict
+}
+
+/// 把事件交给 sink。panic 不能穿过系统框架，这里截住。
+fn emit(state: &mut TapState, event: CaptureEvent) {
+    let _ = catch_unwind(AssertUnwindSafe(|| (state.sink)(event)));
 }
 
 fn translate(ty: CGEventType, event: &CGEvent) -> Option<CaptureEvent> {
@@ -287,6 +349,31 @@ fn translate(ty: CGEventType, event: &CGEvent) -> Option<CaptureEvent> {
             // macOS 从 0 开始编号（0 左、1 右、2 中），协议从 1 开始。
             let number = int(CGEventField::MouseEventButtonNumber).clamp(0, 254) as u8 + 1;
             button(MouseButton::new(number)?, ty == CGEventType::OtherMouseDown)
+        }
+        CGEventType::KeyDown | CGEventType::KeyUp => {
+            let code = hid_code(int(CGEventField::KeyboardEventKeycode) as u16)?;
+            let action = if ty == CGEventType::KeyUp {
+                KeyAction::Up
+            } else if int(CGEventField::KeyboardEventAutorepeat) != 0 {
+                KeyAction::Repeat
+            } else {
+                KeyAction::Down
+            };
+            Some(CaptureEvent::Key { code, action })
+        }
+        CGEventType::FlagsChanged => {
+            let keycode = int(CGEventField::KeyboardEventKeycode) as u16;
+            let code = hid_code(keycode)?;
+            if code == KeyCode::CAPS_LOCK {
+                return Some(CaptureEvent::Key {
+                    code,
+                    action: KeyAction::Down,
+                });
+            }
+            // 修饰键只报告“状态变了”，按设备相关的标志位判断是按下还是松开。
+            let held = CGEvent::flags(Some(event)).0 & modifier_flag(keycode)? != 0;
+            let action = if held { KeyAction::Down } else { KeyAction::Up };
+            Some(CaptureEvent::Key { code, action })
         }
         CGEventType::ScrollWheel => {
             let lines = |field| CGEvent::double_value_field(Some(event), field);

@@ -1,14 +1,15 @@
-//! 服务端：拥有键鼠的一方。捕获本机鼠标，光标越过边缘后把输入发给客户端。
+//! 服务端：拥有键鼠的一方。捕获本机键鼠，光标越过边缘后把输入发给客户端。
 //!
 //! 任何原因结束会话（对方断开、心跳超时、出错）时，都会立即把控制权交还本机。
+//! 光标在对方屏幕时，按 Ctrl + Option（Alt）+ Esc 可以强制回到本机。
 
 use std::convert::Infallible;
 
-use ferry_core::{EdgeSwitch, Pressed, Side, Transition, bounds};
+use ferry_core::{EdgeSwitch, KeyRemap, Pressed, Side, Transition, bounds};
 use ferry_net::Framed;
 use ferry_platform::{CaptureEvent, Displays, InputCapture};
 use ferry_proto::{Bye, ByeReason, Channel, Enter, Message};
-use ferry_types::{Display, InputEvent, LockKeys, Point};
+use ferry_types::{Display, InputEvent, KeyAction, KeyCode, Point};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 use tokio::time::{MissedTickBehavior, interval, timeout};
@@ -23,6 +24,8 @@ pub struct ServerConfig {
     pub side: Side,
     /// 本机设备名，显示给对方。
     pub name: String,
+    /// 发送前对按键做的重映射，例如把 Command 当作对方的 Ctrl。
+    pub remap: KeyRemap,
 }
 
 /// 运行服务端：在 `listener` 上一次服务一个客户端，断开后继续等待下一个。
@@ -73,8 +76,9 @@ struct Server<C, D> {
     displays: D,
     events: UnboundedReceiver<CaptureEvent>,
     switch: Option<EdgeSwitch>,
-    /// 本机按着的鼠标键。按着时不切换屏幕，避免拖拽到一半换了屏。
-    buttons: Pressed,
+    /// 按着的鼠标键和（光标在对方屏幕时）按着的键。
+    /// 按着鼠标键时不切换屏幕，避免拖拽到一半换了屏；按着的键用来识别快捷键。
+    pressed: Pressed,
 }
 
 impl<C: InputCapture, D: Displays> Server<C, D> {
@@ -89,7 +93,7 @@ impl<C: InputCapture, D: Displays> Server<C, D> {
             displays,
             events,
             switch: None,
-            buttons: Pressed::new(),
+            pressed: Pressed::new(),
         })
     }
 
@@ -166,61 +170,33 @@ impl<C: InputCapture, D: Displays> Server<C, D> {
             return Ok(());
         };
 
-        match event {
+        let transition = match event {
             CaptureEvent::Pointer { position, dx, dy } => {
-                let free = !self.buttons.any_button();
-                let transition = if switch.is_remote() {
+                let free = !self.pressed.any_button();
+                if switch.is_remote() {
                     switch.remote_motion(dx, dy, free)
                 } else if free {
                     switch.local_motion(position, dx, dy)
                 } else {
                     None
-                };
-                match transition {
-                    Some(Transition::Enter { seq, at }) => {
-                        // 先抓取再通知对方：抓取失败时，会话结束后会照常归还控制权。
-                        self.capture.grab()?;
-                        let enter = Enter {
-                            seq,
-                            position: at,
-                            locks: LockKeys::empty(),
-                        };
-                        send(framed, &Message::Enter(enter)).await?;
-                        info!(?at, "光标进入对方屏幕");
-                    }
-                    Some(Transition::Move(position)) => {
-                        send(
-                            framed,
-                            &Message::Input(InputEvent::PointerMotion { position }),
-                        )
-                        .await?;
-                    }
-                    Some(Transition::Leave { seq, local_at }) => {
-                        // 先归还本机控制再通知对方：发送失败也不会把本机鼠标锁住。
-                        self.capture.release(local_at)?;
-                        send(framed, &Message::Leave { seq }).await?;
-                        info!("光标回到本机");
-                    }
-                    None => {}
                 }
             }
             CaptureEvent::Button { button, pressed } => {
-                self.buttons.track(&InputEvent::Button {
+                let event = InputEvent::Button {
                     button,
                     pressed,
                     position: Point::default(),
-                });
+                };
+                self.pressed.track(&event);
                 if let Some(position) = switch.remote_position() {
-                    send(
-                        framed,
-                        &Message::Input(InputEvent::Button {
-                            button,
-                            pressed,
-                            position,
-                        }),
-                    )
-                    .await?;
+                    let event = InputEvent::Button {
+                        button,
+                        pressed,
+                        position,
+                    };
+                    send(framed, &Message::Input(event)).await?;
                 }
+                None
             }
             CaptureEvent::Wheel { dx, dy } => {
                 if let Some(position) = switch.remote_position() {
@@ -230,9 +206,56 @@ impl<C: InputCapture, D: Displays> Server<C, D> {
                     )
                     .await?;
                 }
+                None
             }
-            // 原型阶段键盘不转发。
-            CaptureEvent::Key { .. } => {}
+            CaptureEvent::Key { code, action } => {
+                // 光标在本机时，按键由本机自己处理。
+                if !switch.is_remote() {
+                    return Ok(());
+                }
+                self.pressed.track(&InputEvent::Key { code, action });
+                if action == KeyAction::Down
+                    && code == KeyCode::ESCAPE
+                    && escape_hotkey(&self.pressed)
+                {
+                    info!("快捷键 Ctrl + Option + Esc：回到本机");
+                    switch.leave()
+                } else {
+                    let code = self.config.remap.apply(code);
+                    send(framed, &Message::Input(InputEvent::Key { code, action })).await?;
+                    None
+                }
+            }
+        };
+
+        match transition {
+            Some(Transition::Enter { seq, at }) => {
+                // 先抓取再通知对方：抓取失败时，会话结束后会照常归还控制权。
+                self.capture.grab()?;
+                let enter = Enter {
+                    seq,
+                    position: at,
+                    locks: self.capture.lock_keys(),
+                };
+                send(framed, &Message::Enter(enter)).await?;
+                info!(?at, "光标进入对方屏幕");
+            }
+            Some(Transition::Move(position)) => {
+                send(
+                    framed,
+                    &Message::Input(InputEvent::PointerMotion { position }),
+                )
+                .await?;
+            }
+            Some(Transition::Leave { seq, local_at }) => {
+                // 先归还本机控制再通知对方：发送失败也不会把本机键鼠锁住。
+                self.capture.release(local_at)?;
+                // 对方收到 Leave 会松开所有键，这些键不再需要跟踪。
+                self.pressed.clear_keys();
+                send(framed, &Message::Leave { seq }).await?;
+                info!("光标回到本机");
+            }
+            None => {}
         }
         Ok(())
     }
@@ -250,6 +273,7 @@ impl<C: InputCapture, D: Displays> Server<C, D> {
 
     /// 光标在对方屏幕时，立即放回本机。
     fn return_control(&mut self) {
+        self.pressed.clear_keys();
         if let Some(at) = self.switch.take().as_mut().and_then(EdgeSwitch::abort) {
             match self.capture.release(at) {
                 Ok(()) => info!("已把控制权交还本机"),
@@ -257,6 +281,12 @@ impl<C: InputCapture, D: Displays> Server<C, D> {
             }
         }
     }
+}
+
+/// Ctrl + Option（Alt）是否都按着。左右两侧的键都算。
+fn escape_hotkey(pressed: &Pressed) -> bool {
+    let held = |a, b| pressed.is_held(a) || pressed.is_held(b);
+    held(KeyCode::LEFT_CTRL, KeyCode::RIGHT_CTRL) && held(KeyCode::LEFT_ALT, KeyCode::RIGHT_ALT)
 }
 
 async fn expect_displays(framed: &mut Framed<TcpStream>) -> Result<Vec<Display>> {

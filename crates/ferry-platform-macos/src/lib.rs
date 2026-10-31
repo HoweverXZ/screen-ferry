@@ -14,4 +14,5 @@ mod permission;
 
 pub use capture::MacCapture;
 pub use display::MacDisplays;
+pub use keymap::hid_code;
 pub use permission::MacPermissions;

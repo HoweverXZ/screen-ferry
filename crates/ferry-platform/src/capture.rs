@@ -1,6 +1,6 @@
 //! 输入捕获：定义 `InputCapture` trait。
 
-use ferry_types::{KeyAction, KeyCode, MouseButton, Point};
+use ferry_types::{KeyAction, KeyCode, LockKeys, MouseButton, Point};
 
 use crate::error::Result;
 
@@ -37,8 +37,14 @@ pub trait InputCapture: Send {
     fn start(&mut self, sink: CaptureSink) -> Result<()>;
 
     /// 抓取：本机不再响应键鼠，光标固定在原地，事件只交给 `sink`。
+    ///
+    /// 抓取前就已按下的键，之后的连发和松开仍交给本机，不交给 `sink`，
+    /// 以免本机以为它一直按着。
     fn grab(&self) -> Result<()>;
 
     /// 结束抓取，并把本机光标放到 `at`。
     fn release(&self, at: Point) -> Result<()>;
+
+    /// 本机当前的锁定键状态。平台没有的锁定键视为关闭。
+    fn lock_keys(&self) -> LockKeys;
 }

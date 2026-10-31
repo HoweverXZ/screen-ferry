@@ -15,6 +15,7 @@ impl KeyCode {
     /// 消费者页：音量、播放控制等媒体键。
     pub const CONSUMER_PAGE: u16 = 0x0C;
 
+    pub const ESCAPE: Self = Self::keyboard(0x29);
     pub const CAPS_LOCK: Self = Self::keyboard(0x39);
     pub const SCROLL_LOCK: Self = Self::keyboard(0x47);
     pub const NUM_LOCK: Self = Self::keyboard(0x53);

@@ -18,3 +18,9 @@
   - `ferry-platform-windows`：`SendInput` 注入鼠标、显示器枚举、每显示器 DPI 感知。
   - `ferry-engine`：服务端与客户端会话、心跳与延迟统计、断线时归还控制并松开按键。
   - `screenferry serve` / `screenferry connect` 命令行。
+- 键盘共享：
+  - macOS 键码 → HID、HID → Windows 扫描码两张对照表；Windows 以扫描码注入，不受布局和输入法影响。
+  - macOS 捕获键盘，修饰键按左右分别识别；抓取前按下的键，松开仍交给本机。
+  - 默认互换 Command 与 Ctrl（`--no-cmd-ctrl-swap` 关闭）。
+  - 进入对方屏幕时同步 Caps Lock。
+  - Ctrl + Option + Esc 强制回到本机。

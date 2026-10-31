@@ -5,7 +5,7 @@ use std::io::IsTerminal;
 use std::net::SocketAddr;
 use std::process::ExitCode;
 
-use ferry_core::Side;
+use ferry_core::{KeyRemap, Side};
 use tracing::{error, info};
 
 use crate::cli::{Mode, Options};
@@ -41,7 +41,18 @@ pub(crate) fn run(options: Options) -> ExitCode {
     let result = runtime.block_on(async move {
         let work = async {
             match options.mode {
-                Mode::Serve { listen, side } => serve(listen, side, options.name).await,
+                Mode::Serve {
+                    listen,
+                    side,
+                    swap_cmd_ctrl,
+                } => {
+                    let remap = if swap_cmd_ctrl {
+                        KeyRemap::swap_command_control()
+                    } else {
+                        KeyRemap::none()
+                    };
+                    serve(listen, side, remap, options.name).await
+                }
                 Mode::Connect { server } => connect(server, options.name).await,
             }
         };
@@ -64,19 +75,19 @@ pub(crate) fn run(options: Options) -> ExitCode {
 }
 
 #[cfg(target_os = "macos")]
-async fn serve(listen: SocketAddr, side: Side, name: String) -> AppResult {
+async fn serve(listen: SocketAddr, side: Side, remap: KeyRemap, name: String) -> AppResult {
     use ferry_engine::ServerConfig;
     use ferry_platform::Permissions;
     use ferry_platform_macos::{MacCapture, MacDisplays, MacPermissions};
 
     MacPermissions.check_input()?;
     let listener = tokio::net::TcpListener::bind(listen).await?;
-    let config = ServerConfig { side, name };
+    let config = ServerConfig { side, name, remap };
     Ok(ferry_engine::serve(listener, config, MacCapture::new(), MacDisplays).await?)
 }
 
 #[cfg(not(target_os = "macos"))]
-async fn serve(_listen: SocketAddr, _side: Side, _name: String) -> AppResult {
+async fn serve(_listen: SocketAddr, _side: Side, _remap: KeyRemap, _name: String) -> AppResult {
     Err("原型阶段只能在 macOS 上运行 serve".into())
 }
 

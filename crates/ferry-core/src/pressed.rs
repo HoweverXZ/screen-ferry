@@ -56,6 +56,15 @@ impl Pressed {
         !self.buttons.is_empty()
     }
 
+    pub fn is_held(&self, code: KeyCode) -> bool {
+        self.keys.contains(&code)
+    }
+
+    /// 忘掉所有按着的键，鼠标按键不变。用于光标离开后，键盘状态已不由本记录负责的时候。
+    pub fn clear_keys(&mut self) {
+        self.keys.clear();
+    }
+
     /// 生成释放全部按键的事件并清空记录。
     ///
     /// 顺序：先松普通键，再松修饰键，最后松鼠标按键（在 `position` 处）。

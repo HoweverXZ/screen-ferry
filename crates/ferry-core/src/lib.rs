@@ -5,9 +5,11 @@
 #![forbid(unsafe_code)]
 
 mod edge_switch;
+mod key_remap;
 mod layout;
 mod pressed;
 
 pub use edge_switch::{EdgeSwitch, Transition};
+pub use key_remap::KeyRemap;
 pub use layout::{Side, bounds};
 pub use pressed::Pressed;

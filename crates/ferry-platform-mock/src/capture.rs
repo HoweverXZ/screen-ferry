@@ -3,7 +3,7 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use ferry_platform::{CaptureEvent, CaptureSink, InputCapture, Result};
-use ferry_types::Point;
+use ferry_types::{LockKeys, Point};
 
 /// 假的输入捕获：测试用 [`emit`](Self::emit) 模拟本机输入。
 #[derive(Clone, Default)]
@@ -16,6 +16,7 @@ struct State {
     sink: Option<CaptureSink>,
     grabbed: bool,
     last_release: Option<Point>,
+    locks: LockKeys,
 }
 
 impl MockCapture {
@@ -39,6 +40,11 @@ impl MockCapture {
         self.lock().last_release
     }
 
+    /// 设置本机的锁定键状态。
+    pub fn set_lock_keys(&self, locks: LockKeys) {
+        self.lock().locks = locks;
+    }
+
     fn lock(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
@@ -60,5 +66,9 @@ impl InputCapture for MockCapture {
         state.grabbed = false;
         state.last_release = Some(at);
         Ok(())
+    }
+
+    fn lock_keys(&self) -> LockKeys {
+        self.lock().locks
     }
 }

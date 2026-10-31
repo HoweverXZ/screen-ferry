@@ -16,4 +16,5 @@ mod permission;
 
 pub use display::WinDisplays;
 pub use inject::WinInject;
+pub use keymap::{WinKey, win_key};
 pub use permission::WinPermissions;

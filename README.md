@@ -16,7 +16,12 @@ cargo xtask lint
 
 ## 试运行原型
 
-目前是端到端验证原型：Mac 作为服务端，把鼠标（移动、按键、滚轮）共享给同一局域网内的 Windows。键盘还未转发。
+目前是端到端验证原型：Mac 作为服务端，把键盘和鼠标（移动、按键、滚轮）共享给同一局域网内的 Windows。
+
+- 默认把 Mac 的 Command 当作 Windows 的 Ctrl，⌘C、⌘V 即复制粘贴；不需要时加 `--no-cmd-ctrl-swap`。
+- 进入 Windows 时同步 Caps Lock 状态。
+- 光标在 Windows 上时，按 **Ctrl + Option + Esc** 可以强制回到 Mac。
+- 测试时请先退出 Deskflow 等同类软件，两者会争抢同一套键鼠。
 
 1. 在 Mac 上编译两个版本（Windows 版需要 `brew install mingw-w64` 和 `rustup target add x86_64-pc-windows-gnu`）：
 
@@ -25,7 +30,7 @@ cargo xtask lint
    cargo build --release -p ferry-daemon --target x86_64-pc-windows-gnu
    ```
 
-2. Mac 上运行服务端。首次运行需要在「系统设置 → 隐私与安全性 → 辅助功能」中允许终端：
+2. Mac 上运行服务端。首次运行需要在「系统设置 → 隐私与安全性」中给终端打开辅助功能权限（较新的 macOS 中名为“设备控制和数据访问”）：
 
    ```bash
    ./target/release/screenferry serve --side right

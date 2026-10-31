@@ -1,5 +1,5 @@
 use ferry_platform::CaptureEvent;
-use ferry_types::{InputEvent, MouseButton};
+use ferry_types::{InputEvent, LockKeys, MouseButton};
 
 use crate::support::{ENTRY, Rig, eventually};
 
@@ -24,4 +24,21 @@ async fn buttons_are_released_when_the_server_disappears() {
         rig.inject.events().last() == Some(&released)
     })
     .await;
+}
+
+#[tokio::test]
+async fn entering_syncs_caps_lock() {
+    let rig = Rig::start().await;
+    rig.capture.set_lock_keys(LockKeys::CAPS | LockKeys::NUM);
+    rig.enter().await;
+
+    eventually("客户端同步锁定键", || {
+        !rig.inject.synced_locks().is_empty()
+    })
+    .await;
+    assert_eq!(
+        rig.inject.synced_locks(),
+        [LockKeys::CAPS],
+        "只同步 Caps Lock"
+    );
 }

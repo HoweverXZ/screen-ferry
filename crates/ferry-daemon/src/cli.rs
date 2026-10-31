@@ -7,7 +7,7 @@ use ferry_engine::DEFAULT_PORT;
 
 pub(crate) const USAGE: &str = "\
 用法：
-  screenferry serve   [--listen 地址] [--side 方向] [--name 设备名] [-v]
+  screenferry serve   [--listen 地址] [--side 方向] [--name 设备名] [--no-cmd-ctrl-swap] [-v]
   screenferry connect <服务端地址> [--name 设备名] [-v]
 
 命令：
@@ -18,8 +18,12 @@ pub(crate) const USAGE: &str = "\
   --listen   监听地址，默认 0.0.0.0:24810
   --side     对方屏幕在本机的哪一侧：right、left、top、bottom，默认 right
   --name     显示给对方的设备名，默认取计算机名
+  --no-cmd-ctrl-swap
+             不互换 Command 与 Ctrl。默认互换，在 Windows 上 ⌘C、⌘V 即复制粘贴
   -v         输出调试日志
-  -h         显示本帮助";
+  -h         显示本帮助
+
+光标在对方屏幕时，按 Ctrl + Option + Esc 可以强制回到本机。";
 
 pub(crate) enum Parsed {
     Run(Options),
@@ -33,8 +37,14 @@ pub(crate) struct Options {
 }
 
 pub(crate) enum Mode {
-    Serve { listen: SocketAddr, side: Side },
-    Connect { server: SocketAddr },
+    Serve {
+        listen: SocketAddr,
+        side: Side,
+        swap_cmd_ctrl: bool,
+    },
+    Connect {
+        server: SocketAddr,
+    },
 }
 
 pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, String> {
@@ -47,6 +57,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, St
 
     let mut listen = SocketAddr::from(([0, 0, 0, 0], DEFAULT_PORT));
     let mut side = Side::Right;
+    let mut swap_cmd_ctrl = true;
     let mut server = None;
     let mut name = None;
     let mut verbose = false;
@@ -59,6 +70,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, St
             "--name" => name = Some(value("--name")?),
             "--listen" if command == "serve" => listen = resolve(&value("--listen")?)?,
             "--side" if command == "serve" => side = parse_side(&value("--side")?)?,
+            "--no-cmd-ctrl-swap" if command == "serve" => swap_cmd_ctrl = false,
             other if command == "connect" && server.is_none() && !other.starts_with('-') => {
                 server = Some(resolve(other)?);
             }
@@ -67,7 +79,11 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, St
     }
 
     let mode = match command.as_str() {
-        "serve" => Mode::Serve { listen, side },
+        "serve" => Mode::Serve {
+            listen,
+            side,
+            swap_cmd_ctrl,
+        },
         _ => Mode::Connect {
             server: server.ok_or("connect 需要服务端地址，例如 192.168.1.5")?,
         },

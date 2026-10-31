@@ -2,11 +2,11 @@
 
 use std::time::Duration;
 
-use ferry_core::Side;
+use ferry_core::{KeyRemap, Side};
 use ferry_engine::{ClientConfig, ServerConfig, connect, serve};
 use ferry_platform::CaptureEvent;
 use ferry_platform_mock::{MockCapture, MockDisplays, MockInject};
-use ferry_types::{Display, DisplayId, Point, Rect};
+use ferry_types::{Display, DisplayId, KeyAction, KeyCode, Point, Rect};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
@@ -45,6 +45,7 @@ impl Rig {
                 let config = ServerConfig {
                     side: Side::Right,
                     name: "mac".into(),
+                    remap: KeyRemap::swap_command_control(),
                 };
                 let displays = MockDisplays(vec![display(1000, 800, 100)]);
                 serve(listener, config, capture, displays).await.unwrap();
@@ -75,6 +76,10 @@ impl Rig {
             dx,
             dy,
         });
+    }
+
+    pub fn key(&self, code: KeyCode, action: KeyAction) {
+        self.capture.emit(CaptureEvent::Key { code, action });
     }
 
     /// 在右边缘向外推，直到进入客户端屏幕。

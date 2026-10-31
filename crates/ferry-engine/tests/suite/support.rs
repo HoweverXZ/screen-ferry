@@ -1,11 +1,20 @@
 //! 场景测试共用：在本机回环地址上跑一对真实的服务端与客户端，平台换成 mock。
+//!
+//! 连接是真实的 TLS，两端各有一个临时数据目录；配对确认由 [`AutoConfirm`] 自动回答。
 
+use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use ferry_core::{KeyRemap, Side};
-use ferry_engine::{ClientConfig, ServerConfig, connect, serve};
+use ferry_engine::{
+    ClientConfig, ConfirmPairing, Error, PairingRequest, ServerConfig, connect, serve,
+};
 use ferry_platform::CaptureEvent;
 use ferry_platform_mock::{MockCapture, MockClipboard, MockDisplays, MockInject};
+use ferry_store::Store;
 use ferry_types::{Display, DisplayId, KeyAction, KeyCode, Point, Rect};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
@@ -16,15 +25,89 @@ use tokio::time::sleep;
 pub const EDGE: Point = Point::new(999, 400);
 pub const ENTRY: Point = Point::new(0, 540);
 
+/// 一台测试设备的数据目录。可以跨多个 `Rig` 复用，模拟重启后再连。
+#[derive(Clone)]
+pub struct Device {
+    pub store: Store,
+    /// 最后一个持有者丢弃时删除目录。
+    _dir: Arc<TempDir>,
+}
+
+impl Device {
+    pub fn new() -> Self {
+        let dir = Arc::new(TempDir::new());
+        let store = Store::open(dir.path()).unwrap();
+        Self { store, _dir: dir }
+    }
+}
+
+/// 自动回答配对确认，并记下每次的请求。
+#[derive(Clone)]
+pub struct AutoConfirm {
+    answer: bool,
+    requests: Arc<Mutex<Vec<PairingRequest>>>,
+}
+
+impl AutoConfirm {
+    pub fn answering(answer: bool) -> Self {
+        Self {
+            answer,
+            requests: Arc::default(),
+        }
+    }
+
+    pub fn requests(&self) -> Vec<PairingRequest> {
+        self.requests.lock().unwrap().clone()
+    }
+}
+
+impl ConfirmPairing for AutoConfirm {
+    async fn confirm(&self, request: &PairingRequest) -> bool {
+        self.requests.lock().unwrap().push(request.clone());
+        self.answer
+    }
+}
+
+/// 启动参数。默认：两台全新设备、都同意配对、都启动。
+pub struct Setup {
+    pub mac: Device,
+    pub pc: Device,
+    pub mac_clipboard: MockClipboard,
+    pub pc_clipboard: MockClipboard,
+    pub mac_confirm: AutoConfirm,
+    pub pc_confirm: AutoConfirm,
+    pub start_client: bool,
+}
+
+impl Default for Setup {
+    fn default() -> Self {
+        Self {
+            mac: Device::new(),
+            pc: Device::new(),
+            mac_clipboard: MockClipboard::new(),
+            pc_clipboard: MockClipboard::new(),
+            mac_confirm: AutoConfirm::answering(true),
+            pc_confirm: AutoConfirm::answering(true),
+            start_client: true,
+        }
+    }
+}
+
 pub struct Rig {
+    pub addr: SocketAddr,
     pub capture: MockCapture,
     pub inject: MockInject,
-    /// 服务端（Mac）的剪贴板。
+    /// 服务端（Mac）。
+    pub mac: Device,
+    /// 客户端（PC）。
+    pub pc: Device,
     pub mac_clipboard: MockClipboard,
-    /// 客户端（PC）的剪贴板。
     pub pc_clipboard: MockClipboard,
-    pub server: JoinHandle<()>,
-    pub client: JoinHandle<()>,
+    pub mac_confirm: AutoConfirm,
+    pub pc_confirm: AutoConfirm,
+    /// 服务端与客户端只会因出错而结束，任务的结果就是那个错误。
+    pub server: JoinHandle<Error>,
+    pub client: JoinHandle<Error>,
 }
 
 fn display(width: u32, height: u32, scale_percent: u16) -> Display {
@@ -38,7 +121,7 @@ fn display(width: u32, height: u32, scale_percent: u16) -> Display {
 
 impl Rig {
     pub async fn start() -> Self {
-        Self::with_clipboards(MockClipboard::new(), MockClipboard::new()).await
+        Self::with(Setup::default()).await
     }
 
     /// 用给定的剪贴板启动，便于测试连接之前就有内容的情况。
@@ -46,6 +129,15 @@ impl Rig {
         mac_clipboard: MockClipboard,
         pc_clipboard: MockClipboard,
     ) -> Self {
+        Self::with(Setup {
+            mac_clipboard,
+            pc_clipboard,
+            ..Setup::default()
+        })
+        .await
+    }
+
+    pub async fn with(setup: Setup) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let capture = MockCapture::new();
@@ -53,41 +145,66 @@ impl Rig {
 
         let server = tokio::spawn({
             let capture = capture.clone();
-            let clipboard = mac_clipboard.clone();
+            let clipboard = setup.mac_clipboard.clone();
+            let confirm = setup.mac_confirm.clone();
+            let config = ServerConfig {
+                side: Side::Right,
+                name: "mac".into(),
+                remap: KeyRemap::swap_command_control(),
+                clipboard: true,
+                store: setup.mac.store.clone(),
+            };
             async move {
-                let config = ServerConfig {
-                    side: Side::Right,
-                    name: "mac".into(),
-                    remap: KeyRemap::swap_command_control(),
-                    clipboard: true,
-                };
                 let displays = MockDisplays(vec![display(1000, 800, 100)]);
-                serve(listener, config, capture, displays, clipboard)
-                    .await
-                    .unwrap();
+                match serve(listener, config, capture, displays, clipboard, confirm).await {
+                    Ok(never) => match never {},
+                    Err(e) => e,
+                }
             }
         });
-        let client = tokio::spawn({
-            let inject = inject.clone();
-            let clipboard = pc_clipboard.clone();
-            async move {
-                let config = ClientConfig {
-                    server: addr,
-                    name: "pc".into(),
-                    clipboard: true,
-                };
-                let displays = MockDisplays(vec![display(1920, 1080, 150)]);
-                connect(config, inject, displays, clipboard).await.unwrap();
-            }
-        });
+        let client = if setup.start_client {
+            Self::spawn_client(&setup, addr, inject.clone())
+        } else {
+            tokio::spawn(std::future::pending())
+        };
         Self {
+            addr,
             capture,
             inject,
-            mac_clipboard,
-            pc_clipboard,
+            mac: setup.mac,
+            pc: setup.pc,
+            mac_clipboard: setup.mac_clipboard,
+            pc_clipboard: setup.pc_clipboard,
+            mac_confirm: setup.mac_confirm,
+            pc_confirm: setup.pc_confirm,
             server,
             client,
         }
+    }
+
+    fn spawn_client(setup: &Setup, addr: SocketAddr, inject: MockInject) -> JoinHandle<Error> {
+        let clipboard = setup.pc_clipboard.clone();
+        let confirm = setup.pc_confirm.clone();
+        let config = ClientConfig {
+            server: addr,
+            name: "pc".into(),
+            clipboard: true,
+            store: setup.pc.store.clone(),
+        };
+        tokio::spawn(async move {
+            let displays = MockDisplays(vec![display(1920, 1080, 150)]);
+            match connect(config, inject, displays, clipboard, confirm).await {
+                Ok(never) => match never {},
+                Err(e) => e,
+            }
+        })
+    }
+
+    /// 停掉两端，留下数据目录供下一个 `Rig` 使用。
+    pub fn stop(self) -> (Device, Device) {
+        self.server.abort();
+        self.client.abort();
+        (self.mac, self.pc)
     }
 
     pub fn push(&self, dx: i32, dy: i32) {
@@ -141,4 +258,27 @@ pub async fn eventually(what: &str, mut check: impl FnMut() -> bool) {
         sleep(Duration::from_millis(10)).await;
     }
     panic!("等待超时：{what}");
+}
+
+/// 测试结束时删除的临时目录。
+pub struct TempDir(PathBuf);
+
+impl TempDir {
+    pub fn new() -> Self {
+        static NEXT: AtomicU32 = AtomicU32::new(0);
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!("ferry-engine-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&path);
+        Self(path)
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
 }

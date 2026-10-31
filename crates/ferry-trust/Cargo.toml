@@ -11,6 +11,10 @@ test = false
 
 [dependencies]
 ferry-types.workspace = true
+rcgen.workspace = true
+ring.workspace = true
+rustls.workspace = true
+thiserror.workspace = true
 
 [lints]
 workspace = true

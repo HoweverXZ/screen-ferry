@@ -15,6 +15,9 @@ fn kind(message: &Message) -> &'static str {
         Message::Bye(_) => "Bye",
         Message::Ping { .. } => "Ping",
         Message::Pong { .. } => "Pong",
+        Message::PairCommit { .. } => "PairCommit",
+        Message::PairNonce { .. } => "PairNonce",
+        Message::PairResult { .. } => "PairResult",
         Message::Displays(_) => "Displays",
         Message::Enter(_) => "Enter",
         Message::Leave { .. } => "Leave",
@@ -32,7 +35,7 @@ fn kind(message: &Message) -> &'static str {
     }
 }
 
-const MESSAGE_KINDS: usize = 18;
+const MESSAGE_KINDS: usize = 21;
 
 fn decode(channel: Channel, buf: &[u8]) -> Result<Option<(Message, usize)>, DecodeError> {
     Codec::new(channel).decode(buf)

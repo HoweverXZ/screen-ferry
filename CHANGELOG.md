@@ -30,3 +30,11 @@
   - 自己写入的内容不会被再次通告，连接时也不会用对方的旧内容覆盖本机。
   - macOS 基于 NSPasteboard，Windows 基于 Win32 剪贴板（`\r\n` 与 `\n` 互转）。
   - `--no-clipboard` 关闭。
+- 加密与配对：
+  - 所有连接改为 TLS 1.3（rustls + ring），双方出示自签名设备证书，以证书指纹识别设备。
+  - 首次连接用“数字比较 + 承诺”配对：两边显示同一个 6 位配对码，用户分别确认后互相记住对方；中间人凑出相同配对码的概率为百万分之一。
+  - 只有配对过的设备能建立会话；数据连接必须与输入连接来自同一台设备。
+  - 服务端删掉配对记录后，客户端会自动重新配对；任何一方拒绝配对，客户端即退出。
+  - 设备身份存于数据目录的 `identity/`，已信任设备存于 `peers.toml`（`schema_version = 1`）。
+  - 新增 `screenferry peers`、`screenferry forget`，以及 `--data-dir`。
+  - 协议：新增配对连接（`channel = 3`）、`PairCommit` / `PairNonce` / `PairResult` 消息、`Reject` 原因 `NOT_PAIRED`。

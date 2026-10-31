@@ -10,7 +10,11 @@ publish.workspace = true
 test = false
 
 [dependencies]
+ferry-trust.workspace = true
 ferry-types.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+toml.workspace = true
 
 [lints]
 workspace = true

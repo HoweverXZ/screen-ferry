@@ -18,6 +18,12 @@ pub enum Error {
     UnexpectedMessage { expected: &'static str },
     #[error("对方拒绝连接（原因 {}，对方协议版本 {}）", .0.reason.0, .0.version)]
     Rejected(Reject),
+    #[error("无法初始化 TLS：{0}")]
+    TlsConfig(#[from] rustls::Error),
+    #[error("对方不是 ScreenFerry（TLS 协议标识不符）")]
+    WrongProtocol,
+    #[error("对方没有出示证书")]
+    NoPeerCertificate,
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

@@ -12,7 +12,10 @@ pub const MAX_CLIPBOARD_FORMATS: usize = 16;
 /// 单个数据分块的最大字节数。
 pub const MAX_CHUNK_LEN: usize = 64 * 1024;
 
-/// 输入连接上单帧消息体的最大字节数。
+/// 配对随机数与承诺的字节数。
+pub const PAIRING_NONCE_LEN: usize = 32;
+
+/// 输入连接（以及配对连接）上单帧消息体的最大字节数。
 pub const MAX_INPUT_PAYLOAD: usize = 4 * 1024;
 
 /// 数据连接上单帧消息体的最大字节数：一个满载分块再加少量字段。

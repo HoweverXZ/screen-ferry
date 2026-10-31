@@ -24,6 +24,8 @@ cargo xtask lint
 - 剪贴板在光标切过去时才同步：在 Mac 上复制，移到 Windows 即可粘贴，反之亦然。不需要时在任意一端加 `--no-clipboard`。目前只同步纯文本。
 - 测试时请先退出 Deskflow 等同类软件，两者会争抢同一套键鼠。
 
+两台电脑之间的连接全程 TLS 1.3 加密。第一次连接时两边终端都会显示同一个 6 位配对码，核对一致后分别输入 `y` 回车确认；之后两台电脑互相记住对方，不再询问。用 `screenferry peers` 查看已配对的设备，`screenferry forget <设备名或指纹>` 删除。
+
 1. 在 Mac 上编译两个版本（Windows 版需要 `brew install mingw-w64` 和 `rustup target add x86_64-pc-windows-gnu`）：
 
    ```bash

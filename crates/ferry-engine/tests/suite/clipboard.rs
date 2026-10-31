@@ -100,6 +100,25 @@ async fn connecting_does_not_overwrite_the_mac_with_old_pc_content() {
 }
 
 #[tokio::test]
+async fn crossing_right_after_connecting_still_keeps_each_side_right() {
+    // 数据连接比输入连接晚一点建立，这期间光标就已经切过去了。
+    let mac = MockClipboard::new();
+    let pc = MockClipboard::new();
+    mac.copy(text("Mac 上的"));
+    pc.copy(text("PC 上旧的"));
+    let rig = Rig::with_clipboards(mac, pc).await;
+
+    rig.enter().await;
+    eventually("PC 收到 Mac 的内容", || {
+        rig.pc_clipboard.content() == text("Mac 上的")
+    })
+    .await;
+    rig.leave().await;
+    sleep(QUIET).await;
+    assert_eq!(rig.mac_clipboard.writes(), 0, "PC 的旧内容不能覆盖 Mac");
+}
+
+#[tokio::test]
 async fn large_text_arrives_in_many_chunks() {
     let rig = Rig::start().await;
     // 约 600 KB，需要十来个 64 KiB 分块。

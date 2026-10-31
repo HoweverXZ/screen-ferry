@@ -16,6 +16,16 @@ pub enum Error {
     NoDisplays(&'static str),
     #[error("对方违反协议：{0}")]
     Protocol(&'static str),
+    #[error(transparent)]
+    Store(#[from] ferry_store::Error),
+    #[error(transparent)]
+    Trust(#[from] ferry_trust::Error),
+    #[error("配对被拒绝")]
+    PairingRejected,
+    #[error("配对失败：{0}")]
+    PairingFailed(&'static str),
+    #[error("数据连接的对方与输入连接不是同一台设备")]
+    PeerMismatch,
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

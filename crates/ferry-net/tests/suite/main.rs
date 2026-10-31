@@ -4,3 +4,4 @@
 
 mod framed;
 mod handshake;
+mod tls;

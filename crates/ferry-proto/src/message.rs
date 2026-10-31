@@ -5,7 +5,7 @@ use ferry_types::{Display, InputEvent, KeyAction, KeyCode, MouseButton, Point};
 use crate::clipboard::{ClipboardOffer, ClipboardRequest};
 use crate::error::{DecodeError, EncodeError};
 use crate::handshake::{Bye, Channel, Hello, Reject, Welcome};
-use crate::limits::MAX_DISPLAYS;
+use crate::limits::{MAX_DISPLAYS, PAIRING_NONCE_LEN};
 use crate::screen::Enter;
 use crate::transfer::{Cancel, Chunk};
 use crate::wire::{Body, Reader, Writer};
@@ -26,6 +26,21 @@ pub enum Message {
         nonce: u64,
     },
 
+    // ── 配对连接 ──────────────────────────
+    /// 接受方对自己配对随机数的承诺：`SHA-256(随机数)`。先承诺、后公开，
+    /// 中间人就无法看到发起方的随机数后再挑选自己的随机数去凑配对码。
+    PairCommit {
+        commitment: [u8; PAIRING_NONCE_LEN],
+    },
+    /// 配对随机数。发起方收到承诺后先发，接受方收到后再公开自己的。
+    PairNonce {
+        nonce: [u8; PAIRING_NONCE_LEN],
+    },
+    /// 本机用户是否确认了配对码。双方都确认才算配对成功。
+    PairResult {
+        accepted: bool,
+    },
+
     // ── 输入连接 ──────────────────────────
     /// 发送方的显示器布局。连接建立和布局变化时发送。
     Displays(Vec<Display>),
@@ -43,7 +58,7 @@ pub enum Message {
     Cancel(Cancel),
 }
 
-/// 消息类型号。高字节是类别：0x00 握手与心跳，0x01 输入，0x02 剪贴板，0x03 传输。
+/// 消息类型号。高字节是类别：0x00 握手、心跳与配对，0x01 输入，0x02 剪贴板，0x03 传输。
 mod ty {
     pub(super) const HELLO: u16 = 0x0001;
     pub(super) const WELCOME: u16 = 0x0002;
@@ -51,6 +66,9 @@ mod ty {
     pub(super) const BYE: u16 = 0x0004;
     pub(super) const PING: u16 = 0x0005;
     pub(super) const PONG: u16 = 0x0006;
+    pub(super) const PAIR_COMMIT: u16 = 0x0007;
+    pub(super) const PAIR_NONCE: u16 = 0x0008;
+    pub(super) const PAIR_RESULT: u16 = 0x0009;
 
     pub(super) const DISPLAYS: u16 = 0x0100;
     pub(super) const ENTER: u16 = 0x0101;
@@ -70,8 +88,9 @@ mod ty {
 
 /// 类型号为 `ty` 的消息能否出现在 `channel` 上。未知类型返回 `None`。
 pub(crate) fn allowed(ty: u16, channel: Channel) -> Option<bool> {
-    let input = match ty {
+    let home = match ty {
         ty::HELLO | ty::WELCOME | ty::REJECT | ty::BYE | ty::PING | ty::PONG => return Some(true),
+        ty::PAIR_COMMIT | ty::PAIR_NONCE | ty::PAIR_RESULT => Channel::Pair,
         ty::DISPLAYS
         | ty::ENTER
         | ty::LEAVE
@@ -79,11 +98,11 @@ pub(crate) fn allowed(ty: u16, channel: Channel) -> Option<bool> {
         | ty::POINTER_MOTION
         | ty::POINTER_DELTA
         | ty::BUTTON
-        | ty::WHEEL => true,
-        ty::CLIPBOARD_OFFER | ty::CLIPBOARD_REQUEST | ty::CHUNK | ty::CANCEL => false,
+        | ty::WHEEL => Channel::Input,
+        ty::CLIPBOARD_OFFER | ty::CLIPBOARD_REQUEST | ty::CHUNK | ty::CANCEL => Channel::Data,
         _ => return None,
     };
-    Some(input == (channel == Channel::Input))
+    Some(home == channel)
 }
 
 impl Message {
@@ -95,6 +114,9 @@ impl Message {
             Self::Bye(_) => ty::BYE,
             Self::Ping { .. } => ty::PING,
             Self::Pong { .. } => ty::PONG,
+            Self::PairCommit { .. } => ty::PAIR_COMMIT,
+            Self::PairNonce { .. } => ty::PAIR_NONCE,
+            Self::PairResult { .. } => ty::PAIR_RESULT,
             Self::Displays(_) => ty::DISPLAYS,
             Self::Enter(_) => ty::ENTER,
             Self::Leave { .. } => ty::LEAVE,
@@ -122,6 +144,14 @@ impl Message {
                 w.u64(*nonce);
                 Ok(())
             }
+            Self::PairCommit { commitment: bytes } | Self::PairNonce { nonce: bytes } => {
+                w.array(bytes);
+                Ok(())
+            }
+            Self::PairResult { accepted } => {
+                w.bool(*accepted);
+                Ok(())
+            }
             Self::Displays(displays) => w.list(displays, MAX_DISPLAYS, "显示器数量"),
             Self::Enter(m) => m.encode(w),
             Self::Leave { seq } => {
@@ -144,6 +174,13 @@ impl Message {
             ty::BYE => Self::Bye(Bye::decode(r)?),
             ty::PING => Self::Ping { nonce: r.u64()? },
             ty::PONG => Self::Pong { nonce: r.u64()? },
+            ty::PAIR_COMMIT => Self::PairCommit {
+                commitment: r.array()?,
+            },
+            ty::PAIR_NONCE => Self::PairNonce { nonce: r.array()? },
+            ty::PAIR_RESULT => Self::PairResult {
+                accepted: r.bool()?,
+            },
             ty::DISPLAYS => Self::Displays(r.list(MAX_DISPLAYS, "显示器数量")?),
             ty::ENTER => Self::Enter(Enter::decode(r)?),
             ty::LEAVE => Self::Leave { seq: r.u32()? },

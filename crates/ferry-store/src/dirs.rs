@@ -1,0 +1,36 @@
+//! 运行时数据目录的位置，见 AGENTS.md 第 10 节。
+
+use std::env;
+use std::path::PathBuf;
+
+use crate::error::{Error, Result};
+
+const APP_DIR: &str = "ScreenFerry";
+
+/// 本机默认的数据目录：
+///
+/// - macOS：`~/Library/Application Support/ScreenFerry/`
+/// - Windows：`%APPDATA%\ScreenFerry\`
+///
+/// 这两处都只有当前用户能访问，身份私钥直接放在其中。
+pub fn default_data_dir() -> Result<PathBuf> {
+    // 按运行时的系统选择；平台差异只有这一处，不值得为它引入条件编译。
+    match env::consts::OS {
+        "windows" => Ok(var_dir("APPDATA")?.join(APP_DIR)),
+        "macos" => Ok(var_dir("HOME")?
+            .join("Library")
+            .join("Application Support")
+            .join(APP_DIR)),
+        _ => match var_dir("XDG_DATA_HOME") {
+            Ok(dir) => Ok(dir.join("screenferry")),
+            Err(_) => Ok(var_dir("HOME")?.join(".local/share/screenferry")),
+        },
+    }
+}
+
+fn var_dir(name: &'static str) -> Result<PathBuf> {
+    env::var_os(name)
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .ok_or(Error::NoDataDir(name))
+}

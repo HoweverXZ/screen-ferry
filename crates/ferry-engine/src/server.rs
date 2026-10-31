@@ -3,15 +3,21 @@
 //! 任何原因结束会话（对方断开、心跳超时、出错）时，都会立即把控制权交还本机。
 //! 光标在对方屏幕时，按 Ctrl + Option（Alt）+ Esc 可以强制回到本机。
 //!
-//! 客户端握手后会用拿到的会话号再连一条数据连接，用来同步剪贴板。
+//! 所有连接都走 TLS 1.3。只有配对过的设备能建立会话；陌生设备会先发起配对，
+//! 由两边的用户核对配对码。客户端握手后会用拿到的会话号再连一条数据连接，
+//! 用来同步剪贴板。
 
 use std::convert::Infallible;
 use std::sync::{Arc, Mutex};
 
 use ferry_core::{EdgeSwitch, KeyRemap, Pressed, Side, Transition, bounds};
-use ferry_net::Framed;
+use ferry_net::{Framed, ServerStream, Tls};
 use ferry_platform::{CaptureEvent, Clipboard, Displays, InputCapture};
-use ferry_proto::{Bye, ByeReason, Capabilities, Channel, Enter, Message, RejectReason};
+use ferry_proto::{
+    Bye, ByeReason, Capabilities, Channel, Enter, Hello, Message, RejectReason, Welcome,
+};
+use ferry_store::Store;
+use ferry_trust::{Fingerprint, Peer};
 use ferry_types::{Display, InputEvent, KeyAction, KeyCode, Point};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::{self, UnboundedReceiver};
@@ -19,10 +25,11 @@ use tokio::sync::watch;
 use tokio::time::{MissedTickBehavior, interval, timeout};
 use tracing::{debug, info, warn};
 
-use crate::clipboard::{self, ClipboardTask, SharedClipboard};
+use crate::clipboard::{self, ClipboardTask, SharedClipboard, Start};
 use crate::error::{Error, Result};
 use crate::heartbeat::{self, Heartbeat};
 use crate::link::{HANDSHAKE_TIMEOUT, capabilities, primary_scale, send};
+use crate::pairing::{self, ConfirmPairing, Outcome};
 
 pub struct ServerConfig {
     /// 客户端的屏幕位于本机的哪一侧。
@@ -33,25 +40,34 @@ pub struct ServerConfig {
     pub remap: KeyRemap,
     /// 是否同步剪贴板。
     pub clipboard: bool,
+    /// 数据目录：本机身份和已信任的设备。
+    pub store: Store,
 }
 
 /// 运行服务端：在 `listener` 上一次服务一个客户端，断开后继续等待下一个。
 ///
-/// 只有启动失败（例如捕获权限不足）时才返回错误。
-pub async fn serve<C, D, K>(
+/// 陌生设备发起配对时，用 `confirm` 请本机用户核对配对码。
+/// 只有启动失败（例如捕获权限不足、数据目录不可用）时才返回错误。
+pub async fn serve<C, D, K, P>(
     listener: TcpListener,
     config: ServerConfig,
     capture: C,
     displays: D,
     clipboard: K,
+    confirm: P,
 ) -> Result<Infallible>
 where
     C: InputCapture,
     D: Displays,
     K: Clipboard,
+    P: ConfirmPairing,
 {
-    let mut server = Server::start(config, capture, displays, clipboard)?;
-    info!(addr = %listener.local_addr()?, "等待客户端连接");
+    let mut server = Server::start(config, capture, displays, clipboard, confirm)?;
+    info!(
+        addr = %listener.local_addr()?,
+        fingerprint = %server.fingerprint,
+        "等待客户端连接",
+    );
 
     let mut session = 0u64;
     loop {
@@ -69,19 +85,30 @@ where
         };
 
         session += 1;
-        info!(%peer, "客户端已连接");
-        let result = server.session(stream, session, &listener).await;
+        let result = server.connection(stream, session, &listener).await;
         server.return_control();
         match result {
-            Ok(()) => info!(%peer, "客户端已断开"),
+            Ok(Ended::Session) => info!(%peer, "客户端已断开"),
+            Ok(Ended::Other) => {}
             Err(e) => warn!(%peer, "连接中断：{e}"),
         }
     }
 }
 
-struct Server<C, D, K> {
+/// 一条新连接是怎么结束的。
+enum Ended {
+    /// 建立过会话。
+    Session,
+    /// 配对或被拒绝，没有建立会话。
+    Other,
+}
+
+struct Server<C, D, K, P> {
     config: ServerConfig,
     capabilities: Capabilities,
+    tls: Tls,
+    fingerprint: Fingerprint,
+    confirm: P,
     capture: C,
     displays: D,
     clipboard: SharedClipboard<K>,
@@ -94,14 +121,31 @@ struct Server<C, D, K> {
     pressed: Pressed,
 }
 
-impl<C: InputCapture, D: Displays, K: Clipboard> Server<C, D, K> {
-    fn start(config: ServerConfig, mut capture: C, displays: D, clipboard: K) -> Result<Self> {
+impl<C, D, K, P> Server<C, D, K, P>
+where
+    C: InputCapture,
+    D: Displays,
+    K: Clipboard,
+    P: ConfirmPairing,
+{
+    fn start(
+        config: ServerConfig,
+        mut capture: C,
+        displays: D,
+        clipboard: K,
+        confirm: P,
+    ) -> Result<Self> {
+        let identity = config.store.identity(&config.name)?;
+        let tls = Tls::new(&identity)?;
         let (tx, events) = mpsc::unbounded_channel();
         capture.start(Box::new(move |event| {
             let _ = tx.send(event);
         }))?;
         Ok(Self {
             capabilities: capabilities(config.clipboard),
+            tls,
+            fingerprint: identity.fingerprint(),
+            confirm,
             config,
             capture,
             displays,
@@ -113,19 +157,82 @@ impl<C: InputCapture, D: Displays, K: Clipboard> Server<C, D, K> {
         })
     }
 
-    async fn session(&mut self, stream: TcpStream, id: u64, listener: &TcpListener) -> Result<()> {
-        let mut framed = ferry_net::wrap(stream, Channel::Input)?;
+    /// 处理一条新连接：TLS 握手，然后按对方声明的连接类型配对或开始会话。
+    async fn connection(
+        &mut self,
+        stream: TcpStream,
+        id: u64,
+        listener: &TcpListener,
+    ) -> Result<Ended> {
+        let (mut framed, peer) = timeout(HANDSHAKE_TIMEOUT, self.tls.accept(stream))
+            .await
+            .map_err(|_| Error::Timeout("TLS 握手"))??;
+        // 每次都从磁盘读：用户手动删掉某台设备后立即生效。
+        let peers = self.config.store.peers()?;
         let handshake =
             ferry_net::accept(&mut framed, self.capabilities, &self.config.name, |hello| {
                 match hello.channel {
-                    Channel::Input => Ok(id),
+                    Channel::Input if peers.contains(&peer) => Ok(id),
+                    Channel::Input => Err(RejectReason::NOT_PAIRED),
+                    Channel::Pair => Ok(id),
                     // 数据连接只能在输入连接之后、带着它的会话号来。
                     Channel::Data => Err(RejectReason::UNKNOWN_SESSION),
                 }
             });
-        let (hello, welcome) = timeout(HANDSHAKE_TIMEOUT, handshake)
-            .await
-            .map_err(|_| Error::Timeout("握手"))??;
+        let (hello, welcome) = match timeout(HANDSHAKE_TIMEOUT, handshake).await {
+            Err(_) => return Err(Error::Timeout("握手")),
+            Ok(Err(ferry_net::Error::Rejected(r))) if r.reason == RejectReason::NOT_PAIRED => {
+                info!(fingerprint = %peer, "一台未配对的设备想要连接，已请它先配对");
+                return Ok(Ended::Other);
+            }
+            Ok(result) => result?,
+        };
+
+        if hello.channel == Channel::Pair {
+            self.pair(&mut framed, peer, &hello.name).await?;
+            return Ok(Ended::Other);
+        }
+        info!(peer = %hello.name, fingerprint = %peer, "客户端已连接");
+        self.session(framed, peer, hello, welcome, listener).await?;
+        Ok(Ended::Session)
+    }
+
+    async fn pair(
+        &mut self,
+        framed: &mut Framed<ServerStream>,
+        peer: Fingerprint,
+        name: &str,
+    ) -> Result<()> {
+        info!(peer = name, fingerprint = %peer, "收到配对请求");
+        let outcome =
+            pairing::as_acceptor(framed, self.fingerprint, peer, name, &self.confirm).await?;
+        match outcome {
+            Outcome::Paired => {
+                let mut peers = self.config.store.peers()?;
+                peers.add(Peer {
+                    name: name.to_owned(),
+                    fingerprint: peer,
+                });
+                self.config.store.save_peers(&peers)?;
+                info!(peer = name, "配对成功，已记住这台设备");
+            }
+            Outcome::RejectedHere => info!(peer = name, "已拒绝配对"),
+            Outcome::RejectedByPeer => info!(peer = name, "对方拒绝了配对"),
+        }
+        Ok(())
+    }
+
+    async fn session(
+        &mut self,
+        mut framed: Framed<ServerStream>,
+        peer: Fingerprint,
+        hello: Hello,
+        welcome: Welcome,
+        listener: &TcpListener,
+    ) -> Result<()> {
+        // 等待连接（尤其是等用户确认配对）期间积压的本机输入与会话无关。
+        while self.events.try_recv().is_ok() {}
+        let id = welcome.session;
 
         let local = self.displays.displays()?;
         send(&mut framed, &Message::Displays(local.clone())).await?;
@@ -164,12 +271,14 @@ impl<C: InputCapture, D: Displays, K: Clipboard> Server<C, D, K> {
         loop {
             tokio::select! {
                 accepted = listener.accept() => match accepted {
-                    Ok((stream, peer)) => self.accept_data(stream, id, clipboard, data_tx.clone(), peer),
+                    Ok((stream, addr)) => self.accept_data(stream, id, peer, clipboard, data_tx.clone(), addr),
                     Err(e) => warn!("接受连接失败：{e}"),
                 },
                 Some(data) = data_rx.recv() => {
                     info!("数据连接已建立，开始同步剪贴板");
-                    _clipboard_task = Some(clipboard::spawn(data, self.clipboard.clone(), self.active.subscribe()));
+                    let active = self.active.subscribe();
+                    let task = clipboard::spawn(data, self.clipboard.clone(), active, Start::Announce);
+                    _clipboard_task = Some(task);
                 }
                 event = self.events.recv() => {
                     let Some(event) = event else { return Ok(()) };
@@ -199,24 +308,28 @@ impl<C: InputCapture, D: Displays, K: Clipboard> Server<C, D, K> {
     }
 
     /// 会话期间到来的连接只能是本会话的数据连接。握手放到后台，不耽误键鼠转发。
+    ///
+    /// 数据连接必须来自同一台设备（证书指纹相同），并带着本会话的会话号。
     fn accept_data(
         &self,
         stream: TcpStream,
         id: u64,
+        peer: Fingerprint,
         clipboard: bool,
-        established: mpsc::Sender<Framed<TcpStream>>,
-        peer: std::net::SocketAddr,
+        established: mpsc::Sender<Framed<ServerStream>>,
+        addr: std::net::SocketAddr,
     ) {
         let capabilities = self.capabilities;
         let name = self.config.name.clone();
+        let tls = self.tls.clone();
         tokio::spawn(async move {
             let handshake = async {
-                let mut framed = ferry_net::wrap(stream, Channel::Data)?;
+                let (mut framed, from) = tls.accept(stream).await?;
                 ferry_net::accept(&mut framed, capabilities, &name, |hello| {
                     match hello.channel {
-                        Channel::Data if hello.session == id && clipboard => Ok(id),
+                        Channel::Data if hello.session == id && from == peer && clipboard => Ok(id),
                         Channel::Data => Err(RejectReason::UNKNOWN_SESSION),
-                        Channel::Input => Err(RejectReason::BUSY),
+                        Channel::Input | Channel::Pair => Err(RejectReason::BUSY),
                     }
                 })
                 .await?;
@@ -226,8 +339,8 @@ impl<C: InputCapture, D: Displays, K: Clipboard> Server<C, D, K> {
                 Ok(Ok(framed)) => {
                     let _ = established.send(framed).await;
                 }
-                Ok(Err(e)) => warn!(%peer, "拒绝了一个连接：{e}"),
-                Err(_) => warn!(%peer, "新连接握手超时"),
+                Ok(Err(e)) => warn!(%addr, "拒绝了一个连接：{e}"),
+                Err(_) => warn!(%addr, "新连接握手超时"),
             }
         });
     }
@@ -235,7 +348,7 @@ impl<C: InputCapture, D: Displays, K: Clipboard> Server<C, D, K> {
     async fn on_capture(
         &mut self,
         event: CaptureEvent,
-        framed: &mut Framed<TcpStream>,
+        framed: &mut Framed<ServerStream>,
     ) -> Result<()> {
         let Some(switch) = self.switch.as_mut() else {
             return Ok(());
@@ -363,7 +476,7 @@ fn escape_hotkey(pressed: &Pressed) -> bool {
     held(KeyCode::LEFT_CTRL, KeyCode::RIGHT_CTRL) && held(KeyCode::LEFT_ALT, KeyCode::RIGHT_ALT)
 }
 
-async fn expect_displays(framed: &mut Framed<TcpStream>) -> Result<Vec<Display>> {
+async fn expect_displays(framed: &mut Framed<ServerStream>) -> Result<Vec<Display>> {
     match framed.recv().await? {
         Some(Message::Displays(displays)) => Ok(displays),
         Some(_) => Err(Error::Protocol("握手后应先发送显示器信息")),

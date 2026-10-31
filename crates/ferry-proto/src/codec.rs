@@ -30,7 +30,7 @@ impl Codec {
     /// 本连接上单帧消息体的最大字节数。
     pub const fn max_payload(self) -> usize {
         match self.channel {
-            Channel::Input => MAX_INPUT_PAYLOAD,
+            Channel::Input | Channel::Pair => MAX_INPUT_PAYLOAD,
             Channel::Data => MAX_DATA_PAYLOAD,
         }
     }

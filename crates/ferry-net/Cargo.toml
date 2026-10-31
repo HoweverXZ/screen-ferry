@@ -13,11 +13,13 @@ test = false
 ferry-proto.workspace = true
 ferry-trust.workspace = true
 ferry-types.workspace = true
+rustls.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["io-util", "net"] }
+tokio-rustls.workspace = true
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["macros", "rt", "time"] }
 
 [lints]
 workspace = true

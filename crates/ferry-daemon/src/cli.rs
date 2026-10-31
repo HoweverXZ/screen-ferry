@@ -1,29 +1,40 @@
 //! 命令行参数。
 
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
+use std::path::PathBuf;
 
 use ferry_core::Side;
 use ferry_engine::DEFAULT_PORT;
 
 pub(crate) const USAGE: &str = "\
 用法：
-  screenferry serve   [--listen 地址] [--side 方向] [--name 设备名] [--no-cmd-ctrl-swap] [--no-clipboard] [-v]
-  screenferry connect <服务端地址> [--name 设备名] [--no-clipboard] [-v]
+  screenferry serve   [--listen 地址] [--side 方向] [--no-cmd-ctrl-swap] [通用选项]
+  screenferry connect <服务端地址> [通用选项]
+  screenferry peers   [--data-dir 目录]
+  screenferry forget  <设备名或指纹> [--data-dir 目录]
 
 命令：
   serve      在拥有键鼠的电脑上运行，等待另一台连接
   connect    在被控制的电脑上运行，连接到运行 serve 的那台
+  peers      列出已配对的设备
+  forget     删除一台已配对的设备，下次连接需要重新配对
 
-选项：
+serve 的选项：
   --listen   监听地址，默认 0.0.0.0:24810
   --side     对方屏幕在本机的哪一侧：right、left、top、bottom，默认 right
-  --name     显示给对方的设备名，默认取计算机名
   --no-cmd-ctrl-swap
              不互换 Command 与 Ctrl。默认互换，在 Windows 上 ⌘C、⌘V 即复制粘贴
+
+通用选项：
+  --name     显示给对方的设备名，默认取计算机名
   --no-clipboard
              不同步剪贴板。任意一端加上即关闭
+  --data-dir 数据目录（本机身份与已配对设备），默认为系统的应用数据目录
   -v         输出调试日志
   -h         显示本帮助
+
+连接全程 TLS 1.3 加密。两台电脑第一次连接时，两边终端都会显示一个 6 位配对码，
+核对一致后分别输入 y 确认。
 
 光标在对方屏幕时，按 Ctrl + Option + Esc 可以强制回到本机。";
 
@@ -36,6 +47,7 @@ pub(crate) struct Options {
     pub(crate) mode: Mode,
     pub(crate) name: String,
     pub(crate) clipboard: bool,
+    pub(crate) data_dir: Option<PathBuf>,
     pub(crate) verbose: bool,
 }
 
@@ -48,22 +60,28 @@ pub(crate) enum Mode {
     Connect {
         server: SocketAddr,
     },
+    Peers,
+    Forget {
+        target: String,
+    },
 }
 
 pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, String> {
     let mut args = args.into_iter();
     let command = match args.next().as_deref() {
         None | Some("-h" | "--help" | "help") => return Ok(Parsed::Help),
-        Some(command @ ("serve" | "connect")) => command.to_owned(),
+        Some(command @ ("serve" | "connect" | "peers" | "forget")) => command.to_owned(),
         Some(other) => return Err(format!("未知命令：{other}")),
     };
+    let runs = matches!(command.as_str(), "serve" | "connect");
 
     let mut listen = SocketAddr::from(([0, 0, 0, 0], DEFAULT_PORT));
     let mut side = Side::Right;
     let mut swap_cmd_ctrl = true;
-    let mut server = None;
-    let mut name = None;
     let mut clipboard = true;
+    let mut positional = None;
+    let mut name = None;
+    let mut data_dir = None;
     let mut verbose = false;
 
     while let Some(arg) = args.next() {
@@ -71,13 +89,18 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, St
         match arg.as_str() {
             "-h" | "--help" => return Ok(Parsed::Help),
             "-v" | "--verbose" => verbose = true,
-            "--name" => name = Some(value("--name")?),
-            "--no-clipboard" => clipboard = false,
+            "--data-dir" => data_dir = Some(PathBuf::from(value("--data-dir")?)),
+            "--name" if runs => name = Some(value("--name")?),
+            "--no-clipboard" if runs => clipboard = false,
             "--listen" if command == "serve" => listen = resolve(&value("--listen")?)?,
             "--side" if command == "serve" => side = parse_side(&value("--side")?)?,
             "--no-cmd-ctrl-swap" if command == "serve" => swap_cmd_ctrl = false,
-            other if command == "connect" && server.is_none() && !other.starts_with('-') => {
-                server = Some(resolve(other)?);
+            other
+                if matches!(command.as_str(), "connect" | "forget")
+                    && positional.is_none()
+                    && !other.starts_with('-') =>
+            {
+                positional = Some(other.to_owned());
             }
             other => return Err(format!("无法识别的参数：{other}")),
         }
@@ -89,14 +112,19 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, St
             side,
             swap_cmd_ctrl,
         },
-        _ => Mode::Connect {
-            server: server.ok_or("connect 需要服务端地址，例如 192.168.1.5")?,
+        "connect" => Mode::Connect {
+            server: resolve(&positional.ok_or("connect 需要服务端地址，例如 192.168.1.5")?)?,
+        },
+        "peers" => Mode::Peers,
+        _ => Mode::Forget {
+            target: positional.ok_or("forget 需要设备名或指纹，可先用 peers 查看")?,
         },
     };
     Ok(Parsed::Run(Options {
         mode,
         name: name.unwrap_or_else(default_name),
         clipboard,
+        data_dir,
         verbose,
     }))
 }

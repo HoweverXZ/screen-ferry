@@ -52,6 +52,14 @@ pub fn samples() -> Vec<(Channel, Message)> {
         ),
         (Channel::Data, Message::Pong { nonce: 7 }),
         (
+            Channel::Pair,
+            Message::PairCommit {
+                commitment: [0xC0; 32],
+            },
+        ),
+        (Channel::Pair, Message::PairNonce { nonce: [7; 32] }),
+        (Channel::Pair, Message::PairResult { accepted: true }),
+        (
             Channel::Input,
             Message::Displays(vec![
                 Display {

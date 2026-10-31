@@ -6,7 +6,7 @@ use ferry_proto::{Channel, Codec};
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
-    for channel in [Channel::Input, Channel::Data] {
+    for channel in [Channel::Input, Channel::Data, Channel::Pair] {
         let codec = Codec::new(channel);
         let mut rest = data;
         while let Ok(Some((message, used))) = codec.decode(rest) {

@@ -26,6 +26,9 @@ where
 ///
 /// `session` 看过对方的 `Hello` 后给出本连接所属的会话号，或者拒绝的原因，
 /// 例如数据连接带来的会话号不存在。版本不兼容时不会调用它。
+///
+/// 接受方事先不知道连接类型，`framed` 用任意类型创建即可：
+/// 收到 `Hello` 后会切换到对方声明的类型。
 pub async fn accept<S>(
     framed: &mut Framed<S>,
     capabilities: Capabilities,
@@ -40,6 +43,7 @@ where
         Some(_) => return Err(Error::UnexpectedMessage { expected: "Hello" }),
         None => return Err(Error::Closed),
     };
+    framed.set_channel(hello.channel);
     let reply = hello
         .accept(capabilities, 0, name)
         .and_then(|welcome| match session(&hello) {

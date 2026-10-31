@@ -21,6 +21,8 @@ pub enum Channel {
     Input,
     /// 剪贴板与文件：大而慢，分块传输。
     Data,
+    /// 配对：首次连接时交换配对码所需的随机数，完成后即关闭。
+    Pair,
 }
 
 impl fmt::Display for Channel {
@@ -28,6 +30,7 @@ impl fmt::Display for Channel {
         f.write_str(match self {
             Self::Input => "输入",
             Self::Data => "数据",
+            Self::Pair => "配对",
         })
     }
 }
@@ -135,6 +138,8 @@ impl RejectReason {
     pub const UNKNOWN_SESSION: Self = Self(2);
     /// 已被其他设备控制，暂不接受新连接。
     pub const BUSY: Self = Self(3);
+    /// 对方证书不在信任列表中，需要先配对。
+    pub const NOT_PAIRED: Self = Self(4);
 }
 
 /// 主动关闭连接前的告别。
@@ -163,6 +168,7 @@ impl Body for Channel {
         w.u8(match self {
             Self::Input => 1,
             Self::Data => 2,
+            Self::Pair => 3,
         });
         Ok(())
     }
@@ -171,6 +177,7 @@ impl Body for Channel {
         match r.u8()? {
             1 => Ok(Self::Input),
             2 => Ok(Self::Data),
+            3 => Ok(Self::Pair),
             _ => Err(DecodeError::InvalidValue("连接类型")),
         }
     }

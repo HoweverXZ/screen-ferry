@@ -7,9 +7,13 @@ use std::process::ExitCode;
 
 use ferry_core::KeyRemap;
 use ferry_engine::{ClientConfig, ServerConfig};
+use ferry_store::Store;
+use ferry_trust::Fingerprint;
 use tracing::{error, info};
 
 use crate::cli::{Mode, Options};
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use crate::pairing::TerminalConfirm;
 
 type AppResult = Result<Infallible, Box<dyn std::error::Error>>;
 
@@ -29,6 +33,23 @@ pub(crate) fn init_logging(verbose: bool) {
 }
 
 pub(crate) fn run(options: Options) -> ExitCode {
+    let store = match &options.data_dir {
+        Some(dir) => Store::open(dir),
+        None => Store::open_default(),
+    };
+    let store = match store {
+        Ok(store) => store,
+        Err(e) => {
+            error!("{e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match options.mode {
+        Mode::Peers => return report(list_peers(&store)),
+        Mode::Forget { target } => return report(forget(&store, &target)),
+        Mode::Serve { .. } | Mode::Connect { .. } => {}
+    }
+
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -57,6 +78,7 @@ pub(crate) fn run(options: Options) -> ExitCode {
                         name: options.name,
                         remap,
                         clipboard: options.clipboard,
+                        store,
                     };
                     serve(listen, config).await
                 }
@@ -65,9 +87,11 @@ pub(crate) fn run(options: Options) -> ExitCode {
                         server,
                         name: options.name,
                         clipboard: options.clipboard,
+                        store,
                     };
                     connect(config).await
                 }
+                Mode::Peers | Mode::Forget { .. } => unreachable!("已在上面处理"),
             }
         };
         // 收到 Ctrl+C 时让引擎正常析构：归还鼠标控制、松开按键，而不是被系统直接杀掉。
@@ -79,12 +103,53 @@ pub(crate) fn run(options: Options) -> ExitCode {
             }
         }
     });
+    report(result)
+}
+
+fn report(result: Result<(), Box<dyn std::error::Error>>) -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             error!("{e}");
             ExitCode::FAILURE
         }
+    }
+}
+
+fn list_peers(store: &Store) -> Result<(), Box<dyn std::error::Error>> {
+    let peers = store.peers()?;
+    println!("数据目录：{}", store.root().display());
+    if peers.is_empty() {
+        println!("还没有配对过任何设备。");
+    }
+    for peer in peers.iter() {
+        println!("  {}  {}", peer.fingerprint, peer.name);
+    }
+    Ok(())
+}
+
+/// 按设备名，或者指纹（完整十六进制，或 `peers` 显示的短形式及其前缀）删除一台设备。
+fn forget(store: &Store, target: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let mut peers = store.peers()?;
+    let wanted = target.to_uppercase();
+    let matches: Vec<Fingerprint> = peers
+        .iter()
+        .filter(|p| {
+            p.name == target
+                || p.fingerprint.to_hex().to_uppercase() == wanted
+                || (wanted.len() >= 4 && p.fingerprint.short().starts_with(&wanted))
+        })
+        .map(|p| p.fingerprint)
+        .collect();
+    match matches.as_slice() {
+        [] => Err(format!("没有找到 {target}，可先用 peers 查看").into()),
+        [fingerprint] => {
+            peers.remove(fingerprint);
+            store.save_peers(&peers)?;
+            println!("已删除 {fingerprint}，下次连接需要重新配对。");
+            Ok(())
+        }
+        _ => Err(format!("{target} 对应多台设备，请改用更长的指纹").into()),
     }
 }
 
@@ -95,8 +160,16 @@ async fn serve(listen: SocketAddr, config: ServerConfig) -> AppResult {
 
     MacPermissions.check_input()?;
     let listener = tokio::net::TcpListener::bind(listen).await?;
-    let capture = MacCapture::new();
-    Ok(ferry_engine::serve(listener, config, capture, MacDisplays, MacClipboard::new()).await?)
+    let (capture, clipboard) = (MacCapture::new(), MacClipboard::new());
+    let engine = ferry_engine::serve(
+        listener,
+        config,
+        capture,
+        MacDisplays,
+        clipboard,
+        TerminalConfirm,
+    );
+    Ok(engine.await?)
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -111,7 +184,14 @@ async fn connect(config: ClientConfig) -> AppResult {
 
     WinPermissions.check_input()?;
     let (inject, displays) = (WinInject::new(), WinDisplays::new());
-    Ok(ferry_engine::connect(config, inject, displays, WinClipboard::new()).await?)
+    let engine = ferry_engine::connect(
+        config,
+        inject,
+        displays,
+        WinClipboard::new(),
+        TerminalConfirm,
+    );
+    Ok(engine.await?)
 }
 
 #[cfg(not(target_os = "windows"))]

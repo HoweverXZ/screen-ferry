@@ -30,6 +30,16 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Framed<S> {
         &self.io
     }
 
+    /// 本连接的类型，决定允许哪些消息、单帧多大。
+    pub fn channel(&self) -> Channel {
+        self.codec.channel()
+    }
+
+    /// 接受方收到 `Hello` 后才知道连接类型，由握手流程切换过去。
+    pub(crate) fn set_channel(&mut self, channel: Channel) {
+        self.codec = Codec::new(channel);
+    }
+
     /// 发送一条消息。
     pub async fn send(&mut self, message: &Message) -> Result<()> {
         self.write_buf.clear();

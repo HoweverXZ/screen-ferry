@@ -49,6 +49,11 @@ impl<'a> Writer<'a> {
         self.u8(u8::from(v));
     }
 
+    /// 定长字节串：长度由消息格式规定，不写长度前缀。
+    pub(crate) fn array<const N: usize>(&mut self, v: &[u8; N]) {
+        self.buf.extend_from_slice(v);
+    }
+
     pub(crate) fn str(
         &mut self,
         v: &str,
@@ -107,7 +112,7 @@ impl<'a> Reader<'a> {
         Ok(head)
     }
 
-    fn array<const N: usize>(&mut self) -> Result<[u8; N], DecodeError> {
+    pub(crate) fn array<const N: usize>(&mut self) -> Result<[u8; N], DecodeError> {
         let mut out = [0; N];
         out.copy_from_slice(self.take(N)?);
         Ok(out)

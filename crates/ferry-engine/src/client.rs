@@ -2,6 +2,9 @@
 //!
 //! 光标离开、连接断开或心跳超时时，都会立即松开所有按着的键，杜绝卡键。
 //!
+//! 所有连接都走 TLS 1.3。服务端的证书不在信任列表里（第一次连接，或对方换了身份）时，
+//! 先发起配对，由两边的用户核对配对码，确认后才建立会话。
+//!
 //! 双方都支持剪贴板时，握手后再连一条数据连接同步剪贴板；它失败不影响键鼠。
 
 use std::convert::Infallible;
@@ -10,18 +13,20 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use ferry_core::Pressed;
-use ferry_net::Framed;
+use ferry_net::{ClientStream, Framed, Tls};
 use ferry_platform::{Clipboard, Displays, Error as PlatformError, InputInject};
-use ferry_proto::{Capabilities, Channel, Hello, Message};
+use ferry_proto::{Capabilities, Channel, Hello, Message, RejectReason};
+use ferry_store::Store;
+use ferry_trust::{Fingerprint, Peer};
 use ferry_types::{InputEvent, LockKeys, Point};
-use tokio::net::TcpStream;
 use tokio::sync::watch;
 use tokio::time::{sleep, timeout};
 use tracing::{debug, info, warn};
 
-use crate::clipboard::{self, ClipboardTask, SharedClipboard};
+use crate::clipboard::{self, ClipboardTask, SharedClipboard, Start};
 use crate::error::{Error, Result};
 use crate::link::{CONNECT_TIMEOUT, HANDSHAKE_TIMEOUT, capabilities, send};
+use crate::pairing::{self, ConfirmPairing, Outcome};
 
 /// 两次连接尝试之间的间隔。
 const RETRY_DELAY: Duration = Duration::from_secs(1);
@@ -34,24 +39,35 @@ pub struct ClientConfig {
     pub name: String,
     /// 是否同步剪贴板。
     pub clipboard: bool,
+    /// 数据目录：本机身份和已信任的设备。
+    pub store: Store,
 }
 
 /// 运行客户端：连接服务端，断开后自动重连。
 ///
-/// 只有启动失败（例如读不到本机显示器）时才返回错误。
-pub async fn connect<I, D, K>(
+/// 需要配对时用 `confirm` 请本机用户核对配对码。
+/// 启动失败（例如读不到本机显示器）或任何一方拒绝配对时返回错误。
+pub async fn connect<I, D, K, P>(
     config: ClientConfig,
     inject: I,
     displays: D,
     clipboard: K,
+    confirm: P,
 ) -> Result<Infallible>
 where
     I: InputInject,
     D: Displays,
     K: Clipboard,
+    P: ConfirmPairing,
 {
     displays.displays()?;
+    let identity = config.store.identity(&config.name)?;
+    info!(fingerprint = %identity.fingerprint(), "本机身份");
     let mut client = Client {
+        tls: Tls::new(&identity)?,
+        fingerprint: identity.fingerprint(),
+        confirm,
+        repair: false,
         inject,
         clipboard: Arc::new(Mutex::new(clipboard)),
         active: watch::Sender::new(false),
@@ -64,14 +80,27 @@ where
         client.release_all();
         client.active.send_replace(false);
         match result {
-            Ok(()) => info!("连接已结束"),
+            // 刚配对完，立即用新的信任关系重连。
+            Ok(Ended::Paired) => continue,
+            Ok(Ended::Session) => info!("连接已结束"),
+            Err(e @ Error::PairingRejected) => return Err(e),
             Err(e) => warn!("连接中断：{e}"),
         }
         sleep(RETRY_DELAY).await;
     }
 }
 
-struct Client<I, K> {
+enum Ended {
+    Session,
+    Paired,
+}
+
+struct Client<I, K, P> {
+    tls: Tls,
+    fingerprint: Fingerprint,
+    confirm: P,
+    /// 服务端说不认识本机：即使本机信任它，下次也要重新配对。
+    repair: bool,
     inject: I,
     clipboard: SharedClipboard<K>,
     /// 光标是否在本机，供剪贴板同步判断谁是活动端。
@@ -80,25 +109,39 @@ struct Client<I, K> {
     cursor: Point,
 }
 
-impl<I: InputInject, K: Clipboard> Client<I, K> {
-    async fn session<D: Displays>(&mut self, config: &ClientConfig, displays: &D) -> Result<()> {
-        let mut framed = timeout(
+impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
+    async fn session<D: Displays>(&mut self, config: &ClientConfig, displays: &D) -> Result<Ended> {
+        let (mut framed, server) = timeout(
             CONNECT_TIMEOUT,
-            ferry_net::connect(config.server, Channel::Input),
+            self.tls.connect(config.server, Channel::Input),
         )
         .await
         .map_err(|_| Error::Timeout("连接"))??;
+        if self.repair || !config.store.peers()?.contains(&server) {
+            drop(framed);
+            self.pair(config).await?;
+            self.repair = false;
+            return Ok(Ended::Paired);
+        }
+
         let caps = capabilities(config.clipboard);
         let hello = Hello::new(Channel::Input, caps, 0, config.name.clone());
-        let welcome = timeout(HANDSHAKE_TIMEOUT, ferry_net::initiate(&mut framed, hello))
-            .await
-            .map_err(|_| Error::Timeout("握手"))??;
+        let welcome =
+            match timeout(HANDSHAKE_TIMEOUT, ferry_net::initiate(&mut framed, hello)).await {
+                Err(_) => return Err(Error::Timeout("握手")),
+                Ok(Err(ferry_net::Error::Rejected(r))) if r.reason == RejectReason::NOT_PAIRED => {
+                    warn!("服务端不再信任本机（可能删除了配对记录），将重新配对");
+                    self.repair = true;
+                    return Ok(Ended::Paired);
+                }
+                Ok(result) => result?,
+            };
         send(&mut framed, &Message::Displays(displays.displays()?)).await?;
-        info!(server = %welcome.name, "已连接，等待光标进入");
+        info!(server = %welcome.name, fingerprint = %server, "已连接，等待光标进入");
 
         // 会话结束时随之丢弃，剪贴板同步也就停了。
         let _clipboard_task = if welcome.capabilities.contains(Capabilities::CLIPBOARD) {
-            match connect_data(config, caps, welcome.session).await {
+            match connect_data(&self.tls, config, caps, welcome.session, server).await {
                 Ok(data) => {
                     info!("数据连接已建立，开始同步剪贴板");
                     Some(self.sync_clipboard(data))
@@ -117,7 +160,7 @@ impl<I: InputInject, K: Clipboard> Client<I, K> {
                 .await
                 .map_err(|_| Error::HeartbeatTimeout)??;
             match message {
-                None | Some(Message::Bye(_)) => return Ok(()),
+                None | Some(Message::Bye(_)) => return Ok(Ended::Session),
                 Some(Message::Ping { nonce }) => {
                     send(&mut framed, &Message::Pong { nonce }).await?
                 }
@@ -142,8 +185,53 @@ impl<I: InputInject, K: Clipboard> Client<I, K> {
         }
     }
 
-    fn sync_clipboard(&self, data: Framed<TcpStream>) -> ClipboardTask {
-        clipboard::spawn(data, self.clipboard.clone(), self.active.subscribe())
+    /// 在单独的配对连接上与服务端核对配对码。任何一方拒绝都返回 [`Error::PairingRejected`]。
+    async fn pair(&mut self, config: &ClientConfig) -> Result<()> {
+        let (mut framed, server) = timeout(
+            CONNECT_TIMEOUT,
+            self.tls.connect(config.server, Channel::Pair),
+        )
+        .await
+        .map_err(|_| Error::Timeout("连接"))??;
+        let hello = Hello::new(Channel::Pair, Capabilities::empty(), 0, config.name.clone());
+        let welcome = timeout(HANDSHAKE_TIMEOUT, ferry_net::initiate(&mut framed, hello))
+            .await
+            .map_err(|_| Error::Timeout("握手"))??;
+        let name = welcome.name;
+        info!(server = %name, fingerprint = %server, "这台服务端尚未配对，开始配对");
+
+        let outcome =
+            pairing::as_initiator(&mut framed, self.fingerprint, server, &name, &self.confirm)
+                .await?;
+        match outcome {
+            Outcome::Paired => {
+                let mut peers = config.store.peers()?;
+                peers.add(Peer {
+                    name: name.clone(),
+                    fingerprint: server,
+                });
+                config.store.save_peers(&peers)?;
+                info!(server = %name, "配对成功，已记住这台设备");
+                Ok(())
+            }
+            Outcome::RejectedHere => {
+                info!("已拒绝配对");
+                Err(Error::PairingRejected)
+            }
+            Outcome::RejectedByPeer => {
+                info!(server = %name, "对方拒绝了配对");
+                Err(Error::PairingRejected)
+            }
+        }
+    }
+
+    fn sync_clipboard(&self, data: Framed<ClientStream>) -> ClipboardTask {
+        clipboard::spawn(
+            data,
+            self.clipboard.clone(),
+            self.active.subscribe(),
+            Start::Quiet,
+        )
     }
 
     fn apply(&mut self, event: InputEvent) {
@@ -181,14 +269,19 @@ impl<I: InputInject, K: Clipboard> Client<I, K> {
     }
 }
 
-/// 带着输入连接的会话号建立数据连接。
+/// 带着输入连接的会话号建立数据连接。对方必须与输入连接是同一台设备。
 async fn connect_data(
+    tls: &Tls,
     config: &ClientConfig,
     caps: Capabilities,
     session: u64,
-) -> Result<Framed<TcpStream>> {
+    server: Fingerprint,
+) -> Result<Framed<ClientStream>> {
     let handshake = async {
-        let mut framed = ferry_net::connect(config.server, Channel::Data).await?;
+        let (mut framed, peer) = tls.connect(config.server, Channel::Data).await?;
+        if peer != server {
+            return Err(Error::PeerMismatch);
+        }
         let hello = Hello::new(Channel::Data, caps, session, config.name.clone());
         ferry_net::initiate(&mut framed, hello).await?;
         Ok::<_, Error>(framed)

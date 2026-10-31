@@ -140,14 +140,15 @@ fn corrupted_frames_never_panic_and_decoding_is_canonical() {
 #[test]
 fn random_bytes_never_panic() {
     let mut rng = Rng::new(42);
-    for channel in [Channel::Input, Channel::Data] {
+    for channel in [Channel::Input, Channel::Data, Channel::Pair] {
         let codec = Codec::new(channel);
         for _ in 0..20_000 {
             let len = rng.below(64);
             let mut buf: Vec<u8> = (0..len).map(|_| rng.next_u64() as u8).collect();
             // 一半的样本给一个合法的类型号，让解码走得更深。
             if buf.len() >= HEADER_LEN && rng.below(2) == 0 {
-                let ty: u16 = [0x0001, 0x0005, 0x0101, 0x0122, 0x0200, 0x0300][rng.below(6)];
+                let ty: u16 =
+                    [0x0001, 0x0005, 0x0008, 0x0101, 0x0122, 0x0200, 0x0300][rng.below(7)];
                 buf[..2].copy_from_slice(&ty.to_le_bytes());
                 let body = (buf.len() - HEADER_LEN) as u32;
                 buf[2..HEADER_LEN].copy_from_slice(&body.to_le_bytes());
@@ -155,4 +156,22 @@ fn random_bytes_never_panic() {
             let _ = codec.decode(&buf);
         }
     }
+}
+
+#[test]
+fn pairing_messages_stay_on_the_pairing_channel() {
+    let nonce = Message::PairNonce { nonce: [1; 32] };
+    let mut buf = Vec::new();
+    for channel in [Channel::Input, Channel::Data] {
+        assert_eq!(
+            Codec::new(channel).encode(&nonce, &mut buf),
+            Err(EncodeError::WrongChannel(channel))
+        );
+    }
+    let frame = encode(Channel::Pair, &nonce);
+    assert_eq!(frame.len(), HEADER_LEN + 32, "随机数定长，不带长度前缀");
+    assert!(matches!(
+        Codec::new(Channel::Input).decode(&frame),
+        Err(DecodeError::WrongChannel { ty: 0x0008, .. })
+    ));
 }

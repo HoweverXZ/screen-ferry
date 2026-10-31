@@ -7,6 +7,7 @@
 //! - **拉取**：手上有对方未拉取的通告、且本机是活动端时，立即拉取并写入本机剪贴板。
 //!
 //! 所以复制多次只传最后一次；光标不过去，对方的剪贴板就不会被覆盖。
+//! 例外是刚连上时：服务端先通告一次当前内容，见 [`Start`]。
 //! 写入后记下剪贴板的变化计数，自己写入的内容不会再被当作新复制通告回去。
 
 use std::collections::HashMap;
@@ -47,11 +48,24 @@ impl Drop for ClipboardTask {
     }
 }
 
+/// 连上时谁先通告本机剪贴板。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Start {
+    /// 会话开始时光标总在服务端，它的剪贴板就是用户眼下的剪贴板，连上就通告。
+    Announce,
+    /// 客户端的旧内容只记下计数，免得一连上就覆盖服务端。
+    Quiet,
+}
+
 /// 在数据连接上启动剪贴板同步。`active` 表示光标是否在本机。
+///
+/// 数据连接比输入连接晚建立，期间光标可能已经切走，
+/// 所以连上时是否通告由 `start` 决定，而不看这一刻谁是活动端。
 pub(crate) fn spawn<S, C>(
     framed: Framed<S>,
     clipboard: SharedClipboard<C>,
     active: watch::Receiver<bool>,
+    start: Start,
 ) -> ClipboardTask
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -59,7 +73,7 @@ where
 {
     ClipboardTask(tokio::spawn(async move {
         let mut sync = ClipboardSync::new(framed, clipboard, active);
-        match sync.run().await {
+        match sync.run(start).await {
             Ok(()) => debug!("数据连接已关闭"),
             Err(e) => warn!("剪贴板同步中断：{e}"),
         }
@@ -112,12 +126,10 @@ where
         }
     }
 
-    async fn run(&mut self) -> Result<()> {
-        // 连上时，活动端的剪贴板就是用户眼下的剪贴板，通告出去；
-        // 非活动端的旧内容只记下计数，免得一连上就覆盖活动端。
+    async fn run(&mut self, start: Start) -> Result<()> {
         let count = self.lock().change_count();
         self.seen = count;
-        if self.is_active() {
+        if start == Start::Announce {
             self.offer_local().await?;
         }
 

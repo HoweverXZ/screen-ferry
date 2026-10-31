@@ -16,6 +16,7 @@ ferry-net.workspace = true
 ferry-platform.workspace = true
 ferry-proto.workspace = true
 ferry-store.workspace = true
+ferry-trust.workspace = true
 ferry-types.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "rt", "sync", "time"] }

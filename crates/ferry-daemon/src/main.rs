@@ -6,6 +6,7 @@
 
 mod app;
 mod cli;
+mod pairing;
 
 use std::process::ExitCode;
 

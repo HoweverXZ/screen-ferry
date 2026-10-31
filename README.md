@@ -66,8 +66,17 @@ open target/bundle/macos/ScreenFerry.app
 ```
 
 产物在 `target/bundle/macos/ScreenFerry.app`，可以拖进“应用程序”文件夹。第一次运行时系统会请你
-在「系统设置 → 隐私与安全性 → 辅助功能」中允许 ScreenFerry 控制键盘和鼠标。目前用临时签名，
-重新打包后可能要在那里把它关掉再打开一次。设置里的“开机自动启动”会在 `~/Library/LaunchAgents/`
+在「系统设置 → 隐私与安全性 → 辅助功能」中允许 ScreenFerry 控制键盘和鼠标。
+
+签名：钥匙串里有“Developer ID Application”证书时自动用它签名（也可以用环境变量
+`SCREENFERRY_SIGN_IDENTITY` 指定），系统按“团队 + bundle id”认这个应用，重新打包后已授予的权限不会丢；
+没有证书时用临时签名，每次重新打包都要重新授权。要清掉 ScreenFerry 的辅助功能授权重新来过：
+
+```bash
+tccutil reset Accessibility io.github.icloudza.screenferry
+```
+
+设置里的“开机自动启动”会在 `~/Library/LaunchAgents/`
 登记，登录时安静地启动，不弹出设置界面。没有终端时日志写在 `~/Library/Caches/ScreenFerry/logs/`。
 
 设置界面用 Flutter 编写，工程在 `app/`，需要 Flutter 3.47 和 Xcode。它读取后台写在

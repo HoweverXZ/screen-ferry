@@ -10,7 +10,10 @@
 //! └─ Helpers/ScreenFerry Settings.app  Flutter 设置界面
 //! ```
 //!
-//! 签名用临时签名（ad-hoc），只适合本机使用；正式发布时换成开发者证书并公证。
+//! 签名：环境变量 `SCREENFERRY_SIGN_IDENTITY` 指定的证书优先，其次钥匙串里第一张
+//! “Developer ID Application”证书，都没有时用临时签名（ad-hoc）。用固定的开发者证书签名后，
+//! 系统按“团队 + bundle id”认这个应用，重新打包也不会丢掉已经授予的辅助功能权限；
+//! 临时签名每次打包都像一个新应用。签名开启 hardened runtime，为以后公证做准备。
 //!
 //! Windows 产物是 `target/bundle/windows/ScreenFerry/` 目录：
 //!
@@ -115,33 +118,36 @@ fn macos(root: &Path) -> Result {
         ],
     )?;
 
-    step("签名（临时签名，仅限本机）");
+    let identity = signing_identity();
+    step(&format!(
+        "签名（{}）",
+        if identity == "-" {
+            "临时签名，仅限本机"
+        } else {
+            identity.as_str()
+        }
+    ));
+    let runtime: &[&str] = if identity == "-" {
+        &[]
+    } else {
+        &["--options", "runtime"]
+    };
     // Flutter 产物里的 App.framework 签名后又被改过，严格校验通不过；先整体重签内层的设置界面。
     let helper = contents.join("Helpers/ScreenFerry Settings.app");
-    run_in(
-        &root,
-        "codesign",
-        &[
-            "--force",
-            "--deep",
-            "--sign",
-            "-",
-            helper.to_str().ok_or("路径不是 UTF-8")?,
-        ],
-    )?;
+    let mut args = vec!["--force", "--deep", "--sign", identity.as_str()];
+    args.extend_from_slice(runtime);
+    args.push(helper.to_str().ok_or("路径不是 UTF-8")?);
+    run_in(&root, "codesign", &args)?;
+
     let entitlements = root.join("packaging/macos/entitlements.plist");
-    run_in(
-        &root,
-        "codesign",
-        &[
-            "--force",
-            "--sign",
-            "-",
-            "--entitlements",
-            entitlements.to_str().ok_or("路径不是 UTF-8")?,
-            bundle.to_str().ok_or("路径不是 UTF-8")?,
-        ],
-    )?;
+    let mut args = vec!["--force", "--sign", identity.as_str()];
+    args.extend_from_slice(runtime);
+    args.extend_from_slice(&[
+        "--entitlements",
+        entitlements.to_str().ok_or("路径不是 UTF-8")?,
+        bundle.to_str().ok_or("路径不是 UTF-8")?,
+    ]);
+    run_in(&root, "codesign", &args)?;
 
     run_in(
         &root,
@@ -156,9 +162,33 @@ fn macos(root: &Path) -> Result {
 
     println!("\n✓ {}", bundle.display());
     println!("  打开：open \"{}\"", bundle.display());
-    println!("  安装：拖到“应用程序”文件夹。首次运行需要在系统设置里允许它控制键盘和鼠标；");
-    println!("        临时签名的应用每次重新打包后，可能要在“辅助功能”里关掉再打开一次。");
+    println!("  安装：拖到“应用程序”文件夹。首次运行需要在系统设置里允许它控制键盘和鼠标。");
+    if identity == "-" {
+        println!("        临时签名的应用每次重新打包后，可能要在“辅助功能”里关掉再打开一次。");
+    }
     Ok(())
+}
+
+/// 选签名证书：环境变量指定的优先，其次钥匙串里第一张 Developer ID Application 证书，
+/// 都没有时用临时签名 `-`。
+fn signing_identity() -> String {
+    if let Ok(identity) = std::env::var("SCREENFERRY_SIGN_IDENTITY")
+        && !identity.trim().is_empty()
+    {
+        return identity;
+    }
+    let output = Command::new("security")
+        .args(["find-identity", "-v", "-p", "codesigning"])
+        .output();
+    let Ok(output) = output else {
+        return "-".into();
+    };
+    // 每行形如：  1) <40 位哈希> "Developer ID Application: 名字 (团队)"
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|line| line.contains("\"Developer ID Application:"))
+        .find_map(|line| line.split('"').nth(1).map(str::to_owned))
+        .unwrap_or_else(|| "-".into())
 }
 
 fn workspace_version(root: &Path) -> Result<String> {

@@ -10,12 +10,15 @@ mod autostart;
 mod capture;
 mod clipboard;
 mod display;
+mod event_loop;
 mod inject;
 mod keymap;
 mod permission;
 
+pub use autostart::MockAutostart;
 pub use capture::MockCapture;
 pub use clipboard::MockClipboard;
 pub use display::MockDisplays;
+pub use event_loop::MockEventLoop;
 pub use inject::MockInject;
 pub use permission::MockPermissions;

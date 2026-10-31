@@ -5,5 +5,6 @@
 
 #![cfg(target_os = "macos")]
 
+mod autostart;
 mod display;
 mod keymap;

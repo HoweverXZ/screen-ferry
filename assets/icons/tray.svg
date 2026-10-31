@@ -1,0 +1,8 @@
+<!-- 托盘图标源文件（24×24 网格）。导出：tray-template@2x.png（macOS 菜单栏模板图，36×36）、
+     tray-paused@2x.png（暂停时整体变淡）、tray-color.png / tray-color-paused.png（Windows 任务栏，32×32）。 -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <rect x="2" y="4.5" width="8.5" height="11" rx="2.6" fill="#000" fill-opacity="0.5"/>
+  <rect x="13.5" y="4.5" width="8.5" height="11" rx="2.6" fill="#000"/>
+  <path d="M7.8 19.6h8.4M13.4 17.3l2.8 2.3-2.8 2.3" fill="none" stroke="#000" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

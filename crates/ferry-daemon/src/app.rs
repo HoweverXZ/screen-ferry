@@ -17,19 +17,54 @@ use crate::pairing::TerminalConfirm;
 
 type AppResult = Result<Infallible, Box<dyn std::error::Error>>;
 
-pub(crate) fn init_logging(verbose: bool) {
-    let level = if verbose {
+/// 日志文件超过这个大小时，启动时把它改名为 `.1` 重新开始。
+const LOG_LIMIT: u64 = 2 * 1024 * 1024;
+
+/// 有终端时写到终端；常驻运行而没有终端（双击启动、登录时启动）时写到缓存目录的日志文件。
+pub(crate) fn init_logging(options: &Options) {
+    let level = if options.verbose {
         tracing::Level::DEBUG
     } else {
         tracing::Level::INFO
     };
-    tracing_subscriber::fmt()
+    let builder = tracing_subscriber::fmt()
         .with_max_level(level)
         .with_target(false)
-        .with_timer(tracing_subscriber::fmt::time::uptime())
-        .with_ansi(std::io::stderr().is_terminal())
+        .with_timer(tracing_subscriber::fmt::time::uptime());
+    let terminal = std::io::stderr().is_terminal();
+    if !terminal
+        && matches!(options.mode, Mode::Resident { .. })
+        && let Some(file) = log_file(options)
+    {
+        builder
+            .with_ansi(false)
+            .with_writer(std::sync::Mutex::new(file))
+            .init();
+        return;
+    }
+    builder
+        .with_ansi(terminal)
         .with_writer(std::io::stderr)
         .init();
+}
+
+fn log_file(options: &Options) -> Option<std::fs::File> {
+    let store = match &options.data_dir {
+        Some(dir) => Store::open(dir),
+        None => Store::open_default(),
+    }
+    .ok()?;
+    let dir = store.logs_dir();
+    std::fs::create_dir_all(&dir).ok()?;
+    let path = dir.join("screenferry.log");
+    if std::fs::metadata(&path).is_ok_and(|m| m.len() > LOG_LIMIT) {
+        let _ = std::fs::rename(&path, dir.join("screenferry.log.1"));
+    }
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .ok()
 }
 
 pub(crate) fn run(options: Options) -> ExitCode {
@@ -45,7 +80,7 @@ pub(crate) fn run(options: Options) -> ExitCode {
         }
     };
     match options.mode {
-        Mode::Resident => return report(resident(store)),
+        Mode::Resident { autostart } => return report(resident(store, autostart)),
         Mode::Peers => return report(list_peers(&store)),
         Mode::Forget { target } => return report(forget(&store, &target)),
         Mode::Serve { .. } | Mode::Connect { .. } => {}
@@ -95,7 +130,7 @@ pub(crate) fn run(options: Options) -> ExitCode {
                     };
                     connect(config).await
                 }
-                Mode::Resident | Mode::Peers | Mode::Forget { .. } => {
+                Mode::Resident { .. } | Mode::Peers | Mode::Forget { .. } => {
                     unreachable!("已在上面处理")
                 }
             }
@@ -113,37 +148,67 @@ pub(crate) fn run(options: Options) -> ExitCode {
 }
 
 /// 常驻运行。已经有一份在运行时，请它打开设置界面，然后退出。
+///
+/// 主线程运行系统事件循环和托盘图标；引擎与本机通信在另一个线程的 tokio 运行时里。
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-fn resident(store: Store) -> Result<(), Box<dyn std::error::Error>> {
+fn resident(store: Store, autostart: bool) -> Result<(), Box<dyn std::error::Error>> {
     use ferry_engine::resident::{self, Command};
+    use ferry_platform::EventLoop;
 
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
-    runtime.block_on(async move {
-        if resident::hand_over_to_running(&store).await {
-            info!("ScreenFerry 已在运行，已请它打开设置界面");
-            return Ok(());
-        }
-        let (control, handle) = resident::control();
-        // Ctrl+C 走正常退出：停下引擎（归还鼠标、松开按键），删掉 ipc.json。
-        tokio::spawn({
-            let handle = handle.clone();
-            async move {
-                if tokio::signal::ctrl_c().await.is_ok() {
-                    info!("收到 Ctrl+C，正在退出");
-                    handle.send(Command::Quit);
+    if runtime.block_on(resident::hand_over_to_running(&store)) {
+        info!("ScreenFerry 已在运行，已请它打开设置界面");
+        return Ok(());
+    }
+
+    let mut event_loop = crate::host::NativeEventLoop::new()?;
+    let dispatcher = event_loop.dispatcher();
+    let (control, handle) = resident::control();
+    crate::tray::install(handle.clone())?;
+    event_loop.on_reopen(Box::new({
+        let handle = handle.clone();
+        move || handle.send(Command::OpenSettings)
+    }));
+    // 用户手动启动时打开设置界面；登录时由系统启动则安静地待在菜单栏里。
+    if !autostart {
+        handle.send(Command::OpenSettings);
+    }
+
+    std::thread::Builder::new()
+        .name("ferry-runtime".into())
+        .spawn(move || {
+            let result = runtime.block_on(async move {
+                tokio::spawn(crate::tray::follow(handle.summary(), dispatcher));
+                // Ctrl+C 走正常退出：停下引擎（归还鼠标、松开按键），删掉 ipc.json。
+                tokio::spawn({
+                    let handle = handle.clone();
+                    async move {
+                        if tokio::signal::ctrl_c().await.is_ok() {
+                            info!("收到 Ctrl+C，正在退出");
+                            handle.send(Command::Quit);
+                        }
+                    }
+                });
+                let result = resident::run(store, crate::host::NativeHost::new(), control).await;
+                drop(handle);
+                result
+            });
+            // 退出菜单或 Ctrl+C：引擎已经停下，主线程的事件循环随进程一起结束。
+            match result {
+                Ok(()) => std::process::exit(0),
+                Err(e) => {
+                    error!("{e}");
+                    std::process::exit(1);
                 }
             }
-        });
-        resident::run(store, crate::host::NativeHost, control).await?;
-        drop(handle);
-        Ok(())
-    })
+        })?;
+    event_loop.run()
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn resident(_store: Store) -> Result<(), Box<dyn std::error::Error>> {
+fn resident(_store: Store, _autostart: bool) -> Result<(), Box<dyn std::error::Error>> {
     Err("常驻运行目前只支持 macOS 和 Windows".into())
 }
 

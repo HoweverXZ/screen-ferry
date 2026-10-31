@@ -3,6 +3,7 @@
 
 import 'package:flutter/material.dart';
 
+import '../ipc/launcher.dart';
 import '../pages/about_page.dart';
 import '../pages/devices_page.dart';
 import '../pages/layout_page.dart';
@@ -20,6 +21,9 @@ import 'sidebar.dart';
 
 /// 窗口窄于这个宽度（手机大小）时，侧栏换成底部标签栏。
 const phoneWidth = 560.0;
+
+/// 后台的位置只需找一次。
+final String? _daemon = daemonLocation();
 
 class HomeShell extends StatelessWidget {
   const HomeShell({super.key});
@@ -51,7 +55,10 @@ class HomeShell extends StatelessWidget {
               layoutBuilder: (current, previous) => Stack(fit: StackFit.expand, children: [...previous, ?current]),
               // 还没连上过后台时没有数据可显示，先放占位页。
               child: state.daemon == null
-                  ? const KeyedSubtree(key: ValueKey('offline'), child: DaemonOffline())
+                  ? KeyedSubtree(
+                      key: const ValueKey('offline'),
+                      child: DaemonOffline(daemon: _daemon),
+                    )
                   : KeyedSubtree(key: ValueKey(state.page), child: _page(state.page)),
             ),
           ),

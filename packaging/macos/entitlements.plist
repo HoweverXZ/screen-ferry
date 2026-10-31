@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  后台 screenferry 的签名权限。不进 App Store，不启用沙盒：
+  需要读写键鼠（辅助功能权限由用户在系统设置中授予）、监听局域网端口、写 LaunchAgent。
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+</dict>
+</plist>

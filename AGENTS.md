@@ -150,7 +150,8 @@ ferry-platform/src/              ferry-platform-{windows,macos,mock}/src/
 ├─ clipboard.rs   Clipboard      ├─ clipboard.rs
 ├─ display.rs     Displays       ├─ display.rs
 ├─ permission.rs  Permissions    ├─ permission.rs
-└─ autostart.rs   Autostart      └─ autostart.rs
+├─ autostart.rs   Autostart      ├─ autostart.rs
+└─ event_loop.rs  EventLoop      └─ event_loop.rs
 ```
 
 新增平台能力时，trait 与所有实现同时新增同名文件。

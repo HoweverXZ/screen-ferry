@@ -9,6 +9,8 @@ mod cli;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 mod host;
 mod pairing;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+mod tray;
 
 use std::process::ExitCode;
 
@@ -24,6 +26,6 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    app::init_logging(options.verbose);
+    app::init_logging(&options);
     app::run(options)
 }

@@ -8,14 +8,15 @@ use ferry_engine::DEFAULT_PORT;
 
 pub(crate) const USAGE: &str = "\
 用法：
-  screenferry         [--data-dir 目录] [-v]
+  screenferry         [--data-dir 目录] [--autostart] [-v]
   screenferry serve   [--listen 地址] [--side 方向] [--no-cmd-ctrl-swap] [--no-announce] [通用选项]
   screenferry connect [服务端地址] [通用选项]
   screenferry peers   [--data-dir 目录]
   screenferry forget  <设备名或指纹> [--data-dir 目录]
 
-不带命令时常驻运行：按数据目录中的 config.toml 工作，配对、设置都在设置界面里完成。
-已经有一份在运行时，请它打开设置界面后退出。下面的命令用于调试，参数取代 config.toml。
+不带命令时常驻运行：按数据目录中的 config.toml 工作，菜单栏（任务栏）有图标，
+配对、设置都在设置界面里完成。启动时会打开设置界面；--autostart 表示登录时由系统启动，
+不打开。已经有一份在运行时，请它打开设置界面后退出。下面的命令用于调试，参数取代 config.toml。
 
 命令：
   serve      在拥有键鼠的电脑上运行，等待另一台连接
@@ -59,8 +60,10 @@ pub(crate) struct Options {
 }
 
 pub(crate) enum Mode {
-    /// 常驻运行，按 `config.toml` 工作。
-    Resident,
+    /// 常驻运行，按 `config.toml` 工作。`autostart`：登录时由系统启动，不打开设置界面。
+    Resident {
+        autostart: bool,
+    },
     Serve {
         listen: SocketAddr,
         side: Side,
@@ -102,6 +105,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, St
     let mut name = None;
     let mut data_dir = None;
     let mut verbose = false;
+    let mut autostart = false;
 
     while let Some(arg) = args.next() {
         let mut value = |flag: &str| args.next().ok_or_else(|| format!("{flag} 缺少取值"));
@@ -109,6 +113,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, St
             "-h" | "--help" => return Ok(Parsed::Help),
             "-v" | "--verbose" => verbose = true,
             "--data-dir" => data_dir = Some(PathBuf::from(value("--data-dir")?)),
+            "--autostart" if command == "resident" => autostart = true,
             "--name" if runs => name = Some(value("--name")?),
             "--no-clipboard" if runs => clipboard = false,
             "--listen" if command == "serve" => listen = resolve(&value("--listen")?)?,
@@ -127,7 +132,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, St
     }
 
     let mode = match command.as_str() {
-        "resident" => Mode::Resident,
+        "resident" => Mode::Resident { autostart },
         "serve" => Mode::Serve {
             listen,
             side,

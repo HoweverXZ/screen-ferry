@@ -8,12 +8,15 @@ mod autostart;
 mod capture;
 mod clipboard;
 mod display;
+mod event_loop;
 mod inject;
 mod keymap;
 mod permission;
 
+pub use autostart::MacAutostart;
 pub use capture::MacCapture;
 pub use clipboard::MacClipboard;
 pub use display::MacDisplays;
+pub use event_loop::MacEventLoop;
 pub use keymap::{hid_code, media_key};
 pub use permission::MacPermissions;

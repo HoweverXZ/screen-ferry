@@ -38,6 +38,13 @@
   - 设备身份存于数据目录的 `identity/`，已信任设备存于 `peers.toml`（`schema_version = 1`）。
   - 新增 `screenferry peers`、`screenferry forget`，以及 `--data-dir`。
   - 协议：新增配对连接（`channel = 3`）、`PairCommit` / `PairNonce` / `PairResult` 消息、`Reject` 原因 `NOT_PAIRED`。
+- 托盘与打包：
+  - 菜单栏（任务栏）图标显示共享状态，菜单可以暂停或继续共享、打开设置、退出；暂停或出问题时图标变淡。
+  - 开机自动启动：macOS 写 LaunchAgent，Windows 写当前用户的 Run 键；登录时启动不弹出设置界面。
+  - `cargo xtask bundle` 在 macOS 上生成 `ScreenFerry.app`：后台是主程序（不在程序坞显示），设置界面嵌在 `Contents/Helpers/`。
+  - `ferry-platform` 新增 `EventLoop`（主线程事件循环）与 `Autostart` 的实现；缺少辅助功能权限时向系统申请一次，ScreenFerry 自动出现在授权列表里。
+  - 设置界面装在应用里而后台没运行时，可以一键启动后台。
+  - 没有终端时日志写到缓存目录的 `logs/`。
 - 常驻运行：`screenferry` 不带参数时按 `config.toml` 工作，只运行一份；再次启动会请运行中的那份打开设置界面（ADR 0004）。
   - `ferry-ipc`：设置界面与后台的本机通信，`127.0.0.1` 随机端口 + 令牌，每行一条 JSON（`docs/ipc.md`）。
   - `ferry-engine`：对外报告连接、延迟、光标进出、剪贴板同步、配对结果；屏幕方向与 ⌘/Ctrl 互换在会话中即时生效；引擎被停下时客户端也会松开按键。

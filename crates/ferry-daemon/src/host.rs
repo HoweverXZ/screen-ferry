@@ -44,6 +44,12 @@ fn settings_app(candidates: &[PathBuf]) -> Option<PathBuf> {
         .find(|p| p.exists())
 }
 
+/// 登录时执行的命令：本程序加上 `--autostart`。
+fn autostart_command() -> Option<Vec<String>> {
+    let exe = std::env::current_exe().ok()?.canonicalize().ok()?;
+    Some(vec![exe.display().to_string(), "--autostart".into()])
+}
+
 /// 可执行文件所在的目录。
 fn exe_dir() -> Option<PathBuf> {
     std::env::current_exe()
@@ -55,23 +61,45 @@ fn exe_dir() -> Option<PathBuf> {
 }
 
 #[cfg(target_os = "macos")]
+pub(crate) use ferry_platform_macos::MacEventLoop as NativeEventLoop;
+#[cfg(target_os = "macos")]
 pub(crate) use mac::NativeHost;
 
 #[cfg(target_os = "macos")]
 mod mac {
     use std::process::Command;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     use ferry_engine::resident::Host;
-    use ferry_platform::{Error, Permissions, Result};
-    use ferry_platform_macos::{MacCapture, MacClipboard, MacDisplays, MacPermissions};
+    use ferry_platform::{Autostart, Error, Permissions, Result};
+    use ferry_platform_macos::{
+        MacAutostart, MacCapture, MacClipboard, MacDisplays, MacPermissions,
+    };
     use ferry_types::Role;
     use tracing::warn;
 
-    use super::{Unsupported, exe_dir, settings_app};
+    use super::{Unsupported, autostart_command, exe_dir, settings_app};
 
     const NO_INJECT: &str = "这台 Mac 暂时只能控制别的电脑，还不能被控制";
+    /// LaunchAgent 的标识，与安装包的 bundle id 一致。
+    const BUNDLE_ID: &str = "io.github.icloudza.screenferry";
 
-    pub(crate) struct NativeHost;
+    pub(crate) struct NativeHost {
+        autostart: Option<MacAutostart>,
+        /// 是否已经向系统申请过辅助功能权限。
+        prompted: AtomicBool,
+    }
+
+    impl NativeHost {
+        pub(crate) fn new() -> Self {
+            let autostart =
+                autostart_command().and_then(|args| MacAutostart::new(BUNDLE_ID, args).ok());
+            Self {
+                autostart,
+                prompted: AtomicBool::new(false),
+            }
+        }
+    }
 
     impl Host for NativeHost {
         type Capture = MacCapture;
@@ -92,6 +120,10 @@ mod mac {
 
         fn check_permissions(&self, role: Role) -> Result<()> {
             match role {
+                // 第一次发现缺权限时向系统申请一次：系统弹出提示，并把本程序加进授权列表。
+                Role::Server if !self.prompted.swap(true, Ordering::SeqCst) => {
+                    MacPermissions.request_input()
+                }
                 Role::Server => MacPermissions.check_input(),
                 Role::Client => Err(Error::Unsupported(NO_INJECT)),
             }
@@ -114,11 +146,16 @@ mod mac {
         }
 
         fn autostart(&self) -> bool {
-            false
+            self.autostart
+                .as_ref()
+                .is_some_and(|a| a.is_enabled().unwrap_or(false))
         }
 
-        fn set_autostart(&self, _on: bool) -> Result<()> {
-            Err(Error::Unsupported("开机自启即将支持"))
+        fn set_autostart(&self, on: bool) -> Result<()> {
+            self.autostart
+                .as_ref()
+                .ok_or(Error::Unsupported("找不到程序的位置"))?
+                .set_enabled(on)
         }
 
         fn open_settings(&self) {
@@ -145,6 +182,8 @@ mod mac {
         }
 
         fn open_permission_settings(&self) {
+            // 先申请一次，确保本程序出现在授权列表里。
+            let _ = MacPermissions.request_input();
             let url =
                 "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
             if let Err(e) = Command::new("open").arg(url).spawn() {
@@ -155,6 +194,8 @@ mod mac {
 }
 
 #[cfg(target_os = "windows")]
+pub(crate) use ferry_platform_windows::WinEventLoop as NativeEventLoop;
+#[cfg(target_os = "windows")]
 pub(crate) use win::NativeHost;
 
 #[cfg(target_os = "windows")]
@@ -162,16 +203,31 @@ mod win {
     use std::process::Command;
 
     use ferry_engine::resident::Host;
-    use ferry_platform::{Error, Permissions, Result};
-    use ferry_platform_windows::{WinClipboard, WinDisplays, WinInject, WinPermissions};
+    use ferry_platform::{Autostart, Error, Permissions, Result};
+    use ferry_platform_windows::{
+        WinAutostart, WinClipboard, WinDisplays, WinInject, WinPermissions,
+    };
     use ferry_types::Role;
     use tracing::warn;
 
-    use super::{Unsupported, exe_dir, settings_app};
+    use super::{Unsupported, autostart_command, exe_dir, settings_app};
 
     const NO_CAPTURE: &str = "这台电脑暂时只能被控制，还不能控制别的电脑";
 
-    pub(crate) struct NativeHost;
+    pub(crate) struct NativeHost {
+        autostart: Option<WinAutostart>,
+    }
+
+    impl NativeHost {
+        pub(crate) fn new() -> Self {
+            // 命令行：路径带引号（可能含空格），后面跟参数。
+            let autostart = autostart_command().map(|args| {
+                let command = format!("\"{}\" {}", args[0], args[1..].join(" "));
+                WinAutostart::new("ScreenFerry", &command)
+            });
+            Self { autostart }
+        }
+    }
 
     impl Host for NativeHost {
         type Capture = Unsupported;
@@ -210,11 +266,16 @@ mod win {
         }
 
         fn autostart(&self) -> bool {
-            false
+            self.autostart
+                .as_ref()
+                .is_some_and(|a| a.is_enabled().unwrap_or(false))
         }
 
-        fn set_autostart(&self, _on: bool) -> Result<()> {
-            Err(Error::Unsupported("开机自启即将支持"))
+        fn set_autostart(&self, on: bool) -> Result<()> {
+            self.autostart
+                .as_ref()
+                .ok_or(Error::Unsupported("找不到程序的位置"))?
+                .set_enabled(on)
         }
 
         fn open_settings(&self) {

@@ -55,13 +55,20 @@ cargo xtask lint
 ## 常驻运行与设置界面
 
 `screenferry` 不带参数时常驻运行：按数据目录中的 `config.toml` 工作（macOS 默认当服务端），
-配对、方向、开关都在设置界面里完成。已经有一份在运行时，再运行一次会请它打开设置界面。
+菜单栏有图标，可以暂停或继续共享、打开设置、退出；配对、方向、开关都在设置界面里完成。
+已经有一份在运行时，再运行一次会请它打开设置界面。
+
+在 Mac 上打包成一个应用（后台 + 设置界面）：
 
 ```bash
-./target/release/screenferry          # Mac 上常驻运行
-cd app && flutter build macos --release
-open build/macos/Build/Products/Release/ScreenFerry.app
+cargo xtask bundle
+open target/bundle/macos/ScreenFerry.app
 ```
+
+产物在 `target/bundle/macos/ScreenFerry.app`，可以拖进“应用程序”文件夹。第一次运行时系统会请你
+在「系统设置 → 隐私与安全性 → 辅助功能」中允许 ScreenFerry 控制键盘和鼠标。目前用临时签名，
+重新打包后可能要在那里把它关掉再打开一次。设置里的“开机自动启动”会在 `~/Library/LaunchAgents/`
+登记，登录时安静地启动，不弹出设置界面。没有终端时日志写在 `~/Library/Caches/ScreenFerry/logs/`。
 
 设置界面用 Flutter 编写，工程在 `app/`，需要 Flutter 3.47 和 Xcode。它读取后台写在
 `~/Library/Caches/ScreenFerry/ipc.json` 中的端口和令牌连接后台（协议见 [docs/ipc.md](docs/ipc.md)）；

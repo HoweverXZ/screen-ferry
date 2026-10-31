@@ -10,12 +10,15 @@ mod autostart;
 mod capture;
 mod clipboard;
 mod display;
+mod event_loop;
 mod inject;
 mod keymap;
 mod permission;
 
+pub use autostart::WinAutostart;
 pub use clipboard::{WinClipboard, text_from_windows, text_to_windows};
 pub use display::WinDisplays;
+pub use event_loop::WinEventLoop;
 pub use inject::WinInject;
 pub use keymap::{WinKey, win_key};
 pub use permission::WinPermissions;

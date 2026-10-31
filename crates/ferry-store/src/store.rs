@@ -99,6 +99,11 @@ impl Store {
         self.cache.join("ipc.json")
     }
 
+    /// 日志目录（缓存目录下的 `logs/`），可以随时清空。
+    pub fn logs_dir(&self) -> PathBuf {
+        self.cache.join("logs")
+    }
+
     fn config_path(&self) -> PathBuf {
         self.root.join("config.toml")
     }

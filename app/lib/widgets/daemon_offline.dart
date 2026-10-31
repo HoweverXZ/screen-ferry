@@ -2,19 +2,24 @@
 
 import 'package:flutter/material.dart';
 
+import '../ipc/launcher.dart';
 import '../state/app_scope.dart';
 import '../state/app_state.dart';
 import '../theme/tokens.dart';
 import 'surface.dart';
 
 class DaemonOffline extends StatelessWidget {
-  const DaemonOffline({super.key});
+  const DaemonOffline({super.key, this.daemon});
+
+  /// 后台的位置；为 null 时找不到后台（开发时直接运行界面），只能请用户自己启动。
+  final String? daemon;
 
   @override
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
     final c = SfColors.of(context);
     final connecting = state.daemonLink == DaemonLink.connecting;
+    final daemon = this.daemon;
     return Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(28, 48, 28, 28),
@@ -37,16 +42,49 @@ class DaemonOffline extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Text(
-                '请先启动 ScreenFerry，连上后会自动显示。',
+                daemon == null ? '请先启动 ScreenFerry，连上后会自动显示。' : '启动后会自动连上。',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 15, color: c.muted, height: 1.6),
               ),
               const SizedBox(height: 22),
+              if (daemon != null && !connecting) ...[_StartButton(daemon: daemon), const SizedBox(height: 22)],
               const _Retrying(),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+/// 启动后台。点过之后几秒内不能再点，等它连上。
+class _StartButton extends StatefulWidget {
+  const _StartButton({required this.daemon});
+
+  final String daemon;
+
+  @override
+  State<_StartButton> createState() => _StartButtonState();
+}
+
+class _StartButtonState extends State<_StartButton> {
+  bool _starting = false;
+
+  Future<void> _start() async {
+    setState(() => _starting = true);
+    final ok = await startDaemon(widget.daemon);
+    if (!mounted) return;
+    if (!ok) AppScope.read(context).showToast('启动失败，请在“应用程序”中打开 ScreenFerry');
+    await Future<void>.delayed(const Duration(seconds: 4));
+    if (mounted) setState(() => _starting = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PillButton(
+      label: _starting ? '正在启动…' : '启动 ScreenFerry',
+      icon: Icons.play_arrow_rounded,
+      onPressed: _starting ? null : _start,
     );
   }
 }

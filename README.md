@@ -77,7 +77,10 @@ open target/bundle/macos/ScreenFerry.app
 
 ## Windows
 
-Windows 版的设置界面必须在 Windows 上编译（Flutter 不能在 macOS 上交叉编译 Windows 应用）。需要：
+不想在 Windows 上装开发工具时，可以直接下载 CI 打好的包：GitHub 的 Actions 页面里打开最近一次运行，
+在 Artifacts 中下载 `ScreenFerry-windows-<提交号>`（保留 14 天），解压后双击 `screenferry.exe`。
+
+自己编译时，Windows 版的设置界面必须在 Windows 上编译（Flutter 不能在 macOS 上交叉编译 Windows 应用）。需要：
 
 - Flutter 3.47（`flutter doctor` 全部打勾）；
 - Visual Studio 2022，安装“使用 C++ 的桌面开发”；

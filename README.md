@@ -16,11 +16,12 @@ cargo xtask lint
 
 ## 试运行原型
 
-目前是端到端验证原型：Mac 作为服务端，把键盘和鼠标（移动、按键、滚轮）共享给同一局域网内的 Windows。
+目前是端到端验证原型：Mac 作为服务端，把键盘和鼠标（移动、按键、滚轮）共享给同一局域网内的 Windows，并双向同步剪贴板中的文本。
 
 - 默认把 Mac 的 Command 当作 Windows 的 Ctrl，⌘C、⌘V 即复制粘贴；不需要时加 `--no-cmd-ctrl-swap`。
 - 进入 Windows 时同步 Caps Lock 状态。
 - 光标在 Windows 上时，按 **Ctrl + Option + Esc** 可以强制回到 Mac。
+- 剪贴板在光标切过去时才同步：在 Mac 上复制，移到 Windows 即可粘贴，反之亦然。不需要时在任意一端加 `--no-clipboard`。目前只同步纯文本。
 - 测试时请先退出 Deskflow 等同类软件，两者会争抢同一套键鼠。
 
 1. 在 Mac 上编译两个版本（Windows 版需要 `brew install mingw-w64` 和 `rustup target add x86_64-pc-windows-gnu`）：

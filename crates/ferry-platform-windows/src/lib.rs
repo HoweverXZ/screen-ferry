@@ -14,6 +14,7 @@ mod inject;
 mod keymap;
 mod permission;
 
+pub use clipboard::{WinClipboard, text_from_windows, text_to_windows};
 pub use display::WinDisplays;
 pub use inject::WinInject;
 pub use keymap::{WinKey, win_key};

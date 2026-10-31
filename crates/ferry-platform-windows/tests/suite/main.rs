@@ -5,4 +5,5 @@
 
 #![cfg(target_os = "windows")]
 
+mod clipboard;
 mod keymap;

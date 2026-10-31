@@ -5,7 +5,7 @@ use std::time::Duration;
 use ferry_core::{KeyRemap, Side};
 use ferry_engine::{ClientConfig, ServerConfig, connect, serve};
 use ferry_platform::CaptureEvent;
-use ferry_platform_mock::{MockCapture, MockDisplays, MockInject};
+use ferry_platform_mock::{MockCapture, MockClipboard, MockDisplays, MockInject};
 use ferry_types::{Display, DisplayId, KeyAction, KeyCode, Point, Rect};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
@@ -19,6 +19,10 @@ pub const ENTRY: Point = Point::new(0, 540);
 pub struct Rig {
     pub capture: MockCapture,
     pub inject: MockInject,
+    /// 服务端（Mac）的剪贴板。
+    pub mac_clipboard: MockClipboard,
+    /// 客户端（PC）的剪贴板。
+    pub pc_clipboard: MockClipboard,
     pub server: JoinHandle<()>,
     pub client: JoinHandle<()>,
 }
@@ -34,6 +38,14 @@ fn display(width: u32, height: u32, scale_percent: u16) -> Display {
 
 impl Rig {
     pub async fn start() -> Self {
+        Self::with_clipboards(MockClipboard::new(), MockClipboard::new()).await
+    }
+
+    /// 用给定的剪贴板启动，便于测试连接之前就有内容的情况。
+    pub async fn with_clipboards(
+        mac_clipboard: MockClipboard,
+        pc_clipboard: MockClipboard,
+    ) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let capture = MockCapture::new();
@@ -41,30 +53,38 @@ impl Rig {
 
         let server = tokio::spawn({
             let capture = capture.clone();
+            let clipboard = mac_clipboard.clone();
             async move {
                 let config = ServerConfig {
                     side: Side::Right,
                     name: "mac".into(),
                     remap: KeyRemap::swap_command_control(),
+                    clipboard: true,
                 };
                 let displays = MockDisplays(vec![display(1000, 800, 100)]);
-                serve(listener, config, capture, displays).await.unwrap();
+                serve(listener, config, capture, displays, clipboard)
+                    .await
+                    .unwrap();
             }
         });
         let client = tokio::spawn({
             let inject = inject.clone();
+            let clipboard = pc_clipboard.clone();
             async move {
                 let config = ClientConfig {
                     server: addr,
                     name: "pc".into(),
+                    clipboard: true,
                 };
                 let displays = MockDisplays(vec![display(1920, 1080, 150)]);
-                connect(config, inject, displays).await.unwrap();
+                connect(config, inject, displays, clipboard).await.unwrap();
             }
         });
         Self {
             capture,
             inject,
+            mac_clipboard,
+            pc_clipboard,
             server,
             client,
         }
@@ -82,13 +102,30 @@ impl Rig {
         self.capture.emit(CaptureEvent::Key { code, action });
     }
 
-    /// 在右边缘向外推，直到进入客户端屏幕。
+    /// 在右边缘向外推，直到进入客户端屏幕，并且客户端已处理 Enter（把光标移到入口）。
     pub async fn enter(&self) {
+        let before = self.inject.events().len();
         eventually("进入客户端屏幕", || {
             if self.capture.is_grabbed() {
                 return true;
             }
             self.push(5, 0);
+            false
+        })
+        .await;
+        eventually("客户端处理 Enter", || {
+            self.inject.events().len() > before
+        })
+        .await;
+    }
+
+    /// 从客户端屏幕左边缘推回本机。
+    pub async fn leave(&self) {
+        eventually("回到本机", || {
+            if !self.capture.is_grabbed() {
+                return true;
+            }
+            self.push(-50, 0);
             false
         })
         .await;

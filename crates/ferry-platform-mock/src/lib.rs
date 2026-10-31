@@ -15,6 +15,7 @@ mod keymap;
 mod permission;
 
 pub use capture::MockCapture;
+pub use clipboard::MockClipboard;
 pub use display::MockDisplays;
 pub use inject::MockInject;
 pub use permission::MockPermissions;

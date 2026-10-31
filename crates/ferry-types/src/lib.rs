@@ -13,7 +13,7 @@ mod input;
 mod key;
 mod pointer;
 
-pub use clipboard::ClipboardFormat;
+pub use clipboard::{ClipboardContent, ClipboardFormat};
 pub use display::{Display, DisplayId};
 pub use geometry::{Point, Rect};
 pub use input::InputEvent;

@@ -13,6 +13,7 @@ mod keymap;
 mod permission;
 
 pub use capture::MacCapture;
+pub use clipboard::MacClipboard;
 pub use display::MacDisplays;
 pub use keymap::hid_code;
 pub use permission::MacPermissions;

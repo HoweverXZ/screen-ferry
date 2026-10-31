@@ -2,22 +2,27 @@
 //!
 //! 任何原因结束会话（对方断开、心跳超时、出错）时，都会立即把控制权交还本机。
 //! 光标在对方屏幕时，按 Ctrl + Option（Alt）+ Esc 可以强制回到本机。
+//!
+//! 客户端握手后会用拿到的会话号再连一条数据连接，用来同步剪贴板。
 
 use std::convert::Infallible;
+use std::sync::{Arc, Mutex};
 
 use ferry_core::{EdgeSwitch, KeyRemap, Pressed, Side, Transition, bounds};
 use ferry_net::Framed;
-use ferry_platform::{CaptureEvent, Displays, InputCapture};
-use ferry_proto::{Bye, ByeReason, Channel, Enter, Message};
+use ferry_platform::{CaptureEvent, Clipboard, Displays, InputCapture};
+use ferry_proto::{Bye, ByeReason, Capabilities, Channel, Enter, Message, RejectReason};
 use ferry_types::{Display, InputEvent, KeyAction, KeyCode, Point};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::{self, UnboundedReceiver};
+use tokio::sync::watch;
 use tokio::time::{MissedTickBehavior, interval, timeout};
 use tracing::{debug, info, warn};
 
+use crate::clipboard::{self, ClipboardTask, SharedClipboard};
 use crate::error::{Error, Result};
 use crate::heartbeat::{self, Heartbeat};
-use crate::link::{CAPABILITIES, HANDSHAKE_TIMEOUT, primary_scale, send};
+use crate::link::{HANDSHAKE_TIMEOUT, capabilities, primary_scale, send};
 
 pub struct ServerConfig {
     /// 客户端的屏幕位于本机的哪一侧。
@@ -26,22 +31,26 @@ pub struct ServerConfig {
     pub name: String,
     /// 发送前对按键做的重映射，例如把 Command 当作对方的 Ctrl。
     pub remap: KeyRemap,
+    /// 是否同步剪贴板。
+    pub clipboard: bool,
 }
 
 /// 运行服务端：在 `listener` 上一次服务一个客户端，断开后继续等待下一个。
 ///
 /// 只有启动失败（例如捕获权限不足）时才返回错误。
-pub async fn serve<C, D>(
+pub async fn serve<C, D, K>(
     listener: TcpListener,
     config: ServerConfig,
     capture: C,
     displays: D,
+    clipboard: K,
 ) -> Result<Infallible>
 where
     C: InputCapture,
     D: Displays,
+    K: Clipboard,
 {
-    let mut server = Server::start(config, capture, displays)?;
+    let mut server = Server::start(config, capture, displays, clipboard)?;
     info!(addr = %listener.local_addr()?, "等待客户端连接");
 
     let mut session = 0u64;
@@ -61,7 +70,7 @@ where
 
         session += 1;
         info!(%peer, "客户端已连接");
-        let result = server.session(stream, session).await;
+        let result = server.session(stream, session, &listener).await;
         server.return_control();
         match result {
             Ok(()) => info!(%peer, "客户端已断开"),
@@ -70,10 +79,14 @@ where
     }
 }
 
-struct Server<C, D> {
+struct Server<C, D, K> {
     config: ServerConfig,
+    capabilities: Capabilities,
     capture: C,
     displays: D,
+    clipboard: SharedClipboard<K>,
+    /// 光标是否在本机，供剪贴板同步判断谁是活动端。
+    active: watch::Sender<bool>,
     events: UnboundedReceiver<CaptureEvent>,
     switch: Option<EdgeSwitch>,
     /// 按着的鼠标键和（光标在对方屏幕时）按着的键。
@@ -81,26 +94,36 @@ struct Server<C, D> {
     pressed: Pressed,
 }
 
-impl<C: InputCapture, D: Displays> Server<C, D> {
-    fn start(config: ServerConfig, mut capture: C, displays: D) -> Result<Self> {
+impl<C: InputCapture, D: Displays, K: Clipboard> Server<C, D, K> {
+    fn start(config: ServerConfig, mut capture: C, displays: D, clipboard: K) -> Result<Self> {
         let (tx, events) = mpsc::unbounded_channel();
         capture.start(Box::new(move |event| {
             let _ = tx.send(event);
         }))?;
         Ok(Self {
+            capabilities: capabilities(config.clipboard),
             config,
             capture,
             displays,
+            clipboard: Arc::new(Mutex::new(clipboard)),
+            active: watch::Sender::new(true),
             events,
             switch: None,
             pressed: Pressed::new(),
         })
     }
 
-    async fn session(&mut self, stream: TcpStream, id: u64) -> Result<()> {
+    async fn session(&mut self, stream: TcpStream, id: u64, listener: &TcpListener) -> Result<()> {
         let mut framed = ferry_net::wrap(stream, Channel::Input)?;
-        let handshake = ferry_net::accept(&mut framed, CAPABILITIES, id, &self.config.name);
-        let (hello, _) = timeout(HANDSHAKE_TIMEOUT, handshake)
+        let handshake =
+            ferry_net::accept(&mut framed, self.capabilities, &self.config.name, |hello| {
+                match hello.channel {
+                    Channel::Input => Ok(id),
+                    // 数据连接只能在输入连接之后、带着它的会话号来。
+                    Channel::Data => Err(RejectReason::UNKNOWN_SESSION),
+                }
+            });
+        let (hello, welcome) = timeout(HANDSHAKE_TIMEOUT, handshake)
             .await
             .map_err(|_| Error::Timeout("握手"))??;
 
@@ -128,12 +151,26 @@ impl<C: InputCapture, D: Displays> Server<C, D> {
             scale,
         ));
 
+        self.active.send_replace(true);
+        let clipboard = welcome.capabilities.contains(Capabilities::CLIPBOARD);
+        let (data_tx, mut data_rx) = mpsc::channel(1);
+        // 会话结束时随之丢弃，剪贴板同步也就停了。
+        let mut _clipboard_task: Option<ClipboardTask> = None;
+
         let mut heartbeat = Heartbeat::new();
         let mut tick = interval(heartbeat::TICK);
         tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         loop {
             tokio::select! {
+                accepted = listener.accept() => match accepted {
+                    Ok((stream, peer)) => self.accept_data(stream, id, clipboard, data_tx.clone(), peer),
+                    Err(e) => warn!("接受连接失败：{e}"),
+                },
+                Some(data) = data_rx.recv() => {
+                    info!("数据连接已建立，开始同步剪贴板");
+                    _clipboard_task = Some(clipboard::spawn(data, self.clipboard.clone(), self.active.subscribe()));
+                }
                 event = self.events.recv() => {
                     let Some(event) = event else { return Ok(()) };
                     self.on_capture(event, &mut framed).await?;
@@ -159,6 +196,40 @@ impl<C: InputCapture, D: Displays> Server<C, D> {
                 }
             }
         }
+    }
+
+    /// 会话期间到来的连接只能是本会话的数据连接。握手放到后台，不耽误键鼠转发。
+    fn accept_data(
+        &self,
+        stream: TcpStream,
+        id: u64,
+        clipboard: bool,
+        established: mpsc::Sender<Framed<TcpStream>>,
+        peer: std::net::SocketAddr,
+    ) {
+        let capabilities = self.capabilities;
+        let name = self.config.name.clone();
+        tokio::spawn(async move {
+            let handshake = async {
+                let mut framed = ferry_net::wrap(stream, Channel::Data)?;
+                ferry_net::accept(&mut framed, capabilities, &name, |hello| {
+                    match hello.channel {
+                        Channel::Data if hello.session == id && clipboard => Ok(id),
+                        Channel::Data => Err(RejectReason::UNKNOWN_SESSION),
+                        Channel::Input => Err(RejectReason::BUSY),
+                    }
+                })
+                .await?;
+                Ok::<_, Error>(framed)
+            };
+            match timeout(HANDSHAKE_TIMEOUT, handshake).await {
+                Ok(Ok(framed)) => {
+                    let _ = established.send(framed).await;
+                }
+                Ok(Err(e)) => warn!(%peer, "拒绝了一个连接：{e}"),
+                Err(_) => warn!(%peer, "新连接握手超时"),
+            }
+        });
     }
 
     async fn on_capture(
@@ -238,6 +309,7 @@ impl<C: InputCapture, D: Displays> Server<C, D> {
                     locks: self.capture.lock_keys(),
                 };
                 send(framed, &Message::Enter(enter)).await?;
+                self.active.send_replace(false);
                 info!(?at, "光标进入对方屏幕");
             }
             Some(Transition::Move(position)) => {
@@ -252,6 +324,7 @@ impl<C: InputCapture, D: Displays> Server<C, D> {
                 self.capture.release(local_at)?;
                 // 对方收到 Leave 会松开所有键，这些键不再需要跟踪。
                 self.pressed.clear_keys();
+                self.active.send_replace(true);
                 send(framed, &Message::Leave { seq }).await?;
                 info!("光标回到本机");
             }
@@ -274,6 +347,7 @@ impl<C: InputCapture, D: Displays> Server<C, D> {
     /// 光标在对方屏幕时，立即放回本机。
     fn return_control(&mut self) {
         self.pressed.clear_keys();
+        self.active.send_replace(true);
         if let Some(at) = self.switch.take().as_mut().and_then(EdgeSwitch::abort) {
             match self.capture.release(at) {
                 Ok(()) => info!("已把控制权交还本机"),

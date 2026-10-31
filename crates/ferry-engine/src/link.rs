@@ -13,8 +13,14 @@ use crate::error::{Error, Result};
 /// 默认端口。
 pub const DEFAULT_PORT: u16 = 24810;
 
-/// 原型阶段不声明任何可选能力。
-pub(crate) const CAPABILITIES: Capabilities = Capabilities::empty();
+/// 本机声明的可选能力。
+pub(crate) fn capabilities(clipboard: bool) -> Capabilities {
+    if clipboard {
+        Capabilities::CLIPBOARD
+    } else {
+        Capabilities::empty()
+    }
+}
 
 pub(crate) const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 pub(crate) const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);

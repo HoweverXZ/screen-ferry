@@ -5,7 +5,8 @@ use std::io::IsTerminal;
 use std::net::SocketAddr;
 use std::process::ExitCode;
 
-use ferry_core::{KeyRemap, Side};
+use ferry_core::KeyRemap;
+use ferry_engine::{ClientConfig, ServerConfig};
 use tracing::{error, info};
 
 use crate::cli::{Mode, Options};
@@ -51,9 +52,22 @@ pub(crate) fn run(options: Options) -> ExitCode {
                     } else {
                         KeyRemap::none()
                     };
-                    serve(listen, side, remap, options.name).await
+                    let config = ServerConfig {
+                        side,
+                        name: options.name,
+                        remap,
+                        clipboard: options.clipboard,
+                    };
+                    serve(listen, config).await
                 }
-                Mode::Connect { server } => connect(server, options.name).await,
+                Mode::Connect { server } => {
+                    let config = ClientConfig {
+                        server,
+                        name: options.name,
+                        clipboard: options.clipboard,
+                    };
+                    connect(config).await
+                }
             }
         };
         // 收到 Ctrl+C 时让引擎正常析构：归还鼠标控制、松开按键，而不是被系统直接杀掉。
@@ -75,34 +89,32 @@ pub(crate) fn run(options: Options) -> ExitCode {
 }
 
 #[cfg(target_os = "macos")]
-async fn serve(listen: SocketAddr, side: Side, remap: KeyRemap, name: String) -> AppResult {
-    use ferry_engine::ServerConfig;
+async fn serve(listen: SocketAddr, config: ServerConfig) -> AppResult {
     use ferry_platform::Permissions;
-    use ferry_platform_macos::{MacCapture, MacDisplays, MacPermissions};
+    use ferry_platform_macos::{MacCapture, MacClipboard, MacDisplays, MacPermissions};
 
     MacPermissions.check_input()?;
     let listener = tokio::net::TcpListener::bind(listen).await?;
-    let config = ServerConfig { side, name, remap };
-    Ok(ferry_engine::serve(listener, config, MacCapture::new(), MacDisplays).await?)
+    let capture = MacCapture::new();
+    Ok(ferry_engine::serve(listener, config, capture, MacDisplays, MacClipboard::new()).await?)
 }
 
 #[cfg(not(target_os = "macos"))]
-async fn serve(_listen: SocketAddr, _side: Side, _remap: KeyRemap, _name: String) -> AppResult {
+async fn serve(_listen: SocketAddr, _config: ServerConfig) -> AppResult {
     Err("原型阶段只能在 macOS 上运行 serve".into())
 }
 
 #[cfg(target_os = "windows")]
-async fn connect(server: SocketAddr, name: String) -> AppResult {
-    use ferry_engine::ClientConfig;
+async fn connect(config: ClientConfig) -> AppResult {
     use ferry_platform::Permissions;
-    use ferry_platform_windows::{WinDisplays, WinInject, WinPermissions};
+    use ferry_platform_windows::{WinClipboard, WinDisplays, WinInject, WinPermissions};
 
     WinPermissions.check_input()?;
-    let config = ClientConfig { server, name };
-    Ok(ferry_engine::connect(config, WinInject::new(), WinDisplays::new()).await?)
+    let (inject, displays) = (WinInject::new(), WinDisplays::new());
+    Ok(ferry_engine::connect(config, inject, displays, WinClipboard::new()).await?)
 }
 
 #[cfg(not(target_os = "windows"))]
-async fn connect(_server: SocketAddr, _name: String) -> AppResult {
+async fn connect(_config: ClientConfig) -> AppResult {
     Err("原型阶段只能在 Windows 上运行 connect".into())
 }

@@ -16,6 +16,7 @@ mod keymap;
 mod permission;
 
 pub use capture::{CaptureEvent, CaptureSink, InputCapture};
+pub use clipboard::Clipboard;
 pub use display::Displays;
 pub use error::{Error, Result};
 pub use inject::InputInject;

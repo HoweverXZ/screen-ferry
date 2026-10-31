@@ -2,11 +2,12 @@
 //!
 //! 只依赖 ferry-platform 的 trait，具体平台实现由应用注入。层级：L3。
 //!
-//! 目前是端到端验证原型：一台服务端（拥有键鼠）对一台客户端，只转发鼠标。
+//! 目前是端到端验证原型：一台服务端（拥有键鼠）对一台客户端，共享键鼠和剪贴板文本。
 
 #![forbid(unsafe_code)]
 
 mod client;
+mod clipboard;
 mod error;
 mod heartbeat;
 mod link;

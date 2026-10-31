@@ -7,8 +7,8 @@ use ferry_engine::DEFAULT_PORT;
 
 pub(crate) const USAGE: &str = "\
 用法：
-  screenferry serve   [--listen 地址] [--side 方向] [--name 设备名] [--no-cmd-ctrl-swap] [-v]
-  screenferry connect <服务端地址> [--name 设备名] [-v]
+  screenferry serve   [--listen 地址] [--side 方向] [--name 设备名] [--no-cmd-ctrl-swap] [--no-clipboard] [-v]
+  screenferry connect <服务端地址> [--name 设备名] [--no-clipboard] [-v]
 
 命令：
   serve      在拥有键鼠的电脑上运行，等待另一台连接
@@ -20,6 +20,8 @@ pub(crate) const USAGE: &str = "\
   --name     显示给对方的设备名，默认取计算机名
   --no-cmd-ctrl-swap
              不互换 Command 与 Ctrl。默认互换，在 Windows 上 ⌘C、⌘V 即复制粘贴
+  --no-clipboard
+             不同步剪贴板。任意一端加上即关闭
   -v         输出调试日志
   -h         显示本帮助
 
@@ -33,6 +35,7 @@ pub(crate) enum Parsed {
 pub(crate) struct Options {
     pub(crate) mode: Mode,
     pub(crate) name: String,
+    pub(crate) clipboard: bool,
     pub(crate) verbose: bool,
 }
 
@@ -60,6 +63,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, St
     let mut swap_cmd_ctrl = true;
     let mut server = None;
     let mut name = None;
+    let mut clipboard = true;
     let mut verbose = false;
 
     while let Some(arg) = args.next() {
@@ -68,6 +72,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, St
             "-h" | "--help" => return Ok(Parsed::Help),
             "-v" | "--verbose" => verbose = true,
             "--name" => name = Some(value("--name")?),
+            "--no-clipboard" => clipboard = false,
             "--listen" if command == "serve" => listen = resolve(&value("--listen")?)?,
             "--side" if command == "serve" => side = parse_side(&value("--side")?)?,
             "--no-cmd-ctrl-swap" if command == "serve" => swap_cmd_ctrl = false,
@@ -91,6 +96,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, St
     Ok(Parsed::Run(Options {
         mode,
         name: name.unwrap_or_else(default_name),
+        clipboard,
         verbose,
     }))
 }

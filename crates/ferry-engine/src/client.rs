@@ -1,6 +1,7 @@
 //! 客户端：被控制的一方。连接服务端，把收到的输入注入本机。
 //!
 //! 光标离开、连接断开或心跳超时时，都会立即松开所有按着的键，杜绝卡键。
+//! 光标在服务端屏幕上时，本机光标隐藏起来；会话结束时恢复。
 //!
 //! 所有连接都走 TLS 1.3。服务端的证书不在信任列表里（第一次连接，或对方换了身份）时，
 //! 先发起配对，由两边的用户核对配对码，确认后才建立会话。
@@ -101,6 +102,7 @@ where
         cursor: Point::default(),
         events: config.events.clone(),
         in_session: false,
+        cursor_hidden: false,
     };
     let mut searching = false;
     let mut seen = Vec::new();
@@ -117,6 +119,7 @@ where
         };
         let result = client.session(&config, &displays, &target).await;
         client.release_all();
+        client.hide_cursor(false);
         client.active.send_replace(false);
         if std::mem::take(&mut client.in_session) {
             let reason = result.as_ref().err().map(ToString::to_string);
@@ -266,13 +269,18 @@ struct Client<I: InputInject, K, P> {
     events: Events,
     /// 已建立会话、还没报告断开。
     in_session: bool,
+    /// 本机光标是否被隐藏（光标在服务端屏幕上）。
+    cursor_hidden: bool,
 }
 
-/// 无论因为什么停下（包括整个引擎被关掉），都松开对方按着的键，杜绝卡键。
+/// 无论因为什么停下（包括整个引擎被关掉），都松开对方按着的键、让本机光标重新出现。
 impl<I: InputInject, K, P> Drop for Client<I, K, P> {
     fn drop(&mut self) {
         for event in self.pressed.release_all(self.cursor) {
             let _ = self.inject.inject(&event);
+        }
+        if self.cursor_hidden {
+            let _ = self.inject.set_cursor_hidden(false);
         }
     }
 }
@@ -314,6 +322,8 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
         send(&mut framed, &Message::Displays(displays.displays()?)).await?;
         info!(server = %welcome.name, fingerprint = %server, "已连接，等待光标进入");
         self.in_session = true;
+        // 刚连上时光标在服务端屏幕上。
+        self.hide_cursor(true);
         self.events.emit(Event::Connected {
             name: welcome.name.clone(),
             fingerprint: server,
@@ -372,6 +382,7 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                     }
                 }
                 Some(Message::Enter(enter)) => {
+                    self.hide_cursor(false);
                     self.move_to(enter.position);
                     // 只同步 Caps Lock：对方可能没有 Num Lock（例如 Mac），同步它会误关本机的小键盘。
                     if let Err(e) = self.inject.sync_locks(enter.locks, LockKeys::CAPS) {
@@ -386,6 +397,7 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                 }
                 Some(Message::Leave { .. }) => {
                     self.release_all();
+                    self.hide_cursor(true);
                     self.active.send_replace(false);
                     info!("光标离开本机");
                     self.events.emit(Event::Cursor {
@@ -487,6 +499,17 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
     fn move_to(&mut self, position: Point) {
         self.cursor = position;
         self.inject(&InputEvent::PointerMotion { position });
+    }
+
+    /// 光标在服务端屏幕上时隐藏本机光标，回到本机时重新显示。失败只影响显示，不影响控制。
+    fn hide_cursor(&mut self, hidden: bool) {
+        if self.cursor_hidden == hidden {
+            return;
+        }
+        self.cursor_hidden = hidden;
+        if let Err(e) = self.inject.set_cursor_hidden(hidden) {
+            debug!("{}本机光标失败：{e}", if hidden { "隐藏" } else { "显示" });
+        }
     }
 
     fn release_all(&mut self) {

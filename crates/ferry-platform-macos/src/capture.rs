@@ -2,6 +2,7 @@
 //!
 //! 用 CGEventTap 在会话层拦截鼠标事件，回调运行在专用线程的 CFRunLoop 上。抓取期间：
 //! - 光标与鼠标解耦，光标停在原地，事件里仍带有相对位移；
+//! - 本机光标隐藏起来，免得对方屏幕上的光标在动、本机屏幕边缘还停着一个；
 //! - 事件被吞掉，本机程序收不到。
 //!
 //! 键盘：光标在本机时只记录哪些键按着，不交给 sink；抓取期间转交 sink 并吞掉。
@@ -14,9 +15,8 @@ use std::collections::BTreeSet;
 use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr::{self, NonNull};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc;
+use std::sync::{Arc, Once, mpsc};
 use std::thread::{self, JoinHandle};
 
 use ferry_platform::{CaptureEvent, CaptureSink, Error, InputCapture, Result};
@@ -27,10 +27,12 @@ use objc2_core_foundation::{
     CFMachPort, CFRetained, CFRunLoop, CGPoint, kCFRunLoopCommonModes, kCFRunLoopDefaultMode,
 };
 use objc2_core_graphics::{
-    CGAssociateMouseAndMouseCursorPosition, CGEvent, CGEventField, CGEventFlags, CGEventSource,
-    CGEventSourceStateID, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
-    CGEventTapProxy, CGEventType, CGWarpMouseCursorPosition,
+    CGAssociateMouseAndMouseCursorPosition, CGDisplayHideCursor, CGDisplayShowCursor, CGEvent,
+    CGEventField, CGEventFlags, CGEventSource, CGEventSourceStateID, CGEventTapLocation,
+    CGEventTapOptions, CGEventTapPlacement, CGEventTapProxy, CGEventType, CGMainDisplayID,
+    CGWarpMouseCursorPosition,
 };
+use objc2_foundation::NSString;
 
 use crate::display::check;
 use crate::keymap::{hid_code, media_key, modifier_flag};
@@ -63,8 +65,47 @@ const EVENTS: [CGEventType; 15] = [
 /// 捕获线程每隔这么久检查一次是否该退出（同时也会被立即唤醒）。
 const POLL_SECONDS: f64 = 0.5;
 
+#[link(name = "CoreGraphics", kind = "framework")]
+unsafe extern "C" {
+    /// 本进程与窗口服务器之间的连接。系统私有接口，没有公开的头文件。
+    fn _CGSDefaultConnection() -> i32;
+    /// 设置这条连接的属性。系统私有接口。
+    fn CGSSetConnectionProperty(
+        connection: i32,
+        target: i32,
+        key: *const c_void,
+        value: *const c_void,
+    ) -> i32;
+}
+
+#[link(name = "CoreFoundation", kind = "framework")]
+unsafe extern "C" {
+    static kCFBooleanTrue: *const c_void;
+}
+
+/// 后台程序默认改不了光标的显示：窗口服务器只听前台应用的。给本进程的连接打开
+/// `SetsCursorInBackground` 之后，隐藏光标才对后台程序生效。整个进程只需做一次。
+fn allow_cursor_control_in_background() {
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        let key = NSString::from_str("SetsCursorInBackground");
+        // SAFETY: NSString 与 CFString 可以互相转换；键和值在调用期间都有效。
+        unsafe {
+            let connection = _CGSDefaultConnection();
+            CGSSetConnectionProperty(
+                connection,
+                connection,
+                objc2::rc::Retained::as_ptr(&key).cast(),
+                kCFBooleanTrue,
+            );
+        }
+    });
+}
+
 pub struct MacCapture {
     grabbed: Arc<AtomicBool>,
+    /// 本机光标是否被隐藏。隐藏与显示由系统计数，必须一一对应，所以记下来。
+    cursor_hidden: AtomicBool,
     worker: Option<Worker>,
 }
 
@@ -93,7 +134,23 @@ impl MacCapture {
     pub fn new() -> Self {
         Self {
             grabbed: Arc::new(AtomicBool::new(false)),
+            cursor_hidden: AtomicBool::new(false),
             worker: None,
+        }
+    }
+
+    fn hide_cursor(&self) {
+        if self.cursor_hidden.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        allow_cursor_control_in_background();
+        // 隐藏失败不影响切换，只是本机屏幕上还看得到光标。
+        let _ = CGDisplayHideCursor(CGMainDisplayID());
+    }
+
+    fn show_cursor(&self) {
+        if self.cursor_hidden.swap(false, Ordering::SeqCst) {
+            let _ = CGDisplayShowCursor(CGMainDisplayID());
         }
     }
 }
@@ -154,6 +211,7 @@ impl InputCapture for MacCapture {
             "CGAssociateMouseAndMouseCursorPosition",
         )?;
         self.grabbed.store(true, Ordering::SeqCst);
+        self.hide_cursor();
         Ok(())
     }
 
@@ -167,6 +225,8 @@ impl InputCapture for MacCapture {
             CGAssociateMouseAndMouseCursorPosition(true),
             "CGAssociateMouseAndMouseCursorPosition",
         );
+        // 光标已经放到回来的位置，再让它出现。
+        self.show_cursor();
         warped.and(associated)
     }
 
@@ -186,6 +246,7 @@ impl Drop for MacCapture {
         if self.grabbed.swap(false, Ordering::SeqCst) {
             let _ = CGAssociateMouseAndMouseCursorPosition(true);
         }
+        self.show_cursor();
         if let Some(worker) = self.worker.take() {
             worker.stop.store(true, Ordering::SeqCst);
             worker.run_loop.0.stop();

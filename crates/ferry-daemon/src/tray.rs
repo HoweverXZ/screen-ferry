@@ -1,4 +1,5 @@
 //! 托盘图标：显示共享状态，菜单里可以暂停或继续共享、打开设置、退出。
+//! macOS 按菜单栏的习惯，点图标弹出菜单；Windows 按任务栏的习惯，左键直接打开设置界面，右键弹出菜单。
 //!
 //! 托盘对象只能在主线程上创建和修改，所以放在主线程的线程局部变量里；
 //! 状态变化时由引擎所在的线程经 [`Dispatcher`] 把更新交给主线程。
@@ -42,7 +43,10 @@ mod art {
     pub(super) const PAUSED: &[u8] = include_bytes!("../../../assets/icons/tray-color-paused.png");
 
     pub(super) fn builder(icon: Icon) -> TrayIconBuilder {
-        TrayIconBuilder::new().with_icon(icon)
+        // 左键留给“打开设置界面”，菜单只在右键时弹出。
+        TrayIconBuilder::new()
+            .with_icon(icon)
+            .with_menu_on_left_click(false)
     }
 
     pub(super) fn set(tray: &TrayIcon, icon: Icon) -> tray_icon::Result<()> {
@@ -85,6 +89,23 @@ pub(crate) fn install(handle: Handle) -> Result<(), Box<dyn std::error::Error>> 
         .with_tooltip("ScreenFerry")
         .with_menu(Box::new(menu))
         .build()?;
+
+    #[cfg(target_os = "windows")]
+    {
+        use tray_icon::{MouseButton, MouseButtonState, TrayIconEvent};
+
+        let handle = handle.clone();
+        TrayIconEvent::set_event_handler(Some(move |event: TrayIconEvent| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                handle.send(Command::OpenSettings);
+            }
+        }));
+    }
 
     MenuEvent::set_event_handler(Some(move |event: MenuEvent| match event.id.0.as_str() {
         TOGGLE => {

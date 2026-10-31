@@ -1,0 +1,188 @@
+//! 把本机光标藏起来：光标停在一个 1×1 的窗口上，这个窗口的光标是全透明的，于是看不见。
+//! 本机用户一动鼠标，光标离开这一个像素就会重新出现，不需要额外处理。
+//!
+//! 窗口要有消息循环才能设置光标形状，所以它跑在自己的线程上；其他线程只给它投递消息。
+
+use std::sync::mpsc;
+use std::thread;
+
+use ferry_platform::{Error, Result};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::WindowsAndMessaging::{
+    CreateCursor, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW,
+    GetSystemMetrics, HWND_TOPMOST, MSG, PostMessageW, PostQuitMessage, RegisterClassW,
+    SM_CXCURSOR, SM_CXSCREEN, SM_CYCURSOR, SM_CYSCREEN, SW_HIDE, SWP_NOACTIVATE, SWP_SHOWWINDOW,
+    SetCursorPos, SetWindowPos, ShowWindow, TranslateMessage, WM_APP, WM_DESTROY, WNDCLASSW,
+    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+};
+use windows::core::w;
+
+/// 把窗口放到屏幕中央、光标移上去。
+const WM_HIDE_CURSOR: u32 = WM_APP + 10;
+/// 收起窗口。光标已经被移走时它本来就可见。
+const WM_SHOW_CURSOR: u32 = WM_APP + 11;
+/// 销毁窗口，结束线程。
+const WM_STOP: u32 = WM_APP + 12;
+
+#[derive(Debug)]
+pub(crate) struct CursorHider {
+    /// 窗口句柄本身不是 Send，以整数保存；PostMessageW 可以在任何线程调用。
+    hwnd: isize,
+}
+
+impl CursorHider {
+    pub(crate) fn start() -> Result<Self> {
+        let (tx, rx) = mpsc::channel();
+        thread::Builder::new()
+            .name("ferry-cursor".into())
+            .spawn(move || {
+                let hwnd = match create_window() {
+                    Ok(hwnd) => hwnd,
+                    Err(e) => {
+                        let _ = tx.send(Err(e));
+                        return;
+                    }
+                };
+                let _ = tx.send(Ok(hwnd.0 as isize));
+                let mut msg = MSG::default();
+                // SAFETY: 标准的消息循环，msg 指向有效的缓冲区。
+                unsafe {
+                    while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+                        let _ = TranslateMessage(&msg);
+                        DispatchMessageW(&msg);
+                    }
+                }
+            })
+            .map_err(|e| Error::Os {
+                call: "thread::spawn",
+                detail: e.to_string(),
+            })?;
+        let hwnd = rx.recv().map_err(|_| Error::Os {
+            call: "CreateWindowExW",
+            detail: "隐藏光标的线程意外退出".into(),
+        })??;
+        Ok(Self { hwnd })
+    }
+
+    pub(crate) fn set_hidden(&self, hidden: bool) -> Result<()> {
+        self.post(if hidden {
+            WM_HIDE_CURSOR
+        } else {
+            WM_SHOW_CURSOR
+        })
+    }
+
+    fn post(&self, msg: u32) -> Result<()> {
+        // SAFETY: 窗口在本对象存在期间一直存在。
+        unsafe { PostMessageW(Some(HWND(self.hwnd as *mut _)), msg, WPARAM(0), LPARAM(0)) }
+            .map_err(|e| os("PostMessageW", e))
+    }
+}
+
+impl Drop for CursorHider {
+    fn drop(&mut self) {
+        let _ = self.post(WM_STOP);
+    }
+}
+
+/// 在当前线程创建隐藏用的窗口：1×1、置顶、不在任务栏、不抢焦点，类光标是全透明的。
+fn create_window() -> Result<HWND> {
+    // SAFETY: 参数都是有效的常量、刚取得的句柄或在调用期间有效的缓冲区。
+    unsafe {
+        let instance = GetModuleHandleW(None).map_err(|e| os("GetModuleHandleW", e))?;
+        let (width, height) = (
+            GetSystemMetrics(SM_CXCURSOR).max(1),
+            GetSystemMetrics(SM_CYCURSOR).max(1),
+        );
+        // 单色位图每行按 16 位对齐。AND 全 1、XOR 全 0：每个像素都透明。
+        let stride = (width as usize).div_ceil(16) * 2;
+        let and_mask = vec![0xFF_u8; stride * height as usize];
+        let xor_mask = vec![0_u8; stride * height as usize];
+        let blank = CreateCursor(
+            Some(instance.into()),
+            0,
+            0,
+            width,
+            height,
+            and_mask.as_ptr().cast(),
+            xor_mask.as_ptr().cast(),
+        )
+        .map_err(|e| os("CreateCursor", e))?;
+
+        let class = w!("ScreenFerryCursorHider");
+        let wc = WNDCLASSW {
+            lpfnWndProc: Some(window_proc),
+            hInstance: instance.into(),
+            hCursor: blank,
+            lpszClassName: class,
+            ..Default::default()
+        };
+        RegisterClassW(&wc);
+        CreateWindowExW(
+            WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+            class,
+            w!(""),
+            WS_POPUP,
+            0,
+            0,
+            1,
+            1,
+            None,
+            None,
+            Some(instance.into()),
+            None,
+        )
+        .map_err(|e| os("CreateWindowExW", e))
+    }
+}
+
+unsafe extern "system" fn window_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    // SAFETY: 都是对本线程自己的窗口和光标的操作。
+    unsafe {
+        match msg {
+            WM_HIDE_CURSOR => {
+                let (x, y) = (
+                    GetSystemMetrics(SM_CXSCREEN) / 2,
+                    GetSystemMetrics(SM_CYSCREEN) / 2,
+                );
+                let _ = SetWindowPos(
+                    hwnd,
+                    Some(HWND_TOPMOST),
+                    x,
+                    y,
+                    1,
+                    1,
+                    SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                );
+                let _ = SetCursorPos(x, y);
+                LRESULT(0)
+            }
+            WM_SHOW_CURSOR => {
+                let _ = ShowWindow(hwnd, SW_HIDE);
+                LRESULT(0)
+            }
+            WM_STOP => {
+                let _ = DestroyWindow(hwnd);
+                LRESULT(0)
+            }
+            WM_DESTROY => {
+                PostQuitMessage(0);
+                LRESULT(0)
+            }
+            _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+        }
+    }
+}
+
+fn os(call: &'static str, e: windows::core::Error) -> Error {
+    Error::Os {
+        call,
+        detail: e.message(),
+    }
+}

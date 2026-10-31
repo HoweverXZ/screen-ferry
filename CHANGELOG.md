@@ -38,6 +38,10 @@
   - 设备身份存于数据目录的 `identity/`，已信任设备存于 `peers.toml`（`schema_version = 1`）。
   - 新增 `screenferry peers`、`screenferry forget`，以及 `--data-dir`。
   - 协议：新增配对连接（`channel = 3`）、`PairCommit` / `PairNonce` / `PairResult` 消息、`Reject` 原因 `NOT_PAIRED`。
+- 光标切到对方屏幕时，本机的光标隐藏起来，不再在屏幕边缘停着一个：
+  - macOS：抓取期间隐藏光标（后台程序也能隐藏），回到本机时在回来的位置重新显示。
+  - Windows：光标离开时停到屏幕中央一个看不见的位置，本机用户一动鼠标就重新出现；会话结束时恢复。
+- Windows 托盘：左键直接打开设置界面，右键弹出菜单。
 - Windows 设置界面：
   - 新增 `app/windows` 宿主工程：去掉系统标题栏（保留左、右、下边框的拖动缩放、贴边分屏和窗口阴影），Windows 11 圆角，最小 375×667，默认 1160×780 居中。
   - 右上角画最小化、最大化（最大化后变为还原）、关闭按钮，顶部 32 点可拖动、双击最大化；与 macOS 红绿灯那一行占同样的位置，页面布局完全一致。

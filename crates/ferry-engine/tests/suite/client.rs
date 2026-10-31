@@ -71,3 +71,32 @@ async fn keys_are_released_when_the_client_engine_is_stopped() {
     })
     .await;
 }
+
+#[tokio::test]
+async fn the_local_cursor_is_hidden_while_the_pointer_is_on_the_server() {
+    let rig = Rig::start().await;
+    eventually(
+        "连上后隐藏本机光标（光标在服务端）",
+        || rig.inject.cursor_hidden() == [true],
+    )
+    .await;
+
+    rig.enter().await;
+    eventually("光标过来时显示", || {
+        rig.inject.cursor_hidden() == [true, false]
+    })
+    .await;
+
+    rig.leave().await;
+    eventually("光标离开时再隐藏", || {
+        rig.inject.cursor_hidden() == [true, false, true]
+    })
+    .await;
+
+    // 服务端消失：会话结束，光标一定要恢复显示。
+    rig.server.abort();
+    eventually("断开后恢复显示", || {
+        rig.inject.cursor_hidden() == [true, false, true, false]
+    })
+    .await;
+}

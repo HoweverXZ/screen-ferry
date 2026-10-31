@@ -2,6 +2,9 @@
 //!
 //! 绝对移动使用整个虚拟桌面的归一化坐标（0–65535），换算时落在目标像素的中心，避免差一像素。
 //! 键盘用扫描码注入，不受键盘布局和输入法影响。
+//! 光标在对方屏幕上时，本机光标停到一个看不见的位置（见 [`hider`]）。
+
+mod hider;
 
 use ferry_platform::{Error, InputInject, Result};
 use ferry_types::{InputEvent, KeyAction, KeyCode, LockKeys, MouseButton, Point};
@@ -20,15 +23,19 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 use crate::display::{ensure_dpi_aware, last_error};
 use crate::keymap::{WinKey, win_key};
+use hider::CursorHider;
 
 /// 本机键鼠注入。
 #[derive(Debug)]
-pub struct WinInject(());
+pub struct WinInject {
+    /// 第一次需要隐藏光标时才创建。
+    hider: Option<CursorHider>,
+}
 
 impl WinInject {
     pub fn new() -> Self {
         ensure_dpi_aware();
-        Self(())
+        Self { hider: None }
     }
 }
 
@@ -94,6 +101,16 @@ impl InputInject for WinInject {
             }
         }
         Ok(())
+    }
+
+    fn set_cursor_hidden(&mut self, hidden: bool) -> Result<()> {
+        let hider = match &self.hider {
+            Some(hider) => hider,
+            // 从没藏过，也就不需要再显示。
+            None if !hidden => return Ok(()),
+            None => self.hider.insert(CursorHider::start()?),
+        };
+        hider.set_hidden(hidden)
     }
 }
 

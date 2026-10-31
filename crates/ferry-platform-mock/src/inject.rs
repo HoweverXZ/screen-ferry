@@ -15,6 +15,7 @@ pub struct MockInject {
 struct State {
     events: Vec<InputEvent>,
     synced_locks: Vec<LockKeys>,
+    cursor_hidden: Vec<bool>,
 }
 
 impl MockInject {
@@ -32,6 +33,11 @@ impl MockInject {
         self.lock().synced_locks.clone()
     }
 
+    /// 每次隐藏（`true`）或显示（`false`）本机光标的请求，按先后排列。
+    pub fn cursor_hidden(&self) -> Vec<bool> {
+        self.lock().cursor_hidden.clone()
+    }
+
     fn lock(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
@@ -45,6 +51,11 @@ impl InputInject for MockInject {
 
     fn sync_locks(&mut self, wanted: LockKeys, mask: LockKeys) -> Result<()> {
         self.lock().synced_locks.push(wanted & mask);
+        Ok(())
+    }
+
+    fn set_cursor_hidden(&mut self, hidden: bool) -> Result<()> {
+        self.lock().cursor_hidden.push(hidden);
         Ok(())
     }
 }

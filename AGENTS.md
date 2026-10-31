@@ -42,6 +42,7 @@ screen-ferry/
 ├─ deny.toml               # cargo-deny：许可证、漏洞、重复依赖检查
 ├─ .cargo/config.toml      # 别名：cargo xtask …
 ├─ .editorconfig
+├─ .gitattributes          # 检出时统一用 LF 换行
 ├─ .gitignore
 ├─ AGENTS.md               # 本规范
 ├─ CLAUDE.md               # 只有一行 @AGENTS.md，供 Claude Code 读取

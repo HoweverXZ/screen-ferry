@@ -1,0 +1,8 @@
+# 文本文件在任何系统上检出都用 LF：rustfmt（newline_style = "Unix"）与 dart format 都按 LF 检查，
+# 否则 Windows 上默认的 core.autocrlf 会把检出的文件改成 CRLF，格式检查全部失败。
+* text=auto eol=lf
+
+# 二进制资源
+*.png binary
+*.ico binary
+*.icns binary

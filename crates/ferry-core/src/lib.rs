@@ -3,3 +3,11 @@
 //! 层级：L1。纯逻辑，无 IO、无异步。
 
 #![forbid(unsafe_code)]
+
+mod edge_switch;
+mod layout;
+mod pressed;
+
+pub use edge_switch::{EdgeSwitch, Transition};
+pub use layout::{Side, bounds};
+pub use pressed::Pressed;

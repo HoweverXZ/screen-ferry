@@ -17,6 +17,9 @@ ferry-platform.workspace = true
 ferry-proto.workspace = true
 ferry-store.workspace = true
 ferry-types.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "net", "rt", "sync", "time"] }
+tracing.workspace = true
 
 [dev-dependencies]
 ferry-platform-mock.workspace = true

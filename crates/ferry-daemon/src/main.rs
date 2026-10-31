@@ -3,13 +3,24 @@
 //! 层级：L4。按目标平台选择 `ferry-platform-*` 实现并注入 `ferry-engine`。
 
 #![forbid(unsafe_code)]
-#![cfg_attr(
-    all(target_os = "windows", not(debug_assertions)),
-    windows_subsystem = "windows"
-)]
 
 mod app;
+mod cli;
 
-fn main() -> std::process::ExitCode {
-    app::run()
+use std::process::ExitCode;
+
+fn main() -> ExitCode {
+    let options = match cli::parse(std::env::args().skip(1)) {
+        Ok(cli::Parsed::Run(options)) => options,
+        Ok(cli::Parsed::Help) => {
+            println!("{}", cli::USAGE);
+            return ExitCode::SUCCESS;
+        }
+        Err(e) => {
+            eprintln!("{e}\n\n{}", cli::USAGE);
+            return ExitCode::from(2);
+        }
+    };
+    app::init_logging(options.verbose);
+    app::run(options)
 }

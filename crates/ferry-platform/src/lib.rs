@@ -6,10 +6,17 @@
 
 #![forbid(unsafe_code)]
 
-pub mod autostart;
-pub mod capture;
-pub mod clipboard;
-pub mod display;
-pub mod inject;
-pub mod keymap;
-pub mod permission;
+mod autostart;
+mod capture;
+mod clipboard;
+mod display;
+mod error;
+mod inject;
+mod keymap;
+mod permission;
+
+pub use capture::{CaptureEvent, CaptureSink, InputCapture};
+pub use display::Displays;
+pub use error::{Error, Result};
+pub use inject::InputInject;
+pub use permission::Permissions;

@@ -11,6 +11,7 @@ test = false
 
 [dependencies]
 ferry-types.workspace = true
+thiserror.workspace = true
 
 [lints]
 workspace = true

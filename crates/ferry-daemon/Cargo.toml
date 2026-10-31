@@ -12,9 +12,12 @@ path = "src/main.rs"
 test = false
 
 [dependencies]
+ferry-core.workspace = true
 ferry-engine.workspace = true
 ferry-platform.workspace = true
-ferry-types.workspace = true
+tokio = { workspace = true, features = ["macros", "net", "rt", "signal"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 ferry-platform-windows.workspace = true

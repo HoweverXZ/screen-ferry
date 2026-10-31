@@ -4,10 +4,14 @@
 
 #![cfg(target_os = "macos")]
 
-pub mod autostart;
-pub mod capture;
-pub mod clipboard;
-pub mod display;
-pub mod inject;
-pub mod keymap;
-pub mod permission;
+mod autostart;
+mod capture;
+mod clipboard;
+mod display;
+mod inject;
+mod keymap;
+mod permission;
+
+pub use capture::MacCapture;
+pub use display::MacDisplays;
+pub use permission::MacPermissions;

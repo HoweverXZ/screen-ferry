@@ -13,5 +13,8 @@ test = false
 ferry-platform.workspace = true
 ferry-types.workspace = true
 
+[target.'cfg(target_os = "windows")'.dependencies]
+windows.workspace = true
+
 [lints]
 workspace = true

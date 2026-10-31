@@ -1,0 +1,27 @@
+# 协议解码器的 fuzz 测试。需要 nightly 和 cargo-fuzz：
+#   cargo install cargo-fuzz
+#   cargo +nightly fuzz run decode
+#
+# 独立 workspace，不受根目录工具链和 lint 约束。
+
+[package]
+name = "ferry-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+ferry-proto = { path = "../crates/ferry-proto" }
+libfuzzer-sys = "0.4"
+
+[[bin]]
+name = "decode"
+path = "fuzz_targets/decode.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]

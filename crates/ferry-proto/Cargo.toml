@@ -10,7 +10,9 @@ publish.workspace = true
 test = false
 
 [dependencies]
+bitflags.workspace = true
 ferry-types.workspace = true
+thiserror.workspace = true
 
 [lints]
 workspace = true

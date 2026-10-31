@@ -3,6 +3,7 @@
 /fuzz/target/
 /fuzz/artifacts/
 /fuzz/coverage/
+/fuzz/corpus/
 
 # 本地工具目录
 /.spec-workflow/

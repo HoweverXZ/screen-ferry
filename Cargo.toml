@@ -25,7 +25,9 @@ ferry-ipc = { path = "crates/ferry-ipc" }
 ferry-engine = { path = "crates/ferry-engine" }
 
 # ── 第三方 ──────────────────────────────────
+bitflags = "2"
 serde_json = "1"
+thiserror = "2"
 toml = "0.9"
 
 [workspace.lints.rust]

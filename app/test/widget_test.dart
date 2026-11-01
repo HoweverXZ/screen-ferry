@@ -472,6 +472,18 @@ void main() {
     });
   }
 
+  testWidgets('分组卡片按圆角裁剪内容，行的悬停底色不会从圆角溢出', (tester) async {
+    final state = await launch(tester, const Size(1160, 780));
+    state.go(SfPage.settings);
+    await settle(tester);
+    final groups = find.byType(SfGroup);
+    expect(groups, findsWidgets);
+    for (final group in groups.evaluate()) {
+      final clip = find.descendant(of: find.byWidget(group.widget), matching: find.byType(ClipPath)).first;
+      expect(tester.widget<ClipPath>(clip).clipper, isA<ShapeBorderClipper>());
+    }
+  });
+
   testWidgets('在设置里切换角色，把新角色发给后台', (tester) async {
     final backend = DemoBackend(animate: false);
     final state = await launch(tester, const Size(1160, 780), backend: backend);
@@ -689,13 +701,11 @@ void main() {
 
     DeviceSettings lastSent(DemoBackend backend) => backend.sent.whereType<SetDeviceRequest>().last.device;
 
-    testWidgets('设备卡片显示设置摘要，点开是这台的设置页，返回回到列表', (tester) async {
+    testWidgets('点设备卡片打开这台的设置页，返回回到列表', (tester) async {
       final state = await launch(tester, const Size(1160, 780));
       state.go(SfPage.devices);
       await settle(tester);
-      expect(find.text('垂直滚动反向'), findsOneWidget, reason: '办公室 PC 单独设置过');
-      expect(find.text('1 个按键映射'), findsOneWidget);
-      expect(find.text('默认设置'), findsNWidgets(2), reason: '另外两台都是默认设置');
+      expect(find.text('垂直滚动反向'), findsNothing, reason: '卡片上不列设置');
 
       await tester.tap(find.text('办公室 PC'));
       await settle(tester);
@@ -706,7 +716,7 @@ void main() {
       await tester.tap(find.byTooltip('返回设备列表'));
       await settle(tester);
       expect(state.openedDevice, isNull);
-      expect(find.text('垂直滚动反向'), findsOneWidget);
+      expect(find.text('光标速度'), findsNothing);
     });
 
     testWidgets('改一项发出这台设备的整份设置，其他项保持不变', (tester) async {
@@ -781,6 +791,20 @@ void main() {
       expect(lastSent(backend).alias, '会议室的电脑');
       expect(find.text('原名 办公室 PC'), findsOneWidget);
       expect(state.peers.first.displayName, '会议室的电脑');
+    });
+
+    testWidgets('给设备起了名字后，总览和布局页都显示起的名字', (tester) async {
+      final state = await launch(tester, const Size(1160, 780));
+      final linked = state.peer!;
+      state.setDevice(state.deviceSettings(linked.fingerprint).copyWith(alias: 'Windows 台式机'));
+      await settle(tester);
+      expect(state.peerName, 'Windows 台式机');
+      expect(find.text('Windows 台式机'), findsWidgets, reason: '总览的状态卡片');
+      expect(find.text(linked.name), findsNothing, reason: '不再显示它自己报的名字');
+
+      state.go(SfPage.layout);
+      await settle(tester);
+      expect(find.text('Windows 台式机'), findsOneWidget);
     });
 
     testWidgets('在设备页给本机改名', (tester) async {

@@ -121,9 +121,16 @@ class DemoBackend implements Backend {
   }
 
   String get _peerName =>
-      _linkPeer?.name ?? _peers.firstOrNull?.name ?? (role == Role.server ? '办公室 PC' : 'Mac Studio');
+      _shown(_linkPeer) ?? _shown(_peers.firstOrNull) ?? (role == Role.server ? '办公室 PC' : 'Mac Studio');
 
-  String _nameOf(String fingerprint) => _peers.where((p) => p.fingerprint == fingerprint).firstOrNull?.name ?? '对方';
+  /// 一台设备显示的名字：起过名字就用起的，和后台一样。
+  String? _shown(PeerInfo? p) {
+    if (p == null) return null;
+    final alias = _settings.device(p.fingerprint).alias.trim();
+    return alias.isEmpty ? p.name : alias;
+  }
+
+  String _nameOf(String fingerprint) => _shown(_peers.where((p) => p.fingerprint == fingerprint).firstOrNull) ?? '对方';
 
   @override
   ValueListenable<DaemonLink> get link => _link;
@@ -365,7 +372,20 @@ class DemoBackend implements Backend {
         cursorOnPeer: linkPeer != null && _cursor == linkPeer.fingerprint,
         rttMs: linkPeer != null ? List.of(_rtt) : const [],
       ),
-      clipboard: _clip,
+      // 和后台一样，按对方现在的名字显示最近一次同步。
+      clipboard: switch (_clip) {
+        final c? => ClipboardSync(
+          toPeer: c.toPeer,
+          peer: _peerName,
+          chars: c.chars,
+          bytes: c.bytes,
+          preview: c.preview,
+          rich: c.rich,
+          image: c.image,
+          at: c.at,
+        ),
+        null => null,
+      },
       peers: [
         for (final p in _peers)
           PeerInfo(

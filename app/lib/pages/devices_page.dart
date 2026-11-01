@@ -7,7 +7,6 @@ import 'package:flutter/material.dart';
 
 import '../state/app_scope.dart';
 import '../state/app_state.dart';
-import '../state/device_summary.dart';
 import '../theme/tokens.dart';
 import '../widgets/name_editor.dart';
 import '../widgets/page_scaffold.dart';
@@ -73,8 +72,8 @@ class DevicesPage extends StatelessWidget {
         ),
         SectionTitle('已配对', note: '${state.peers.length} 台'),
         _CardWall(
-          // 服务端的卡片多一行“在本机哪一侧”；设置摘要最多占两行。
-          height: state.isServer ? 300 : 278,
+          // 服务端的卡片多一行“在本机哪一侧”。
+          height: state.isServer ? 240 : 220,
           empty: const _Empty(
             icon: Icons.link_rounded,
             title: '还没有配对的设备',
@@ -177,9 +176,6 @@ class _PairedCard extends StatefulWidget {
 class _PairedCardState extends State<_PairedCard> {
   late final bool _fresh = AppScope.read(context).isFresh(widget.device.fingerprint);
 
-  /// 摘要最多显示几项，多出来的合成“+N”。
-  static const _maxChips = 3;
-
   @override
   Widget build(BuildContext context) {
     final d = widget.device;
@@ -189,10 +185,6 @@ class _PairedCardState extends State<_PairedCard> {
     final seen = d.online && addr.isNotEmpty ? '在线 · $addr' : seenText(d);
     // 服务端：这台设备贴在本机哪一侧（布局页里改）。
     final place = state.isServer ? state.placeOf(d.fingerprint) : null;
-    final summary = deviceSummary(state.deviceSettings(d.fingerprint));
-    final chips = summary.length > _maxChips
-        ? [...summary.take(_maxChips - 1), '+${summary.length - _maxChips + 1}']
-        : summary;
     void open() => state.openDevice(d.fingerprint);
     Widget card = Pressable(
       onTap: open,
@@ -250,15 +242,6 @@ class _PairedCardState extends State<_PairedCard> {
                 ],
               ),
             ],
-            const SizedBox(height: 10),
-            Semantics(
-              label: '这台的设置：${summary.join('、')}',
-              child: ExcludeSemantics(
-                child: ClipRect(
-                  child: Wrap(spacing: 6, runSpacing: 6, children: [for (final text in chips) _Chip(text)]),
-                ),
-              ),
-            ),
             const Spacer(),
             Divider(height: 1, thickness: 1, color: c.line),
             const SizedBox(height: 10),
@@ -295,25 +278,6 @@ class _PairedCardState extends State<_PairedCard> {
       );
     }
     return card;
-  }
-}
-
-/// 设置摘要里的一项。
-class _Chip extends StatelessWidget {
-  const _Chip(this.text);
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = SfColors.of(context);
-    return Container(
-      height: 24,
-      padding: const EdgeInsets.symmetric(horizontal: 9),
-      alignment: Alignment.center,
-      decoration: ShapeDecoration(color: c.card2, shape: const StadiumBorder()),
-      child: Text(text, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-    );
   }
 }
 

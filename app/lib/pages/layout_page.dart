@@ -380,7 +380,7 @@ class _StageState extends State<_Stage> {
   static String _order(ScreenSide side) => side == ScreenSide.left || side == ScreenSide.right ? '从上往下' : '从左往右';
 
   static String _label(PeerInfo p, ScreenSide side, int i, int k, {required bool cursor, required bool movable}) => [
-    '${p.name}，在本机${side.label}${k > 1 ? '${_order(side)}第 ${i + 1} 台' : ''}',
+    '${p.displayName}，在本机${side.label}${k > 1 ? '${_order(side)}第 ${i + 1} 台' : ''}',
     p.online ? '已连接' : '未连接',
     if (cursor) '光标在这台上',
     if (movable) '可以拖动',
@@ -395,7 +395,7 @@ class _StageState extends State<_Stage> {
     }
     if (shown.length == 1) {
       final p = shown.all.single;
-      return '${p.name} 在本机${shown.placeOf(p.fingerprint)!.side.label}，光标从相接的那条边穿过去';
+      return '${p.displayName} 在本机${shown.placeOf(p.fingerprint)!.side.label}，光标从相接的那条边穿过去';
     }
     final parts = [for (final s in shown.usedSides) '${s.label} ${shown.on(s).length} 台'];
     return '本机${parts.join('、')}。同一侧已连接的几台按先后平分那条边，光标从哪一段穿过去就到哪台';

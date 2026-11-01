@@ -94,6 +94,8 @@ pub(crate) struct Runtime<H> {
     /// 摘要里的那台，也是 `send_files` 不指定时发给的那台：光标最近去过的，否则最近连上的。
     focus: Option<Fingerprint>,
     clipboard: Option<ClipboardSync>,
+    /// 最近一次剪贴板同步的对方。界面上的名字按它现在的名字显示（中途可能改了名）。
+    clipboard_peer: Option<Fingerprint>,
     /// 剪贴板单项的大小上限，交给引擎共用，改设置时立即生效。
     clip_limit: ClipLimit,
     /// 最近一次同步的剪贴板图片存在磁盘上的那份，给设置界面预览。
@@ -160,6 +162,7 @@ impl<H: Host> Runtime<H> {
             cursor: None,
             focus: None,
             clipboard: None,
+            clipboard_peer: None,
             clip_limit,
             clip_preview: None,
             peers,
@@ -604,6 +607,7 @@ impl<H: Host> Runtime<H> {
                 to_peer,
                 summary,
             } => {
+                self.clipboard_peer = Some(peer);
                 let peer = self.peer_name(&peer);
                 self.activity.clipped();
                 let detail = match (&summary.image, summary.chars) {
@@ -1261,7 +1265,12 @@ impl<H: Host> Runtime<H> {
                 cursor_on_peer: self.cursor.is_some(),
                 rtt_ms: focus.map_or_else(Vec::new, |l| l.rtt.history()),
             },
-            clipboard: self.clipboard.clone(),
+            clipboard: self.clipboard.clone().map(|mut c| {
+                if let Some(peer) = &self.clipboard_peer {
+                    c.peer = self.peer_name(peer);
+                }
+                c
+            }),
             peers: self
                 .peers
                 .iter()

@@ -81,7 +81,8 @@ class _HeroCard extends StatelessWidget {
     final rtt = state.latestRtt;
 
     final (title, pill, tone) = switch (status) {
-      LinkStatus.connected => (peer?.name ?? state.peerName, '共享中', PillTone.good),
+      // 本机给它起过名字就显示起的名字。
+      LinkStatus.connected => (state.peerName, '共享中', PillTone.good),
       LinkStatus.paused => ('已暂停共享', '已暂停', PillTone.plain),
       LinkStatus.waiting => ('等待对方连接', '等待连接', PillTone.plain),
       LinkStatus.searching => ('正在寻找对方', '寻找中', PillTone.plain),

@@ -8,23 +8,30 @@ import 'pressable.dart';
 import 'surface.dart';
 
 /// 分组列表：一张卡片里若干行，行间有细分隔线。
+/// 内容按卡片的圆角裁剪：第一行、最后一行悬停时的底色不会从圆角溢出去。
 class SfGroup extends StatelessWidget {
   const SfGroup({super.key, required this.children});
 
   final List<Widget> children;
 
+  /// 与 [SfCard] 的圆角相同。
+  static const _radius = 26.0;
+
   @override
   Widget build(BuildContext context) {
     final line = SfColors.of(context).line;
-    return SfCard(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Column(
-        children: [
-          for (var i = 0; i < children.length; i++) ...[
-            if (i > 0) Divider(height: 1, thickness: 1, indent: 20, endIndent: 20, color: line),
-            children[i],
+    return ClipPath(
+      clipper: ShapeBorderClipper(shape: continuous(_radius)),
+      child: SfCard(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Column(
+          children: [
+            for (var i = 0; i < children.length; i++) ...[
+              if (i > 0) Divider(height: 1, thickness: 1, indent: 20, endIndent: 20, color: line),
+              children[i],
+            ],
           ],
-        ],
+        ),
       ),
     );
   }

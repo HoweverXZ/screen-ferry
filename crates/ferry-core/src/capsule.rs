@@ -24,7 +24,7 @@ pub mod hit {
     pub const OPEN: u32 = 2;
     pub const REVEAL: u32 = 3;
     pub const CLOSE: u32 = 4;
-    /// 卡片上可以把文件拖出去的那一条。
+    /// 卡片上可以把文件拖出去的地方：“拖到任意文件夹”那一条和文件图标。
     pub const CHIP: u32 = 5;
 }
 

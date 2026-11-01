@@ -130,11 +130,33 @@ pub enum Shape {
     },
 }
 
-/// 一块可以点的区域。
+/// 一块可以点（或按住拖动）的区域。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Hit {
     pub frame: Frame,
     pub id: u32,
+    /// 按住拖动时把文件拖出去（拖什么由浮层的使用方另行交代），而不是点一下就算。
+    pub drag: bool,
+}
+
+impl Hit {
+    /// 点一下就算数的区域。
+    pub const fn click(frame: Frame, id: u32) -> Self {
+        Self {
+            frame,
+            id,
+            drag: false,
+        }
+    }
+
+    /// 按住拖动时把文件拖出去的区域。
+    pub const fn drag(frame: Frame, id: u32) -> Self {
+        Self {
+            frame,
+            id,
+            drag: true,
+        }
+    }
 }
 
 /// 一帧浮层。

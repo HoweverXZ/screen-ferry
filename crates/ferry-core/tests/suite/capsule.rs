@@ -204,6 +204,56 @@ fn buttons_can_be_clicked_only_once_the_content_shows() {
 }
 
 #[test]
+fn a_card_with_the_chip_can_be_dragged_from_the_chip_and_the_file_icon() {
+    let Look::Card {
+        from,
+        name,
+        detail,
+        tile,
+        ..
+    } = card()
+    else {
+        unreachable!()
+    };
+    let look = Look::Card {
+        from,
+        name,
+        detail,
+        tile,
+        chip: true,
+    };
+    let mut capsule = Capsule::new();
+    capsule.show(
+        look.clone(),
+        Side::Left,
+        place(&look, Side::Left, SCREEN, 450.0, 1.0),
+    );
+    settle(&mut capsule);
+    let (_, scene) = capsule.render(1.0, ACCENT).unwrap();
+    let clicks: Vec<u32> = scene
+        .hits
+        .iter()
+        .filter(|h| !h.drag)
+        .map(|h| h.id)
+        .collect();
+    assert_eq!(
+        clicks,
+        [hit::CLOSE, hit::OPEN, hit::REVEAL],
+        "按钮仍是点一下"
+    );
+    let drags: Vec<_> = scene.hits.iter().filter(|h| h.drag).collect();
+    assert_eq!(drags.len(), 2, "那一条和文件图标都能拖：{drags:?}");
+    assert!(drags.iter().all(|h| h.id == hit::CHIP));
+    let chip = drags
+        .iter()
+        .max_by(|a, b| a.frame.w.total_cmp(&b.frame.w))
+        .unwrap();
+    let open = scene.hits.iter().find(|h| h.id == hit::OPEN).unwrap();
+    assert!(chip.frame.y >= open.frame.bottom(), "那一条在按钮下面");
+    assert!(chip.frame.bottom() <= scene.height);
+}
+
+#[test]
 fn the_lines_of_text_are_drawn() {
     assert_eq!(
         texts(&wide(Action::None, "证书.p12 · 3.2 KB")),

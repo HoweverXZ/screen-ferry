@@ -21,6 +21,11 @@ pub enum OverlayEvent {
     Dropped { paths: Vec<PathBuf> },
     /// 点了 [`Scene::hits`] 中编号为它的那一块。
     Clicked(u32),
+    /// 从可以拖动的那一块（[`Hit::drag`](ferry_types::Hit::drag)）开始把 [`Overlay::offer`]
+    /// 交来的文件拖了出去。
+    DragOutStarted,
+    /// 拖出去的文件放下了（`dropped`），或者取消了。放下后文件可能已被移走。
+    DragOutEnded { dropped: bool },
 }
 
 /// 接收浮层事件的回调。在系统的界面线程上调用，必须立即返回。
@@ -43,6 +48,11 @@ pub trait Overlay: Send {
 
     /// 正在拖的文件和文件夹；拖的不是文件时为空。
     fn dragged_files(&self) -> Vec<PathBuf>;
+
+    /// 从可以拖动的区域拖出去的文件和文件夹；为空时那些区域拖不动。
+    ///
+    /// 拖到文件夹里时由系统决定移动还是复制（同一磁盘上默认移动）；拖回浮层自己不算。
+    fn offer(&mut self, files: Vec<PathBuf>);
 
     /// 拖着东西靠近朝向对方的边时，留意贴边的这一条区域 `strip`（桌面坐标）；`None` 为不再留意。
     ///

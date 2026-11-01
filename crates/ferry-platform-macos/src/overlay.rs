@@ -1,7 +1,8 @@
 //! 屏幕边缘浮层：`Overlay` 的 macOS 实现。
 //!
 //! 一个无边框、不抢焦点、浮在最上层的 NSPanel，内容是自定义的 NSView：照着 [`Scene`]
-//! 用 NSBezierPath 和 NSString 画出来，接收拖进来的文件（NSDraggingDestination）和点击。
+//! 用 NSBezierPath 和 NSString 画出来，接收拖进来的文件（NSDraggingDestination）和点击；
+//! 从可以拖动的区域把交来的文件拖出去（NSDraggingSource）。
 //! 显示在所有桌面空间里，全屏应用之上也能看到。所有 AppKit 调用都经 GCD 主队列交给主线程。
 
 use std::cell::{Cell, RefCell};
@@ -18,9 +19,10 @@ use objc2::{
 };
 use objc2_app_kit::{
     NSBackingStoreType, NSBezierPath, NSBitmapImageFileType, NSBitmapImageRep, NSColor,
-    NSDragOperation, NSDraggingDestination, NSDraggingInfo, NSEvent, NSFont, NSFontAttributeName,
-    NSFontWeightRegular, NSFontWeightSemibold, NSForegroundColorAttributeName, NSGraphicsContext,
-    NSLineBreakMode, NSLineCapStyle, NSLineJoinStyle, NSMutableParagraphStyle, NSPanel,
+    NSDragOperation, NSDraggingContext, NSDraggingDestination, NSDraggingInfo, NSDraggingItem,
+    NSDraggingSession, NSDraggingSource, NSEvent, NSFont, NSFontAttributeName, NSFontWeightRegular,
+    NSFontWeightSemibold, NSForegroundColorAttributeName, NSGraphicsContext, NSLineBreakMode,
+    NSLineCapStyle, NSLineJoinStyle, NSMutableParagraphStyle, NSPanel,
     NSParagraphStyleAttributeName, NSPasteboard, NSPasteboardNameDrag, NSPasteboardTypeFileURL,
     NSPasteboardURLReadingFileURLsOnlyKey, NSResponder, NSScreen, NSStatusWindowLevel,
     NSStringDrawing, NSTextAlignment, NSView, NSWindowCollectionBehavior, NSWindowStyleMask,
@@ -46,7 +48,16 @@ struct ViewIvars {
     scene: RefCell<Scene>,
     /// 每个场景点对应多少个视图点。
     scale: Cell<f64>,
+    /// 可以拖出去的文件。
+    offered: RefCell<Vec<PathBuf>>,
+    /// 在可以拖动的区域按下了鼠标：按下的位置（视图坐标），移动够远就开始拖。
+    press: Cell<Option<CGPoint>>,
 }
+
+/// 按下后移动多远（点）才算开始拖。
+const DRAG_START: f64 = 4.0;
+/// 拖动时文件图标的大小（点）。
+const DRAG_ICON: f64 = 48.0;
 
 define_class!(
     // SAFETY: NSView 允许子类化；CapsuleView 没有实现 Drop。
@@ -79,25 +90,81 @@ define_class!(
             let at = self.convertPoint_fromView(event.locationInWindow(), None);
             let scale = self.ivars().scale.get();
             let (x, y) = ((at.x / scale) as f32, (at.y / scale) as f32);
-            let id = self
+            let hit = self
                 .ivars()
                 .scene
                 .borrow()
                 .hits
                 .iter()
                 .find(|hit| hit.frame.contains(x, y))
-                .map(|hit| hit.id);
-            if let Some(id) = id {
-                emit(OverlayEvent::Clicked(id));
+                .copied();
+            self.ivars().press.set(None);
+            match hit {
+                Some(hit) if hit.drag => {
+                    if !self.ivars().offered.borrow().is_empty() {
+                        self.ivars().press.set(Some(at));
+                    }
+                }
+                Some(hit) => emit(OverlayEvent::Clicked(hit.id)),
+                None => {}
             }
+        }
+
+        #[unsafe(method(mouseDragged:))]
+        fn mouse_dragged(&self, event: &NSEvent) {
+            let Some(start) = self.ivars().press.get() else {
+                return;
+            };
+            let at = self.convertPoint_fromView(event.locationInWindow(), None);
+            if (at.x - start.x).hypot(at.y - start.y) >= DRAG_START {
+                self.ivars().press.set(None);
+                self.drag_out(event, start);
+            }
+        }
+
+        #[unsafe(method(mouseUp:))]
+        fn mouse_up(&self, _event: &NSEvent) {
+            self.ivars().press.set(None);
         }
     }
 
     unsafe impl NSObjectProtocol for CapsuleView {}
 
+    unsafe impl NSDraggingSource for CapsuleView {
+        /// 拖到别的程序（访达、桌面、聊天窗口……）时由对方决定移动还是复制；拖回本程序不接。
+        #[unsafe(method(draggingSession:sourceOperationMaskForDraggingContext:))]
+        fn source_operation_mask(
+            &self,
+            _session: &NSDraggingSession,
+            context: NSDraggingContext,
+        ) -> NSDragOperation {
+            if context == NSDraggingContext::OutsideApplication {
+                NSDragOperation::Copy | NSDragOperation::Move | NSDragOperation::Generic
+            } else {
+                NSDragOperation::None
+            }
+        }
+
+        #[unsafe(method(draggingSession:endedAtPoint:operation:))]
+        fn dragging_ended(
+            &self,
+            _session: &NSDraggingSession,
+            _at: CGPoint,
+            operation: NSDragOperation,
+        ) {
+            emit(OverlayEvent::DragOutEnded {
+                dropped: operation != NSDragOperation::None,
+            });
+        }
+    }
+
     unsafe impl NSDraggingDestination for CapsuleView {
         #[unsafe(method(draggingEntered:))]
         fn dragging_entered(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) -> NSDragOperation {
+            // 从卡片拖出去的文件经过自己时不接。
+            if sender.draggingSource().is_some() {
+                return NSDragOperation::None;
+            }
             let files = !file_urls(&sender.draggingPasteboard()).is_empty();
             emit(OverlayEvent::DragEntered { files });
             operation(files)
@@ -105,11 +172,17 @@ define_class!(
 
         #[unsafe(method(draggingUpdated:))]
         fn dragging_updated(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) -> NSDragOperation {
+            if sender.draggingSource().is_some() {
+                return NSDragOperation::None;
+            }
             operation(!file_urls(&sender.draggingPasteboard()).is_empty())
         }
 
         #[unsafe(method(draggingExited:))]
-        fn dragging_exited(&self, _sender: Option<&ProtocolObject<dyn NSDraggingInfo>>) {
+        fn dragging_exited(&self, sender: Option<&ProtocolObject<dyn NSDraggingInfo>>) {
+            if sender.is_some_and(|s| s.draggingSource().is_some()) {
+                return;
+            }
             emit(OverlayEvent::DragExited);
         }
 
@@ -135,11 +208,63 @@ impl CapsuleView {
         let this = Self::alloc(mtm).set_ivars(ViewIvars {
             scene: RefCell::new(Scene::default()),
             scale: Cell::new(1.0),
+            offered: RefCell::new(Vec::new()),
+            press: Cell::new(None),
         });
         let frame = CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(10.0, 10.0));
         // SAFETY: NSView 的指定初始化方法。
         unsafe { msg_send![super(this), initWithFrame: frame] }
     }
+
+    /// 把交来的文件拖出去：每个文件一项，带着它在访达里的图标，从按下的位置出发。
+    fn drag_out(&self, event: &NSEvent, start: CGPoint) {
+        let paths = self.ivars().offered.borrow().clone();
+        if paths.is_empty() {
+            return;
+        }
+        let workspace = NSWorkspace::sharedWorkspace();
+        let items: Vec<Retained<NSDraggingItem>> = paths
+            .iter()
+            .enumerate()
+            .map(|(i, path)| drag_item(&workspace, path, start, i))
+            .collect();
+        let items = NSArray::from_retained_slice(&items);
+        let session = self.beginDraggingSessionWithItems_event_source(
+            &items,
+            event,
+            ProtocolObject::from_ref(self),
+        );
+        session.setAnimatesToStartingPositionsOnCancelOrFail(true);
+        emit(OverlayEvent::DragOutStarted);
+    }
+}
+
+/// 拖动中的一项：文件的 URL 和图标。多个文件的图标稍微错开叠在一起。
+fn drag_item(
+    workspace: &NSWorkspace,
+    path: &Path,
+    start: CGPoint,
+    index: usize,
+) -> Retained<NSDraggingItem> {
+    let string = NSString::from_str(&path.to_string_lossy());
+    let url = NSURL::fileURLWithPath(&string);
+    let item = NSDraggingItem::initWithPasteboardWriter(
+        NSDraggingItem::alloc(),
+        ProtocolObject::from_ref(&*url),
+    );
+    let icon = workspace.iconForFile(&string);
+    icon.setSize(CGSize::new(DRAG_ICON, DRAG_ICON));
+    let offset = index.min(4) as f64 * 6.0;
+    let frame = CGRect::new(
+        CGPoint::new(
+            start.x - DRAG_ICON / 2.0 + offset,
+            start.y - DRAG_ICON / 2.0 + offset,
+        ),
+        CGSize::new(DRAG_ICON, DRAG_ICON),
+    );
+    // SAFETY: 拖动项的内容可以是 NSImage。
+    unsafe { item.setDraggingFrame_contents(frame, Some(&icon)) };
+    item
 }
 
 /// 拖进来的是文件时复制，否则不接。
@@ -287,6 +412,10 @@ impl Overlay for MacOverlay {
         // SAFETY: 读取 AppKit 导出的常量。
         let name = unsafe { NSPasteboardNameDrag };
         file_urls(&NSPasteboard::pasteboardWithName(name))
+    }
+
+    fn offer(&mut self, files: Vec<PathBuf>) {
+        on_panel(move |panel, _| *panel.view.ivars().offered.borrow_mut() = files);
     }
 
     fn open(&self, path: &Path) {

@@ -1,10 +1,11 @@
 //! 拖放目标：实现 OLE 的 `IDropTarget`，接住拖到浮层上的文件。
 //!
 //! 只接文件（`CF_HDROP`）：拖进来的是文件时鼠标显示“复制”，放下后把路径交给调用方；
-//! 别的内容显示“不可放”，并告诉调用方这次拖的不是文件。
+//! 别的内容显示“不可放”，并告诉调用方这次拖的不是文件。从卡片拖出去的文件经过这里时不接。
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use ferry_platform::OverlayEvent;
 use windows::Win32::Foundation::POINTL;
@@ -28,6 +29,10 @@ impl DropTarget {
     pub(super) fn new(shared: Arc<Shared>) -> Self {
         Self { shared }
     }
+
+    fn dragging_out(&self) -> bool {
+        self.shared.dragging_out.load(Ordering::Acquire)
+    }
 }
 
 impl IDropTarget_Impl for DropTarget_Impl {
@@ -38,6 +43,10 @@ impl IDropTarget_Impl for DropTarget_Impl {
         _at: &POINTL,
         effect: *mut DROPEFFECT,
     ) -> windows_core::Result<()> {
+        if self.dragging_out() {
+            set(effect, false);
+            return Ok(());
+        }
         let files = data.ok().map(file_paths).unwrap_or_default();
         let any = !files.is_empty();
         {
@@ -59,11 +68,17 @@ impl IDropTarget_Impl for DropTarget_Impl {
         _at: &POINTL,
         effect: *mut DROPEFFECT,
     ) -> windows_core::Result<()> {
-        set(effect, lock(&self.shared.drag).holding_files);
+        set(
+            effect,
+            !self.dragging_out() && lock(&self.shared.drag).holding_files,
+        );
         Ok(())
     }
 
     fn DragLeave(&self) -> windows_core::Result<()> {
+        if self.dragging_out() {
+            return Ok(());
+        }
         lock(&self.shared.drag).holding_files = false;
         self.shared.emit(OverlayEvent::DragExited);
         Ok(())
@@ -76,6 +91,10 @@ impl IDropTarget_Impl for DropTarget_Impl {
         _at: &POINTL,
         effect: *mut DROPEFFECT,
     ) -> windows_core::Result<()> {
+        if self.dragging_out() {
+            set(effect, false);
+            return Ok(());
+        }
         let paths = data.ok().map(file_paths).unwrap_or_default();
         lock(&self.shared.drag).holding_files = false;
         let any = !paths.is_empty();

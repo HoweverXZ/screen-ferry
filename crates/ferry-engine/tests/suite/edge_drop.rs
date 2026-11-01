@@ -498,3 +498,91 @@ async fn after_the_peer_disconnects_dragging_files_shows_not_connected() {
     })
     .await;
 }
+
+/// 从客户端发一个文件过来，等服务端的胶囊变成卡片，返回保存的位置。
+async fn receive_card(rig: &Rig, overlay: &MockOverlay, name: &str) -> std::path::PathBuf {
+    let source = TempDir::new();
+    let file = source_file(&source, name, b"notes");
+    let mut sent = false;
+    for _ in 0..300 {
+        if rig.pc_files.send(vec![file.clone()]).await.is_ok() {
+            sent = true;
+            break;
+        }
+        sleep(Duration::from_millis(10)).await;
+    }
+    assert!(sent, "客户端发出了文件");
+    eventually("收完变成卡片", || {
+        texts(overlay).contains(&"打开".to_owned())
+    })
+    .await;
+    // 卡片完全出来后，可以拖的地方才在。
+    sleep(Duration::from_millis(600)).await;
+    rig.mac.store.downloads_dir().join(name)
+}
+
+#[tokio::test]
+async fn the_received_files_can_be_dragged_out_of_the_card() {
+    let (rig, overlay, _edge) = rig_with_edge_drop().await;
+    let saved = receive_card(&rig, &overlay, "会议纪要.docx").await;
+
+    assert!(texts(&overlay).contains(&"按住这里，拖到任意文件夹".to_owned()));
+    let (_, scene) = overlay.shown().unwrap();
+    assert!(scene.hits.iter().any(|h| h.drag && h.id == hit::CHIP));
+    eventually("把收到的文件交给浮层", || {
+        overlay.offered() == vec![saved.clone()]
+    })
+    .await;
+
+    // 拖出去的路上经过了浮层自己（它就贴着边缘）：不当作要发给对方。
+    overlay.emit(OverlayEvent::DragOutStarted);
+    press_and_drag(&rig, &overlay, Some(vec![saved.clone()])).await;
+    pointer(&rig, 990, 400);
+    overlay.emit(OverlayEvent::DragEntered { files: true });
+    overlay.emit(OverlayEvent::Dropped {
+        paths: vec![saved.clone()],
+    });
+    sleep(Duration::from_millis(300)).await;
+    let shown = texts(&overlay);
+    assert!(shown.contains(&"打开".to_owned()), "卡片还在：{shown:?}");
+    assert!(!shown.contains(&"松手发送到".to_owned()));
+
+    // 放到了别处：卡片收起，不再交出文件。
+    overlay.emit(OverlayEvent::DragOutEnded { dropped: true });
+    left_button(&rig, false);
+    eventually("放下后卡片收起", || overlay.shown().is_none()).await;
+    eventually("不再交出文件", || overlay.offered().is_empty()).await;
+    assert!(saved.is_file(), "引擎不碰文件本身");
+}
+
+#[tokio::test]
+async fn cancelling_a_drag_out_keeps_the_card() {
+    let (rig, overlay, _edge) = rig_with_edge_drop().await;
+    let saved = receive_card(&rig, &overlay, "照片.heic").await;
+
+    overlay.emit(OverlayEvent::DragOutStarted);
+    overlay.emit(OverlayEvent::DragOutEnded { dropped: false });
+    sleep(Duration::from_millis(300)).await;
+    assert!(
+        texts(&overlay).contains(&"打开".to_owned()),
+        "取消后卡片还在"
+    );
+    assert_eq!(overlay.offered(), vec![saved]);
+}
+
+#[tokio::test]
+async fn dragging_the_cards_own_files_toward_the_edge_does_not_send_them_back() {
+    let (rig, overlay, _edge) = rig_with_edge_drop().await;
+    let saved = receive_card(&rig, &overlay, "设计稿.fig").await;
+
+    // 拖动已经开始，浮层还没来得及说“开始往外拖”：拖的正是卡片里的文件，也不当作要发送。
+    pointer(&rig, 980, 400);
+    press_and_drag(&rig, &overlay, Some(vec![saved])).await;
+    for x in [985, 990, 995] {
+        pointer(&rig, x, 400);
+        sleep(Duration::from_millis(30)).await;
+    }
+    let shown = texts(&overlay);
+    assert!(shown.contains(&"打开".to_owned()), "卡片还在：{shown:?}");
+    left_button(&rig, false);
+}

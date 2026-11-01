@@ -255,10 +255,10 @@ fn wide(
             let (cx, cy) = (body.right() - 14.0 - 15.0, body.y + body.h / 2.0);
             pen.circle(cx, cy, 15.0, TINT.fade(1.15));
             cross(pen, cx, cy, 16.0, WHITE);
-            pen.hits.push(Hit {
-                frame: Frame::new(cx - 18.0, cy - 18.0, 36.0, 36.0),
-                id: hit::CANCEL,
-            });
+            pen.hits.push(Hit::click(
+                Frame::new(cx - 18.0, cy - 18.0, 36.0, 36.0),
+                hit::CANCEL,
+            ));
             cx - 15.0 - 12.0
         }
     };
@@ -318,10 +318,10 @@ fn card(
     let close = (body.right() - 16.0 - 13.0, y0 + 13.0);
     pen.circle(close.0, close.1, 13.0, TINT);
     cross(pen, close.0, close.1, 14.0, WHITE);
-    pen.hits.push(Hit {
-        frame: Frame::new(close.0 - 16.0, close.1 - 16.0, 32.0, 32.0),
-        id: hit::CLOSE,
-    });
+    pen.hits.push(Hit::click(
+        Frame::new(close.0 - 16.0, close.1 - 16.0, 32.0, 32.0),
+        hit::CLOSE,
+    ));
 
     let tx = x0 + 44.0 + 12.0;
     let tw = (close.0 - 13.0 - 8.0 - tx).max(0.0);
@@ -365,14 +365,8 @@ fn card(
         WHITE,
         Align::Center,
     );
-    pen.hits.push(Hit {
-        frame: open,
-        id: hit::OPEN,
-    });
-    pen.hits.push(Hit {
-        frame: reveal,
-        id: hit::REVEAL,
-    });
+    pen.hits.push(Hit::click(open, hit::OPEN));
+    pen.hits.push(Hit::click(reveal, hit::REVEAL));
 
     if chip {
         let frame = Frame::new(x0, by + 32.0 + 12.0, body.w - 32.0, 34.0);
@@ -392,10 +386,10 @@ fn card(
             WHITE.fade(0.86),
             Align::Center,
         );
-        pen.hits.push(Hit {
-            frame,
-            id: hit::CHIP,
-        });
+        pen.hits.push(Hit::drag(frame, hit::CHIP));
+        // 文件图标也能直接拖走。
+        pen.hits
+            .push(Hit::drag(Frame::new(x0, y0, 44.0, 44.0), hit::CHIP));
     }
 }
 

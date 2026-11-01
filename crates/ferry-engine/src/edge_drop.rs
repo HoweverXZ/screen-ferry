@@ -4,6 +4,8 @@
 //! 引擎经 [`EdgeFeed`] 报告光标和朝向对方的那条边；文件传输的进展由常驻后台转来。
 //! 这里决定显示哪种样子，[`Capsule`] 算出动画中的每一帧，交给平台的 [`Overlay`] 画出来。
 //!
+//! 收到的卡片上可以直接把文件拖到任意文件夹；拖出去的过程中卡片一直留着，放下后收起。
+//!
 //! 两端联动：本机拖着文件靠近边缘时，经引擎把提示（`DropHint`）发给对方；对方在相邻边上
 //! 同一位置提前滑出接收胶囊，放下后接收进度也出现在那里。
 
@@ -179,6 +181,8 @@ impl EdgeDrop {
             pending_along: None,
             watching: None,
             remote: None,
+            offered: Vec::new(),
+            dragging_out: false,
             sent: None,
             sent_at: Instant::now(),
             hint_due: None,
@@ -273,6 +277,10 @@ struct Worker<O> {
     watching: Option<Frame>,
     /// 对方正在拖过来的东西。
     remote: Option<Remote>,
+    /// 交给浮层、可以从卡片拖出去的文件。
+    offered: Vec<PathBuf>,
+    /// 正在把卡片里的文件拖出去。
+    dragging_out: bool,
     /// 最近一次发给对方的提示，和发出的时刻。
     sent: Option<DropHint>,
     sent_at: Instant,
@@ -322,6 +330,7 @@ impl<O: Overlay> Worker<O> {
             self.expire(now);
             self.watch();
             self.decide();
+            self.sync_offer();
             self.publish_hint();
             let dt = (now - last).as_secs_f32();
             last = now;
@@ -350,7 +359,8 @@ impl<O: Overlay> Worker<O> {
         {
             self.brief = None;
         }
-        if self.card.as_ref().is_some_and(|c| c.until <= now) {
+        // 正拖着卡片里的文件时，卡片不能自己收起。
+        if !self.dragging_out && self.card.as_ref().is_some_and(|c| c.until <= now) {
             self.card = None;
         }
         if self
@@ -386,7 +396,7 @@ impl<O: Overlay> Worker<O> {
     fn on_pointer(&mut self) {
         let pointer = *self.pointer.borrow_and_update();
         match (&mut self.drag, pointer.held) {
-            (None, true) => {
+            (None, true) if !self.dragging_out => {
                 self.drag = Some(Drag {
                     count: self.overlay.drag_count(),
                     files: None,
@@ -403,27 +413,31 @@ impl<O: Overlay> Worker<O> {
                     .as_ref()
                     .is_some_and(|edge| distance(edge, &pointer) <= NEAR);
                 if near && drag.files.is_none() && self.overlay.drag_count() != drag.count {
-                    let files = self.overlay.dragged_files();
+                    let files = not_ours(self.overlay.dragged_files(), &self.offered);
                     drag.summary = summarize(&files);
                     drag.files = Some(files);
                 }
             }
-            (None, false) => {}
+            (None, _) => {}
         }
     }
 
     async fn on_event(&mut self, event: OverlayEvent) {
         match event {
+            // 从卡片拖出去的文件经过浮层自己，不算往对方拖。
+            OverlayEvent::DragEntered { .. } | OverlayEvent::Dropped { .. }
+                if self.dragging_out => {}
             OverlayEvent::DragEntered { files } => {
                 if let Some(drag) = &mut self.drag {
                     drag.over = files;
                     // 有的系统（Windows）要到拖进接收条才知道拖的是什么。
                     if drag.files.is_none() {
                         let files = if files {
-                            self.overlay.dragged_files()
+                            not_ours(self.overlay.dragged_files(), &self.offered)
                         } else {
                             Vec::new()
                         };
+                        drag.over = !files.is_empty();
                         drag.summary = summarize(&files);
                         drag.files = Some(files);
                     }
@@ -452,6 +466,34 @@ impl<O: Overlay> Worker<O> {
                 }
             }
             OverlayEvent::Clicked(id) => self.on_click(id),
+            OverlayEvent::DragOutStarted => {
+                self.dragging_out = true;
+                self.drag = None;
+            }
+            OverlayEvent::DragOutEnded { dropped } => {
+                self.dragging_out = false;
+                if dropped {
+                    // 文件已经放到别处（可能被移走了），卡片完成了使命。
+                    self.card = None;
+                } else if let Some(card) = &mut self.card {
+                    card.until = Instant::now() + CARD;
+                }
+            }
+        }
+    }
+
+    /// 告诉浮层卡片上能拖出去哪些文件。
+    fn sync_offer(&mut self) {
+        if self.dragging_out {
+            return;
+        }
+        let wanted = self
+            .card
+            .as_ref()
+            .map_or_else(Vec::new, |card| card.saved.clone());
+        if wanted != self.offered {
+            self.overlay.offer(wanted.clone());
+            self.offered = wanted;
         }
     }
 
@@ -499,7 +541,7 @@ impl<O: Overlay> Worker<O> {
                     name: what.clone(),
                     detail: format!("已保存到「下载」· {}", size_text(update.bytes)),
                     tile: tile_of(&update, saved),
-                    chip: false,
+                    chip: true,
                 };
                 self.card = Some(Card {
                     saved: saved.clone(),
@@ -853,6 +895,15 @@ fn along_from(edge: &Edge, fraction: u16) -> f32 {
     match edge.side {
         Side::Left | Side::Right => s.y + k * s.h,
         Side::Top | Side::Bottom => s.x + k * s.w,
+    }
+}
+
+/// 拖的正是卡片里自己交出去的文件时，不当作要发给对方的文件。
+fn not_ours(files: Vec<PathBuf>, offered: &[PathBuf]) -> Vec<PathBuf> {
+    if !offered.is_empty() && files == offered {
+        Vec::new()
+    } else {
+        files
     }
 }
 

@@ -52,11 +52,14 @@ objc2-app-kit = { version = "0.3.2", default-features = false, features = [
     "NSBitmapImageRep",
     "NSColor",
     "NSDragging",
+    "NSDraggingItem",
+    "NSDraggingSession",
     "NSEvent",
     "NSFont",
     "NSFontDescriptor",
     "NSGraphics",
     "NSGraphicsContext",
+    "NSImage",
     "NSImageRep",
     "NSPanel",
     "NSParagraphStyle",
@@ -124,6 +127,7 @@ windows = { version = "0.62.2", features = [
     "Win32_UI_HiDpi",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_Shell",
+    "Win32_UI_Shell_Common",
     "Win32_UI_WindowsAndMessaging",
 ] }
 # 实现 COM 接口（拖放目标）的宏展开后直接引用这两个 crate。

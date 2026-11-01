@@ -4,12 +4,14 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../ipc/messages.dart';
 import 'arrangement.dart';
 import 'backend.dart';
 import 'demo_backend.dart';
 import 'dial_text.dart';
+import 'links.dart';
 
 export '../ipc/messages.dart';
 export 'arrangement.dart';
@@ -117,13 +119,16 @@ const _pendingTimeout = Duration(seconds: 3);
 const _dialTimeout = Duration(seconds: 20);
 
 class AppState extends ChangeNotifier {
-  AppState({Backend? backend}) : backend = backend ?? DemoBackend() {
+  AppState({Backend? backend, LinkOpener? openLink})
+    : backend = backend ?? DemoBackend(),
+      _openLink = openLink ?? openInBrowser {
     _link = this.backend.link.value;
     this.backend.link.addListener(_onLink);
     _subscription = this.backend.notices.listen(_onNotice);
   }
 
   final Backend backend;
+  final LinkOpener _openLink;
   late final StreamSubscription<Notice> _subscription;
 
   final appearance = Appearance();
@@ -355,6 +360,13 @@ class AppState extends ChangeNotifier {
   }
 
   void showToast(String text) => toast.value = ToastMessage(++_toastId, text);
+
+  /// 用浏览器打开链接；打不开时复制下来并提示。
+  Future<void> openLink(String url) async {
+    if (await _openLink(url)) return;
+    await Clipboard.setData(ClipboardData(text: url));
+    showToast('打不开浏览器，链接已复制');
+  }
 
   // ── 命令 ──
 

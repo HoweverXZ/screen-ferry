@@ -23,11 +23,18 @@ Future<void> settle(WidgetTester tester, {int steps = 6}) async {
 }
 
 /// 用演示后台启动界面。默认不让演示数据自己跳动，测试结果才稳定。
-Future<AppState> launch(WidgetTester tester, Size size, {Backend? backend}) async {
+/// 测试里不真的打开浏览器：[opened] 记下打开过的链接。
+Future<AppState> launch(WidgetTester tester, Size size, {Backend? backend, List<String>? opened}) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
-  final state = AppState(backend: backend ?? DemoBackend(animate: false));
+  final state = AppState(
+    backend: backend ?? DemoBackend(animate: false),
+    openLink: (url) async {
+      opened?.add(url);
+      return opened != null;
+    },
+  );
   addTearDown(state.dispose);
   await tester.pumpWidget(ScreenFerryApp(state: state));
   state.start();
@@ -995,6 +1002,39 @@ void main() {
       await dial(tester, '9.9.9.9', '连接');
       expect(find.text('连不上 9.9.9.9'), findsOneWidget);
       expect(tester.takeException(), isNull);
+    });
+  });
+
+  group('关于', () {
+    testWidgets('点作者主页用浏览器打开，不再列出加密和协议版本', (tester) async {
+      final opened = <String>[];
+      final state = await launch(tester, const Size(1160, 780), opened: opened);
+      state.go(SfPage.about);
+      await settle(tester);
+      expect(find.text('加密与配对'), findsNothing);
+      expect(find.text('协议版本'), findsNothing);
+
+      await tester.tap(find.text('作者主页'));
+      await settle(tester);
+      expect(opened, ['https://github.com/icloudza']);
+      expect(find.text('打不开浏览器，链接已复制'), findsNothing);
+    });
+
+    testWidgets('打不开浏览器时复制链接并提示', (tester) async {
+      final copied = <String>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'Clipboard.setData') copied.add((call.arguments as Map)['text'] as String);
+        return null;
+      });
+      addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
+      final state = await launch(tester, const Size(1160, 780));
+      state.go(SfPage.about);
+      await settle(tester);
+
+      await tester.tap(find.text('作者主页'));
+      await settle(tester);
+      expect(copied, ['https://github.com/icloudza']);
+      expect(find.text('打不开浏览器，链接已复制'), findsOneWidget);
     });
   });
 }

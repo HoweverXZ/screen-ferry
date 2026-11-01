@@ -140,6 +140,11 @@
   - 发送方把一种格式发完就放掉它，大图片不长期占着内存。
   - 总览的剪贴板卡片显示图片的缩略图和尺寸，带格式的文字标明“带格式”；预览图片按内容哈希存在 `blobs/`，只留最近一张。
   - 本机通信：`settings.clipboard_limit_mb`，`clipboard.rich`、`clipboard.image`。
+- 新图标“跃迁”：一颗光球正穿过屏幕边框，拖着一道光尾，蓝紫渐变底板。
+  - 应用图标：macOS（1024 画布、主体 824 居中、带投影）与 Windows（铺满、圆角更小）各一套，32 像素及以下用简化版。
+  - 托盘图标改为按“已连接 / 未连接”切换：已连接时光球正穿过边框，未连接（含暂停、等待连接、出问题）时光球停在屏幕里、变淡；
+    macOS 是单色模板图，Windows 是彩色、未连接时变灰。
+  - 源文件在 `assets/icons/`，新命令 `cargo xtask icons` 用 rsvg-convert 导出托盘图、设置界面的 AppIcon 和 `app_icon.ico`。
 - Windows 托盘：左键直接打开设置界面，右键弹出菜单。
 - Windows 设置界面：
   - 新增 `app/windows` 宿主工程：去掉系统标题栏（保留左、右、下边框的拖动缩放、贴边分屏和窗口阴影），Windows 11 圆角，最小 375×667，默认 1160×780 居中。
@@ -148,7 +153,7 @@
   - 后台在资源管理器里双击或登录时启动，不再留下控制台窗口；常驻时总是写日志文件。
   - `cargo xtask bundle` 在 Windows 上生成 `target/bundle/windows/ScreenFerry/`（后台 + `settings\` 设置界面）。
 - 托盘与打包：
-  - 菜单栏（任务栏）图标显示共享状态，菜单可以暂停或继续共享、打开设置、退出；暂停或出问题时图标变淡。
+  - 菜单栏（任务栏）图标显示是否连着另一台电脑，菜单可以暂停或继续共享、打开设置、退出。
   - 开机自动启动：macOS 写 LaunchAgent，Windows 写当前用户的 Run 键；登录时启动不弹出设置界面。
   - `cargo xtask bundle` 在 macOS 上生成 `ScreenFerry.app`：后台是主程序（不在程序坞显示），设置界面嵌在 `Contents/Helpers/`。
   - `ferry-platform` 新增 `EventLoop`（主线程事件循环）与 `Autostart` 的实现；缺少辅助功能权限时向系统申请一次，ScreenFerry 自动出现在授权列表里。

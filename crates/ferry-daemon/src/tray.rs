@@ -1,4 +1,6 @@
-//! 托盘图标：显示共享状态，菜单里可以暂停或继续共享、打开设置、退出。
+//! 托盘图标：显示是否连着另一台电脑，菜单里可以暂停或继续共享、打开设置、退出。
+//! 图标只有两种：已连接（光球正穿过屏幕边框）和未连接（光球停在屏幕里、变淡）；
+//! 暂停、等待连接、寻找服务端、出了问题都算未连接，具体情况看菜单第一行。
 //! macOS 按菜单栏的习惯，点图标弹出菜单；Windows 按任务栏的习惯，左键直接打开设置界面，右键弹出菜单。
 //!
 //! 托盘对象只能在主线程上创建和修改，所以放在主线程的线程局部变量里；
@@ -22,8 +24,10 @@ const QUIT: &str = "quit";
 mod art {
     use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 
-    pub(super) const ACTIVE: &[u8] = include_bytes!("../../../assets/icons/tray-template@2x.png");
-    pub(super) const PAUSED: &[u8] = include_bytes!("../../../assets/icons/tray-paused@2x.png");
+    pub(super) const CONNECTED: &[u8] =
+        include_bytes!("../../../assets/icons/tray-connected@2x.png");
+    pub(super) const DISCONNECTED: &[u8] =
+        include_bytes!("../../../assets/icons/tray-disconnected@2x.png");
 
     pub(super) fn builder(icon: Icon) -> TrayIconBuilder {
         TrayIconBuilder::new().with_icon_templated(icon)
@@ -34,13 +38,15 @@ mod art {
     }
 }
 
-/// 任务栏可能是深色也可能是浅色，用带底色的彩色图标。
+/// 任务栏可能是深色也可能是浅色，用两种底色上都看得清的彩色图标；未连接时是灰色。
 #[cfg(target_os = "windows")]
 mod art {
     use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 
-    pub(super) const ACTIVE: &[u8] = include_bytes!("../../../assets/icons/tray-color.png");
-    pub(super) const PAUSED: &[u8] = include_bytes!("../../../assets/icons/tray-color-paused.png");
+    pub(super) const CONNECTED: &[u8] =
+        include_bytes!("../../../assets/icons/tray-win-connected.png");
+    pub(super) const DISCONNECTED: &[u8] =
+        include_bytes!("../../../assets/icons/tray-win-disconnected.png");
 
     pub(super) fn builder(icon: Icon) -> TrayIconBuilder {
         // 左键留给“打开设置界面”，菜单只在右键时弹出。
@@ -58,8 +64,8 @@ struct Tray {
     icon: TrayIcon,
     status: MenuItem,
     toggle: MenuItem,
-    active: Icon,
-    paused: Icon,
+    connected: Icon,
+    disconnected: Icon,
     shown: Option<Summary>,
 }
 
@@ -83,9 +89,9 @@ pub(crate) fn install(handle: Handle) -> Result<(), Box<dyn std::error::Error>> 
         &quit,
     ])?;
 
-    let active = decode(art::ACTIVE)?;
-    let paused = decode(art::PAUSED)?;
-    let icon = art::builder(active.clone())
+    let connected = decode(art::CONNECTED)?;
+    let disconnected = decode(art::DISCONNECTED)?;
+    let icon = art::builder(disconnected.clone())
         .with_tooltip("ScreenFerry")
         .with_menu(Box::new(menu))
         .build()?;
@@ -122,8 +128,8 @@ pub(crate) fn install(handle: Handle) -> Result<(), Box<dyn std::error::Error>> 
             icon,
             status,
             toggle,
-            active,
-            paused,
+            connected,
+            disconnected,
             shown: None,
         });
     });
@@ -156,10 +162,11 @@ fn update(summary: &Summary) {
         } else {
             "继续共享"
         });
-        let icon = if summary.sharing && summary.problem.is_none() {
-            &tray.active
+        let linked = summary.sharing && summary.problem.is_none() && summary.connected_to.is_some();
+        let icon = if linked {
+            &tray.connected
         } else {
-            &tray.paused
+            &tray.disconnected
         };
         let set = art::set(&tray.icon, icon.clone());
         if let Err(e) = set {

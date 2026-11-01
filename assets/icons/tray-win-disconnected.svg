@@ -1,0 +1,6 @@
+<!-- 托盘图标（Windows 任务栏，未连接）：灰色，光球停在屏幕里。暂停共享、等待连接、寻找服务端、出了问题时都用它。
+     由 cargo xtask icons 导出为 tray-win-disconnected.png（32×32）。 -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <rect x="2" y="5.5" width="14" height="13" rx="3.4" fill="none" stroke="#8E8E93" stroke-width="1.8"/>
+  <circle cx="9" cy="12" r="2.8" fill="#A1A1A6"/>
+</svg>

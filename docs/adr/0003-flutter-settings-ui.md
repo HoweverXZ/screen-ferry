@@ -26,7 +26,7 @@ AGENTS.md 第 2 节原定设置界面用 egui。评估过程中维护者明确�
 
 - 第 2 节：界面一行改为 Flutter（自定义设计，见下文“设计与实现约定”）。
 - 第 3 节：顶层新增 `app/`，存放 Flutter 工程；它不是 Cargo workspace 成员。
-- 第 3 节：`assets/` 是唯一存放二进制资源的地方，但平台工程要求放在固定位置的图标例外，例如 `app/macos/Runner/Assets.xcassets/AppIcon.appiconset/`。目前是 Flutter 生成的占位图；正式图标的源文件放 `assets/icons/`，导出后覆盖这些文件。
+- 第 3 节：`assets/` 是唯一存放二进制资源的地方，但平台工程要求放在固定位置的图标例外，例如 `app/macos/Runner/Assets.xcassets/AppIcon.appiconset/`。正式图标的源文件放 `assets/icons/`，用 `cargo xtask icons` 导出后覆盖这些文件。
 - 第 4 节：`ferry-settings` 从可执行文件改为 Flutter 调用的 Rust 库，层级仍为 L4，仍只依赖 `ferry-ipc`。
 - 第 12 节：改动 `app/` 时，提交前另外运行 `dart format`、`flutter analyze`、`flutter test`（在 `app/` 中运行）。
 

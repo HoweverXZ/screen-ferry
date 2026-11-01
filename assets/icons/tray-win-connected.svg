@@ -1,0 +1,13 @@
+<!-- 托盘图标（Windows 任务栏，已连接）：彩色，任务栏深浅都看得清。
+     由 cargo xtask icons 导出为 tray-win-connected.png（32×32）。 -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <defs>
+    <mask id="gap" maskUnits="userSpaceOnUse" x="0" y="0" width="24" height="24">
+      <rect width="24" height="24" fill="#FFFFFF"/>
+      <circle cx="16" cy="12" r="6" fill="#000000"/>
+    </mask>
+  </defs>
+  <rect x="2" y="5.5" width="14" height="13" rx="3.4" fill="none" stroke="#4F7BFF" stroke-width="1.8" mask="url(#gap)"/>
+  <rect x="6.5" y="10.75" width="9" height="2.5" rx="1.25" fill="#A9BEFF"/>
+  <circle cx="16" cy="12" r="4.3" fill="#4F7BFF"/>
+</svg>

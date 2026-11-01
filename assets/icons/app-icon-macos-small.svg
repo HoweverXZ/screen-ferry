@@ -1,0 +1,24 @@
+<!-- 应用图标（macOS 小尺寸）：与 app-icon-macos.svg 同一构图，边框加粗、光球放大，去掉光尾和柔光，
+     16、32 像素下不糊。由 cargo xtask icons 导出为设置界面 AppIcon 的 16、32 像素。 -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5B98FF"/>
+      <stop offset="1" stop-color="#4A4AE2"/>
+    </linearGradient>
+    <radialGradient id="orb" cx="0.35" cy="0.3" r="0.75">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#CCD9FF"/>
+    </radialGradient>
+    <mask id="gap" maskUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
+      <rect width="100" height="100" fill="#FFFFFF"/>
+      <circle cx="67" cy="50" r="19" fill="#000000"/>
+    </mask>
+  </defs>
+  <g transform="translate(100 100) scale(8.24)">
+    <rect width="100" height="100" rx="22.5" fill="url(#bg)"/>
+    <rect x="19" y="30" width="48" height="40" rx="10" fill="#FFFFFF" fill-opacity="0.16"
+          stroke="#FFFFFF" stroke-width="5.5" mask="url(#gap)"/>
+    <circle cx="67" cy="50" r="14" fill="url(#orb)"/>
+  </g>
+</svg>

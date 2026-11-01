@@ -1,0 +1,6 @@
+<!-- 托盘图标（macOS 菜单栏模板图，未连接）：光球停在屏幕里、变淡。暂停共享、等待连接、寻找服务端、出了问题时都用它。
+     由 cargo xtask icons 导出为 tray-disconnected@2x.png（36×36）。 -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <rect x="2" y="5.5" width="14" height="13" rx="3.4" fill="none" stroke="#000000" stroke-width="1.8"/>
+  <circle cx="9" cy="12" r="2.8" fill="#000000" fill-opacity="0.5"/>
+</svg>

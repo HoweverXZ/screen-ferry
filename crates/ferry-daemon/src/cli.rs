@@ -14,6 +14,7 @@ pub(crate) const USAGE: &str = "\
   screenferry peers   [--data-dir 目录]
   screenferry forget  <设备名或指纹> [--data-dir 目录]
   screenferry send    <文件或文件夹>... [--data-dir 目录]
+  screenferry quit    [--data-dir 目录]
 
 不带命令时常驻运行：按数据目录中的 config.toml 工作，菜单栏（任务栏）有图标，
 配对、设置都在设置界面里完成。启动时会打开设置界面；--autostart 表示登录时由系统启动，
@@ -27,6 +28,7 @@ pub(crate) const USAGE: &str = "\
   forget     删除一台已配对的设备，下次连接需要重新配对
   send       请正在运行的 ScreenFerry 把文件或文件夹发给它连着的电脑，
              对方收到后放在“下载”文件夹
+  quit       请正在运行的 ScreenFerry 退出，等它退出后返回（安装程序升级、卸载前用）
 
 serve 的选项：
   --listen   监听地址，默认 0.0.0.0:24810
@@ -85,6 +87,8 @@ pub(crate) enum Mode {
     Send {
         paths: Vec<PathBuf>,
     },
+    /// 请正在运行的后台退出。
+    Quit,
     /// 调试：把边缘投递胶囊的各种样子画成 PNG，放进 `dir`。
     PreviewCapsule {
         dir: PathBuf,
@@ -98,7 +102,10 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, St
         // 不带命令（或直接跟选项）：常驻运行。
         None => "resident".to_owned(),
         Some(first) if first.starts_with('-') => "resident".to_owned(),
-        Some(command @ ("serve" | "connect" | "peers" | "forget" | "send" | "preview-capsule")) => {
+        Some(
+            command @ ("serve" | "connect" | "peers" | "forget" | "send" | "quit"
+            | "preview-capsule"),
+        ) => {
             let command = command.to_owned();
             args.next();
             command
@@ -158,6 +165,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, St
             server: positional.as_deref().map(resolve).transpose()?,
         },
         "peers" => Mode::Peers,
+        "quit" => Mode::Quit,
         "send" if paths.is_empty() => return Err("send 需要至少一个文件或文件夹".into()),
         "send" => Mode::Send { paths },
         "preview-capsule" => Mode::PreviewCapsule {

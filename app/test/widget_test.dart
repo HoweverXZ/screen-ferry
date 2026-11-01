@@ -1005,6 +1005,24 @@ void main() {
     });
   });
 
+  testWidgets('后台要退出时设置界面跟着关闭', (tester) async {
+    tester.view.physicalSize = const Size(1160, 780);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final backend = DemoBackend(animate: false);
+    var quits = 0;
+    final state = AppState(backend: backend, onQuit: () => quits++);
+    addTearDown(state.dispose);
+    await tester.pumpWidget(ScreenFerryApp(state: state));
+    state.start();
+    await settle(tester);
+    expect(quits, 0);
+
+    backend.emit(const QuitNotice());
+    await settle(tester);
+    expect(quits, 1);
+  });
+
   group('关于', () {
     testWidgets('点作者主页用浏览器打开，不再列出加密和协议版本', (tester) async {
       final opened = <String>[];

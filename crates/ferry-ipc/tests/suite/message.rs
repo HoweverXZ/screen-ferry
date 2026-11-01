@@ -127,6 +127,7 @@ fn requests() -> Vec<Request> {
             paths: vec!["/Users/me/Desktop/证书.p12".into()],
             to: Some(FP_PC.into()),
         },
+        Request::Quit,
     ]
 }
 
@@ -283,6 +284,7 @@ fn notices() -> Vec<Notice> {
             invite: true,
             error: Some(DialError::NotScreenFerry),
         },
+        Notice::Quit,
     ]
 }
 

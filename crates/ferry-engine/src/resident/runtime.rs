@@ -113,6 +113,8 @@ pub(crate) struct Runtime<H> {
 
     clients: BTreeMap<u64, mpsc::Sender<Notice>>,
     next_client: u64,
+    /// 界面或 `quit` 命令请后台退出了。
+    quit_requested: bool,
     pending: BTreeMap<u64, Pending>,
     next_prompt: u64,
     dirty: bool,
@@ -178,6 +180,7 @@ impl<H: Host> Runtime<H> {
             last_second: Instant::now(),
             clients: BTreeMap::new(),
             next_client: 1,
+            quit_requested: false,
             pending: BTreeMap::new(),
             next_prompt: 1,
             dirty: true,
@@ -203,6 +206,20 @@ impl<H: Host> Runtime<H> {
         let id = self.next_client;
         self.next_client += 1;
         id
+    }
+
+    /// 有人请后台退出了（`quit` 命令）。
+    pub(crate) fn quit_requested(&self) -> bool {
+        self.quit_requested
+    }
+
+    /// 退出前告诉所有界面一起关闭，并放开它们的发送队列：每个界面的发送任务写完这条后结束。
+    /// 返回当时连着几个界面。
+    pub(crate) fn farewell(&mut self) -> usize {
+        self.broadcast(Notice::Quit);
+        let count = self.clients.len();
+        self.clients.clear();
+        count
     }
 
     // ── 引擎 ─────────────────────────────────────
@@ -813,6 +830,10 @@ impl<H: Host> Runtime<H> {
             }
             Request::OpenSettings => self.open_settings(),
             Request::SendFiles { paths, to } => self.send_files(paths, to).await,
+            Request::Quit => {
+                info!("收到退出请求");
+                self.quit_requested = true;
+            }
         }
     }
 

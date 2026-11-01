@@ -42,8 +42,8 @@ jobs:
       - run: flutter test
 
   windows-bundle:
-    # 在 Windows 上打出完整的 ScreenFerry 目录（后台 + 设置界面），作为构建产物上传，
-    # 可以在 Actions 的运行页面下载后直接在 Windows 上运行。
+    # 在 Windows 上打出安装包（后台 + 设置界面，ADR 0011），作为构建产物上传：
+    # 在 Actions 的运行页面下载，解压后双击安装。
     name: Windows 安装包
     runs-on: windows-latest
     steps:
@@ -54,11 +54,26 @@ jobs:
         with:
           flutter-version: 3.47.8
           channel: stable
+      # 运行器自带的是 Inno Setup 6，没有简体中文；装官方发布的 7.1.1，并核对校验和。
+      - name: 安装 Inno Setup 7.1.1
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP 'innosetup-7.1.1-x64.exe'
+          $dir = Join-Path $env:RUNNER_TEMP 'InnoSetup'
+          Invoke-WebRequest 'https://github.com/jrsoftware/issrc/releases/download/is-7_1_1/innosetup-7.1.1-x64.exe' -OutFile $installer
+          $hash = (Get-FileHash $installer -Algorithm SHA256).Hash
+          if ($hash -ne '8a5a6711c3766a6e5fb74f280ba0e3551e719ce94538d901fdbd1f8f9920b3f0') { throw "Inno Setup 安装程序的校验和不对：$hash" }
+          Start-Process $installer -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=$dir" -Wait
+          "ISCC=$(Join-Path $dir 'ISCC.exe')" >> $env:GITHUB_ENV
       - run: cargo xtask bundle
+      - name: 取提交号的前 7 位
+        id: commit
+        shell: bash
+        run: echo "short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
-          name: ScreenFerry-windows-${{ github.sha }}
-          path: target/bundle/windows/ScreenFerry
+          name: ScreenFerry-windows-setup-${{ steps.commit.outputs.short }}
+          path: target/bundle/windows/*-setup.exe
           retention-days: 14
           if-no-files-found: error
 

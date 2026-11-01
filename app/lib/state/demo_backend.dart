@@ -213,6 +213,8 @@ class DemoBackend implements Backend {
         emit(DialedNotice(address: address, invite: false, error: _demoDial(address)));
       case InviteRequest(:final address):
         emit(DialedNotice(address: address, invite: true, error: _demoDial(address)));
+      case QuitRequest():
+        emit(const QuitNotice());
       case OpenPeerSettingsRequest(:final fingerprint):
         emit(ToastNotice('已在 ${_nameOf(fingerprint)} 上打开设置，把光标移过去就能改'));
       case ForgetRequest(:final fingerprint):

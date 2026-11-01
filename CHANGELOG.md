@@ -167,6 +167,19 @@
   - 协议：新增能力位 `REMOTE_SETTINGS` 和消息 `OpenSettings`。本机通信升到版本 2：`settings.mouse_dpi`、`settings.devices`、
     `set_device`、`open_peer_settings`、`show_device`、`peers[].alias`、`peers[].platform`、`local.natural_scrolling`，
     去掉 `settings.swap_cmd_ctrl`。
+- Windows 安装包（ADR 0011）：原来发的是一个散着一堆文件的文件夹，现在是真正的安装程序 `ScreenFerry-<版本>-windows-x64-setup.exe`。
+  - 用 Inno Setup 7.1（简体中文界面）打包，装进 Program Files；开始菜单有 ScreenFerry，桌面快捷方式可选；
+    “设置 → 应用”里能卸载，显示图标、版本和发布者。
+  - 安装时在 Windows 防火墙里放行 ScreenFerry（专用网络和域网络），不用再逐个确认；卸载时删掉。
+  - 升级时先请正在运行的 ScreenFerry 正常退出，装完马上重新启动：正从另一台电脑控制这台时，几秒后就能接着操作。
+  - 从解压的文件夹换成安装版后，开机自启改为启动安装版；卸载时删掉开机自启的登记，配置和配对记录保留。
+  - `screenferry.exe` 双击、登录时启动不再闪出黑色窗口；有了图标、版本信息和程序清单（每显示器 DPI 感知、长路径）。
+    命令行用法接回启动它的终端，`serve`、`connect` 在单独的窗口里运行。
+  - 后台静态链接 C 运行库，设置界面带上它需要的 Visual C++ 运行库，没装过运行库的电脑也能打开。
+  - 设置界面改名为 `screenferry-settings.exe`，任务管理器里显示“ScreenFerry 设置”。
+  - 新增 `screenferry quit`：请正在运行的 ScreenFerry 退出并等它退出。本机通信新增命令 `quit` 和通知 `quit`；
+    后台退出时设置界面跟着关闭（托盘里的“退出”也是）。
+  - CI 上传安装包，产物名改为 `ScreenFerry-windows-setup-<提交号前 7 位>`。
 - 按地址连接与邀请（ADR 0010）：局域网发现不可靠时（公司网络、开了设备隔离的 Wi‑Fi），不用靠组播也能连上。
   - 设备页顶部列出本机的局域网地址，点一下复制。
   - 被控端：“在局域网里发现”旁边有“按地址连接”，填 IP、IP:端口或电脑名；连不上时说明原因（地址不对、没在等、

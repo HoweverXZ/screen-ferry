@@ -23,7 +23,7 @@ cargo xtask lint
   把某个键换成另一个键、文本编辑快捷键按本机习惯转换、切过去前在边上停一下防误切、同不同步剪贴板、能不能拖文件给它，
   还可以给它起个名字。键鼠方面的设置在本机控制它时生效；被控制的一方可以一键在对方那台上打开设置（见 ADR 0009）。
 - 局域网里找不到对方时（有的网络不支持自动发现），在被控制的那台上“按地址连接”，或者在控制的那台上“邀请一台电脑”，
-  填对方「设备」页顶部列出的地址即可（见 ADR 0010）。被控制的一方在 24811 端口等邀请，Windows 第一次运行时防火墙可能询问，请允许。
+  填对方「设备」页顶部列出的地址即可（见 ADR 0010）。被控制的一方在 24811 端口等邀请（Windows 安装版已在防火墙里放行）。
 - 进入 Windows 时同步 Caps Lock 状态。
 - 媒体键（音量加减、静音、播放/暂停、上一首、下一首）也会转发；亮度、键盘背光仍作用在 Mac 上。
 - 光标在 Windows 上时，按 **Ctrl + Option + Esc** 可以强制回到 Mac（键盘鼠标接在 Windows 上时是 Ctrl + Alt + Esc）。
@@ -34,7 +34,7 @@ cargo xtask lint
 - Mac 可以同时连着几台电脑：在设置界面的布局页把它们摆到本机的上下左右，同一侧的几台平分那条边，光标推出哪一段就去哪台。拖文件到哪一段就发给哪台；`screenferry send` 发给光标最近去过的那台（见 ADR 0006）。
 - 反过来也可以：键盘鼠标接在 Windows 上时，在设置界面的“设置 → 这台电脑”里把 Windows 改为“控制别的电脑”、Mac 改为“被控制”
   （命令行：Windows 上运行 `serve`，Mac 上运行 `connect`）。Windows 控制 Mac 时 Ctrl 当作 ⌘；两台都是 Mac 或都是 Windows 时不互换。
-  Mac 被控制同样需要辅助功能权限；Windows 第一次当服务端时，防火墙可能询问是否允许 ScreenFerry 接受连接，请允许（见 ADR 0007）。
+  Mac 被控制同样需要辅助功能权限；Windows 安装版已在防火墙里放行；直接运行没安装的程序时，防火墙可能询问是否允许 ScreenFerry 接受连接，请允许（见 ADR 0007、0011）。
 - 测试时请先退出 Deskflow 等同类软件，两者会争抢同一套键鼠。
 
 两台电脑之间的连接全程 TLS 1.3 加密。第一次连接时两边终端都会显示同一个 6 位配对码，核对一致后分别输入 `y` 回车确认；之后两台电脑互相记住对方，不再询问。用 `screenferry peers` 查看已配对的设备，`screenferry forget <设备名或指纹>` 删除。
@@ -98,14 +98,34 @@ tccutil reset Accessibility io.github.icloudza.screenferry
 
 ## Windows
 
-不想在 Windows 上装开发工具时，可以直接下载 CI 打好的包：GitHub 的 Actions 页面里打开最近一次运行，
-在 Artifacts 中下载 `ScreenFerry-windows-<提交号>`（保留 14 天），解压后双击 `screenferry.exe`。
+### 安装
 
-自己编译时，Windows 版的设置界面必须在 Windows 上编译（Flutter 不能在 macOS 上交叉编译 Windows 应用）。需要：
+在 GitHub 的 Actions 页面里打开最近一次运行，在 Artifacts 中下载 `ScreenFerry-windows-setup-<提交号>`
+（保留 14 天），解压出 `ScreenFerry-<版本>-windows-x64-setup.exe`，双击安装：
+
+- 安装包没有代码签名，第一次运行时 Windows 可能提示“Windows 已保护你的电脑”，点“更多信息 → 仍要运行”。
+- 安装需要管理员权限：装进 `C:\Program Files\ScreenFerry`，开始菜单里有 ScreenFerry（可选桌面快捷方式），
+  并在 Windows 防火墙里允许它在专用网络和域网络上接受连接，不用再逐个端口确认。
+  电脑连在“公用网络”上时防火墙会照常询问。
+- 升级：直接运行新的安装包。正在运行的 ScreenFerry 会先正常退出（归还键鼠、松开按键），装完马上重新启动；
+  正从另一台电脑控制这台时，几秒后就能接着操作。
+- 卸载：在“设置 → 应用”里找到 ScreenFerry。防火墙规则和开机自启的登记一并删掉；
+  配置、配对记录留在 `%APPDATA%\ScreenFerry\`，以后重装还能用。
+
+设置里的“开机自动启动”写在当前用户的启动项里（`HKCU\...\Run`）。日志在 `%LOCALAPPDATA%\ScreenFerry\logs\`。
+
+从命令行用的调试命令（`peers`、`quit` 等）把结果输出到启动它的终端；`serve`、`connect` 要核对配对码、
+按 Ctrl+C 退出，会在单独的窗口里运行。
+
+### 自己打包
+
+Windows 版的设置界面必须在 Windows 上编译（Flutter 不能在 macOS 上交叉编译 Windows 应用）。需要：
 
 - Flutter 3.47（`flutter doctor` 全部打勾）；
-- Visual Studio 2022，安装“使用 C++ 的桌面开发”；
-- Rust（rustup，默认的 MSVC 工具链）。
+- Visual Studio 2022，安装“使用 C++ 的桌面开发”（附带要放进安装包的 Visual C++ 运行库）；
+- Rust（rustup，默认的 MSVC 工具链）；
+- [Inno Setup](https://jrsoftware.org/isdl.php) 7.1 或更高版本（自带简体中文界面）。不在默认位置时用环境变量
+  `ISCC` 指定 `ISCC.exe`。
 
 在仓库根目录运行：
 
@@ -113,9 +133,9 @@ tccutil reset Accessibility io.github.icloudza.screenferry
 cargo xtask bundle
 ```
 
-产物是 `target/bundle/windows/ScreenFerry/` 目录：`screenferry.exe` 是后台，`settings\` 里是设置界面。
-双击 `screenferry.exe` 即可：任务栏右下角出现图标，并打开设置界面。设置里的“开机自动启动”
-写在当前用户的启动项里（`HKCU\...\Run`）。日志在 `%LOCALAPPDATA%\ScreenFerry\logs\`。
+产物是 `target/bundle/windows/ScreenFerry-<版本>-windows-x64-setup.exe`。安装包里的文件先组装在
+`target/bundle/windows/ScreenFerry/`，不安装也可以直接双击那里的 `screenferry.exe` 试用。
+打包方式见 [ADR 0011](docs/adr/0011-windows-installer.md)。
 
 ## 许可证
 

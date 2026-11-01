@@ -44,6 +44,7 @@ void main() {
       ToastNotice,
       ShowDeviceNotice,
       DialedNotice,
+      QuitNotice,
     });
   });
 
@@ -188,6 +189,7 @@ void main() {
       const OpenPeerSettingsRequest(pc),
       const SendFilesRequest(['/Users/me/Desktop/证书.p12', '/Users/me/Desktop/设计稿']),
       const SendFilesRequest(['/Users/me/Desktop/证书.p12'], to: pc),
+      const QuitRequest(),
     ];
     expect(ours, hasLength(requests.length));
     for (var i = 0; i < ours.length; i++) {

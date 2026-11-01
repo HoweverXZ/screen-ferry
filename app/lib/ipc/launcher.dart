@@ -16,7 +16,7 @@ String? daemonLocation([String? executable]) {
     return File('$app/Contents/MacOS/screenferry').existsSync() ? app : null;
   }
   if (Platform.isWindows) {
-    // …\ScreenFerry\settings\screenferry_settings.exe，后台是 …\ScreenFerry\screenferry.exe
+    // …\ScreenFerry\settings\screenferry-settings.exe，后台是 …\ScreenFerry\screenferry.exe
     final daemon = File('${File(exe).parent.parent.path}\\screenferry.exe');
     return daemon.existsSync() ? daemon.path : null;
   }

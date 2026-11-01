@@ -215,6 +215,14 @@ mod win {
                 let command = format!("\"{}\" {}", args[0], args[1..].join(" "));
                 WinAutostart::new("ScreenFerry", &command)
             });
+            // 开着自启时按本程序现在的位置重新登记：换了安装位置（例如从解压的文件夹换成安装版）
+            // 以后，登录时启动的仍是正在用的这一份。
+            if let Some(a) = &autostart
+                && a.is_enabled().unwrap_or(false)
+                && let Err(e) = a.set_enabled(true)
+            {
+                warn!("更新开机自启的登记失败：{e}");
+            }
             Self { autostart }
         }
     }
@@ -271,10 +279,10 @@ mod win {
         }
 
         fn open_settings(&self) {
-            // 安装目录：screenferry.exe 旁边的 settings\screenferry_settings.exe。
+            // 安装目录：screenferry.exe 旁边的 settings\screenferry-settings.exe。
             // 设置界面自己保证只开一个窗口：已经开着时，新启动的那个把旧窗口带到最前面就退出。
             let candidates: Vec<_> = exe_dir()
-                .map(|dir| vec![dir.join("settings").join("screenferry_settings.exe")])
+                .map(|dir| vec![dir.join("settings").join("screenferry-settings.exe")])
                 .unwrap_or_default();
             let Some(exe) = settings_app(&candidates) else {
                 warn!("找不到设置界面，可以用环境变量 SCREENFERRY_SETTINGS_APP 指定");

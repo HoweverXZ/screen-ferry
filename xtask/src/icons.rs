@@ -4,9 +4,10 @@
 //! ```text
 //! assets/icons/
 //! ├─ tray-connected@2x.png / tray-disconnected@2x.png         macOS 菜单栏模板图，36×36
-//! └─ tray-win-connected.png / tray-win-disconnected.png        Windows 任务栏，32×32
+//! ├─ tray-win-connected.png / tray-win-disconnected.png        Windows 任务栏，32×32
+//! └─ app-icon-windows.ico                                      Windows 应用图标，16–256：后台程序与安装包用
 //! app/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_*.png   macOS 应用图标，16–1024
-//! app/windows/runner/resources/app_icon.ico                            Windows 应用图标，16–256
+//! app/windows/runner/resources/app_icon.ico                            同一个 Windows 图标，设置界面用
 //! ```
 //!
 //! 小尺寸（32 像素及以下）用各自的 `-small.svg`：细节少、线条粗，缩小了不糊。
@@ -67,8 +68,13 @@ pub(crate) fn run() -> Result {
         render(&icons.join(svg), size, &png)?;
         images.push((size, fs::read(&png).map_err(|e| io(&png, e))?));
     }
-    let ico = root.join("app/windows/runner/resources/app_icon.ico");
-    fs::write(&ico, pack_ico(&images)?).map_err(|e| io(&ico, e))?;
+    let packed = pack_ico(&images)?;
+    for ico in [
+        icons.join("app-icon-windows.ico"),
+        root.join("app/windows/runner/resources/app_icon.ico"),
+    ] {
+        fs::write(&ico, &packed).map_err(|e| io(&ico, e))?;
+    }
     println!("✓ 图标已导出");
     Ok(())
 }

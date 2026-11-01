@@ -51,6 +51,9 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         to: Option<String>,
     },
+    /// 请后台退出：停下共享（归还键鼠、松开按键），通知界面一起关闭，然后退出。
+    /// 安装程序升级、卸载前用它让正在运行的 ScreenFerry 放开程序文件。
+    Quit,
 }
 
 /// 后台 → 界面。
@@ -80,6 +83,8 @@ pub enum Notice {
         invite: bool,
         error: Option<DialError>,
     },
+    /// 后台要退出了（托盘里的“退出”或 `quit` 命令），界面随之关闭。之后连接断开。
+    Quit,
 }
 
 /// 按地址连接、邀请为什么没成。

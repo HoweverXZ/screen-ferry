@@ -424,6 +424,39 @@ async fn quitting_removes_the_endpoint_file() {
 }
 
 #[tokio::test]
+async fn quitting_tells_the_ui_to_close_too() {
+    let daemon = Daemon::start(MockHost::default()).await;
+    let mut ui = daemon.ui().await;
+    ui.state_where("首次状态", |_| true).await;
+    daemon.handle.send(Command::Quit);
+    ui.wait("后台要退出了", |n| (*n == Notice::Quit).then_some(()))
+        .await;
+    let result = timeout(Duration::from_secs(3), daemon.task).await.unwrap();
+    assert!(result.unwrap().is_ok());
+}
+
+#[tokio::test]
+async fn the_quit_command_stops_the_running_one_and_waits() {
+    let daemon = Daemon::start(MockHost::default()).await;
+    let mut ui = daemon.ui().await;
+    ui.state_where("首次状态", |_| true).await;
+    let path = daemon.device.store.ipc_endpoint_path();
+
+    assert_eq!(resident::quit_running(&daemon.device.store).await, Ok(true));
+    assert!(!path.exists(), "返回时后台已经退出");
+    ui.wait("界面也收到了", |n| (*n == Notice::Quit).then_some(()))
+        .await;
+    let result = timeout(Duration::from_secs(3), daemon.task).await.unwrap();
+    assert!(result.unwrap().is_ok());
+
+    // 没有在运行的后台时，什么也不做。
+    assert_eq!(
+        resident::quit_running(&daemon.device.store).await,
+        Ok(false)
+    );
+}
+
+#[tokio::test]
 async fn pairing_with_no_ui_open_opens_the_settings() {
     let host = MockHost::default();
     let daemon = Daemon::start(host.clone()).await;

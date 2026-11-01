@@ -1,2 +1,7 @@
 [alias]
 xtask = "run --package xtask --"
+
+# Windows（MSVC）：把 C 运行库静态链接进程序。后台不再依赖 VCRUNTIME140.dll，
+# 没装过 Visual C++ 运行库的电脑也能直接运行（ADR 0011）。
+[target.'cfg(all(target_os = "windows", target_env = "msvc"))']
+rustflags = ["-C", "target-feature=+crt-static"]

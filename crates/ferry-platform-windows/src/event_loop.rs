@@ -3,16 +3,18 @@
 //! 主线程运行消息循环。其他线程的任务投递给一个只收消息的隐藏窗口：
 //! 托盘菜单弹出时的模态循环同样会分发窗口消息，任务不会丢。
 //!
-//! 后台是控制台程序，从资源管理器双击或登录时启动会带出一个黑色的控制台窗口；
-//! 创建事件循环时，如果这个控制台只属于本进程，就把它关掉。从终端运行时不受影响。
-//! 关掉之后原来的标准输入输出句柄就失效了，一并清空：启动子进程时默认要复制这几个句柄，
-//! 复制失效的句柄会让启动失败（设置界面打不开就是这个原因）。
+//! 后台是 Windows 子系统程序，自己没有控制台，双击或登录时启动不会闪出黑色窗口。
+//! 命令行用法要输出时用 [`attach_console`] 接一个。
 
 use ferry_platform::{Dispatcher, Error, EventLoop, MainTask, Result};
-use windows::Win32::Foundation::{HANDLE, HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE, HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Storage::FileSystem::{
+    CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TYPE_UNKNOWN,
+    GetFileType, OPEN_EXISTING,
+};
 use windows::Win32::System::Console::{
-    FreeConsole, GetConsoleProcessList, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
-    SetStdHandle,
+    ATTACH_PARENT_PROCESS, AllocConsole, AttachConsole, GetStdHandle, STD_ERROR_HANDLE, STD_HANDLE,
+    STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, SetStdHandle,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -32,7 +34,6 @@ pub struct WinEventLoop {
 impl WinEventLoop {
     /// 只能在主线程上调用：窗口属于创建它的线程，任务也在这个线程上执行。
     pub fn new() -> Result<Self> {
-        detach_own_console();
         let class = w!("ScreenFerryMainThread");
         // SAFETY: 参数都是有效的常量或刚取得的句柄；窗口过程只处理本模块投递的消息。
         let hwnd = unsafe {
@@ -118,21 +119,53 @@ impl EventLoop for WinEventLoop {
     }
 }
 
-/// 控制台只连着本进程（不是从终端启动的）时关掉它。
-fn detach_own_console() {
-    let mut processes = [0u32; 2];
-    // SAFETY: 缓冲区有效；返回值是连在这个控制台上的进程数。
-    let attached = unsafe { GetConsoleProcessList(&mut processes) };
-    if attached == 1 {
-        // SAFETY: 只是与控制台断开，之后写到标准输出的内容被丢弃（日志写到文件）；
-        // 失效的句柄换成空句柄，子进程就不会继承到坏句柄。
-        unsafe {
-            let _ = FreeConsole();
-            for which in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
-                let _ = SetStdHandle(which, HANDLE::default());
+/// 给命令行用法接一个控制台，接上了返回 `true`。
+///
+/// `own` 为真时新开一个控制台窗口：`serve`、`connect` 要在终端里确认配对码、按 Ctrl+C 退出，
+/// 和启动它的终端抢输入会乱。否则接到启动它的终端上（只输出），没有终端时什么也不做。
+/// 已经重定向到文件或管道的标准句柄保持不变，其余的指向控制台。
+pub fn attach_console(own: bool) -> bool {
+    // SAFETY: 只给本进程接上控制台；失败时（父进程没有控制台等）什么也不改。
+    let attached = unsafe {
+        if own {
+            AllocConsole()
+        } else {
+            AttachConsole(ATTACH_PARENT_PROCESS)
+        }
+    };
+    if attached.is_err() {
+        return false;
+    }
+    for (which, device) in [
+        (STD_INPUT_HANDLE, w!("CONIN$")),
+        (STD_OUTPUT_HANDLE, w!("CONOUT$")),
+        (STD_ERROR_HANDLE, w!("CONOUT$")),
+    ] {
+        if !usable(which) {
+            // SAFETY: 打开控制台设备，设为本进程的标准句柄，一直用到进程退出，不需要关闭。
+            unsafe {
+                if let Ok(handle) = CreateFileW(
+                    device,
+                    (GENERIC_READ | GENERIC_WRITE).0,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE,
+                    None,
+                    OPEN_EXISTING,
+                    FILE_ATTRIBUTE_NORMAL,
+                    None,
+                ) {
+                    let _ = SetStdHandle(which, handle);
+                }
             }
         }
     }
+    true
+}
+
+/// 这个标准句柄能用：已经指向控制台、文件或管道。
+fn usable(which: STD_HANDLE) -> bool {
+    // SAFETY: 只读本进程的标准句柄、查询句柄类型。
+    unsafe { GetStdHandle(which) }
+        .is_ok_and(|h| !h.is_invalid() && unsafe { GetFileType(h) } != FILE_TYPE_UNKNOWN)
 }
 
 /// 允许接下来启动的程序把自己的窗口放到最前面。

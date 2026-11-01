@@ -27,6 +27,12 @@ use runtime::Runtime;
 /// 状态推送与各种计时的节拍。界面最多每秒收到 4 次状态。
 const TICK: Duration = Duration::from_millis(250);
 
+/// 退出时最多等多久，让“后台要退出了”这条通知发到各个界面。
+const FAREWELL: Duration = Duration::from_secs(1);
+
+/// `quit` 命令最多等正在运行的后台多久。
+const QUIT_WAIT: Duration = Duration::from_secs(10);
+
 /// 由应用提供的本机能力：按需创建平台对象，以及只有应用才知道怎么做的事。
 pub trait Host: Send + Sync + 'static {
     type Capture: InputCapture + 'static;
@@ -152,7 +158,12 @@ pub async fn run<H: Host>(store: Store, host: H, mut control: Control) -> Result
                 Ok(incoming) => ui::accept(incoming, rt.next_client_id(), ui_tx.clone()),
                 Err(e) => warn!("接受设置界面的连接失败：{e}"),
             },
-            Some(event) = ui_events.recv() => rt.on_ui(event).await,
+            Some(event) = ui_events.recv() => {
+                rt.on_ui(event).await;
+                if rt.quit_requested() {
+                    break;
+                }
+            }
             Some(event) = engine_events.recv() => rt.on_engine(event),
             Some(ask) = pair_asks.recv() => rt.on_pairing(ask),
             command = control.commands.recv() => match command {
@@ -170,7 +181,19 @@ pub async fn run<H: Host>(store: Store, host: H, mut control: Control) -> Result
         });
     }
     info!("正在退出");
+    let mut waiting = rt.farewell();
     rt.stop_engine().await;
+    // 等每个界面的发送任务把最后一条通知写出去：写完后它结束，随即报告 Left。
+    let flushed = async {
+        while waiting > 0 {
+            match ui_events.recv().await {
+                Some(ui::UiEvent::Left { .. }) => waiting -= 1,
+                Some(_) => {}
+                None => break,
+            }
+        }
+    };
+    let _ = tokio::time::timeout(FAREWELL, flushed).await;
     Ok(())
 }
 
@@ -186,8 +209,6 @@ impl Drop for RemoveOnDrop {
     }
 }
 
-/// 另一份后台是否已在运行：`ipc.json` 指向的端口能握手成功。
-/// 在运行时请它打开设置界面并返回 `true`，当前进程应当退出。
 /// 请正在运行的后台把这些文件发给它连着的对方，返回后台给的提示。
 ///
 /// `paths` 须是绝对路径：后台的工作目录与调用方不同。
@@ -219,6 +240,47 @@ pub async fn send_via_running(store: &Store, paths: Vec<String>) -> Result<Strin
         .map_err(|_| "等 ScreenFerry 回复超时".to_owned())?
 }
 
+/// 请正在运行的后台退出，等它退出后返回 `Ok(true)`；没有在运行时返回 `Ok(false)`。
+///
+/// 安装程序升级、卸载前用它让后台放开程序文件。
+pub async fn quit_running(store: &Store) -> Result<bool, String> {
+    use ferry_ipc::{Notice, Request};
+
+    let path = store.ipc_endpoint_path();
+    let Ok(Some(endpoint)) = Endpoint::load(&path) else {
+        return Ok(false);
+    };
+    // 连不上说明上次没有正常退出，留下的 ipc.json 已经没有意义。
+    let Ok(mut conn) = ferry_ipc::connect(&endpoint).await else {
+        return Ok(false);
+    };
+    conn.send(&Request::Quit)
+        .await
+        .map_err(|e| format!("发不出请求：{e}"))?;
+    let finished = async {
+        // 后台答应退出时先发 Quit，写完后放开连接。
+        let mut agreed = false;
+        while let Ok(Some(notice)) = conn.recv::<Notice>().await {
+            agreed |= notice == Notice::Quit;
+        }
+        if !agreed {
+            return Err(
+                "正在运行的 ScreenFerry 版本较旧，不支持这个命令，请在托盘菜单里退出它".to_owned(),
+            );
+        }
+        // 删掉 ipc.json 是退出前的最后一步。
+        while path.exists() {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        Ok(true)
+    };
+    tokio::time::timeout(QUIT_WAIT, finished)
+        .await
+        .map_err(|_| "等 ScreenFerry 退出超时".to_owned())?
+}
+
+/// 另一份后台是否已在运行：`ipc.json` 指向的端口能握手成功。
+/// 在运行时请它打开设置界面并返回 `true`，当前进程应当退出。
 pub async fn hand_over_to_running(store: &Store) -> bool {
     use ferry_ipc::{Notice, Request};
 

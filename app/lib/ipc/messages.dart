@@ -807,6 +807,7 @@ sealed class Notice {
       invite: _bool(j['invite']),
       error: _enumOrNull(DialError.values, _camel(j['error'])),
     ),
+    'quit' => const QuitNotice(),
     _ => null,
   };
 }
@@ -861,6 +862,11 @@ class DialedNotice extends Notice {
   final String address;
   final bool invite;
   final DialError? error;
+}
+
+/// 后台要退出了（托盘里的“退出”或 `quit` 命令），界面随之关闭。
+class QuitNotice extends Notice {
+  const QuitNotice();
 }
 
 // ── 界面 → 后台 ──────────────────────────────
@@ -987,6 +993,14 @@ class SendFilesRequest extends Request {
 
   @override
   Json toJson() => {'type': 'send_files', 'paths': paths, 'to': ?to};
+}
+
+/// 请后台退出：停下共享，通知界面一起关闭，然后退出。
+class QuitRequest extends Request {
+  const QuitRequest();
+
+  @override
+  Json toJson() => {'type': 'quit'};
 }
 
 /// 要修改的设置；为 null 的字段不变，也不会发出去。

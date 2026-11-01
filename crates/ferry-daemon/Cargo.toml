@@ -22,6 +22,10 @@ tokio = { workspace = true, features = ["io-std", "io-util", "macros", "net", "r
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
+# 把图标、版本信息和程序清单编进 Windows 程序，见 build.rs。
+[build-dependencies]
+embed-resource.workspace = true
+
 [target.'cfg(target_os = "windows")'.dependencies]
 ferry-platform-windows.workspace = true
 png.workspace = true

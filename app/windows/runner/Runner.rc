@@ -87,21 +87,22 @@ VS_VERSION_INFO VERSIONINFO
 BEGIN
     BLOCK "StringFileInfo"
     BEGIN
-        BLOCK "040904e4"
+        // 简体中文、Unicode：任务管理器和文件属性里显示“ScreenFerry 设置”。
+        BLOCK "080404b0"
         BEGIN
-            VALUE "CompanyName", "io.github.icloudza" "\0"
-            VALUE "FileDescription", "screenferry_settings" "\0"
+            VALUE "CompanyName", "icloudza" "\0"
+            VALUE "FileDescription", "ScreenFerry 设置" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "screenferry_settings" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 io.github.icloudza. All rights reserved." "\0"
-            VALUE "OriginalFilename", "screenferry_settings.exe" "\0"
-            VALUE "ProductName", "screenferry_settings" "\0"
+            VALUE "InternalName", "screenferry-settings" "\0"
+            VALUE "LegalCopyright", "MIT OR Apache-2.0" "\0"
+            VALUE "OriginalFilename", "screenferry-settings.exe" "\0"
+            VALUE "ProductName", "ScreenFerry" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END
     BLOCK "VarFileInfo"
     BEGIN
-        VALUE "Translation", 0x409, 1252
+        VALUE "Translation", 0x804, 1200
     END
 END
 

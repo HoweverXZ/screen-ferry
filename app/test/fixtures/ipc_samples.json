@@ -308,6 +308,9 @@
       "error": "not_screen_ferry",
       "invite": true,
       "type": "dialed"
+    },
+    {
+      "type": "quit"
     }
   ],
   "requests": [
@@ -453,6 +456,9 @@
       ],
       "to": "3f9a12c477e0b1d2aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55",
       "type": "send_files"
+    },
+    {
+      "type": "quit"
     }
   ],
   "version": 2

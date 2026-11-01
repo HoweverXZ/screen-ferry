@@ -2,6 +2,7 @@
 // 这里只多管导航、侧栏、提示等纯界面状态，以及“先显示、等后台确认”的乐观更新。
 
 import 'dart:async';
+import 'dart:io' show exit;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -119,9 +120,10 @@ const _pendingTimeout = Duration(seconds: 3);
 const _dialTimeout = Duration(seconds: 20);
 
 class AppState extends ChangeNotifier {
-  AppState({Backend? backend, LinkOpener? openLink})
+  AppState({Backend? backend, LinkOpener? openLink, VoidCallback? onQuit})
     : backend = backend ?? DemoBackend(),
-      _openLink = openLink ?? openInBrowser {
+      _openLink = openLink ?? openInBrowser,
+      _onQuit = onQuit ?? _exitApp {
     _link = this.backend.link.value;
     this.backend.link.addListener(_onLink);
     _subscription = this.backend.notices.listen(_onNotice);
@@ -129,6 +131,10 @@ class AppState extends ChangeNotifier {
 
   final Backend backend;
   final LinkOpener _openLink;
+
+  /// 后台要退出时界面怎么关闭。测试里换掉，不真的退出进程。
+  final VoidCallback _onQuit;
+  static void _exitApp() => exit(0);
   late final StreamSubscription<Notice> _subscription;
 
   final appearance = Appearance();
@@ -514,6 +520,10 @@ class AppState extends ChangeNotifier {
           // 没有对话框在等（例如点了局域网里发现的设备）：失败时提示一下。
           showToast(dialFailure(error, address: address, invite: invite).title);
         }
+      case QuitNotice():
+        // 后台退出了（托盘里的“退出”或安装程序升级、卸载），设置界面跟着关闭。
+        _onQuit();
+        return;
       case WelcomeNotice():
         return;
     }

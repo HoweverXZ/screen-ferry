@@ -4,6 +4,7 @@ use std::convert::Infallible;
 use std::io::IsTerminal;
 use std::net::SocketAddr;
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use ferry_engine::{ClientConfig, EdgeFeed, Events, Files, Live, ServerAddr, ServerConfig};
 use ferry_store::Store;
@@ -11,7 +12,7 @@ use ferry_trust::Fingerprint;
 use ferry_types::{Config, DeviceSettings, ModifierPreset, uses_command_key};
 use tracing::{error, info};
 
-use crate::cli::{Mode, Options};
+use crate::cli::{Mode, Options, Parsed};
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use crate::pairing::TerminalConfirm;
 
@@ -20,9 +21,40 @@ type AppResult = Result<Infallible, Box<dyn std::error::Error>>;
 /// 日志文件超过这个大小时，启动时把它改名为 `.1` 重新开始。
 const LOG_LIMIT: u64 = 2 * 1024 * 1024;
 
-/// 常驻运行时总是写日志文件（缓存目录的 `logs/`），从终端运行时同时写到终端；
-/// 其他命令只写到终端。Windows 上双击启动时控制台会被关掉，所以不能只看启动时有没有终端。
-pub(crate) fn init_logging(options: &Options) {
+/// `serve`、`connect` 在自己开的控制台窗口里运行（Windows，见 [`init_output`]）。
+static OWN_CONSOLE: AtomicBool = AtomicBool::new(false);
+
+/// 准备输出，然后初始化日志。
+///
+/// Windows 上本程序没有控制台：双击、登录时启动不会闪出黑色窗口。命令行用法先接一个：
+/// `serve`、`connect` 要确认配对码、按 Ctrl+C 退出，新开一个窗口；其他命令接回启动它的终端。
+pub(crate) fn init_output(parsed: &Result<Parsed, String>) {
+    #[cfg(target_os = "windows")]
+    {
+        let own = match parsed {
+            Ok(Parsed::Run(Options {
+                mode: Mode::Resident { .. },
+                ..
+            })) => None,
+            Ok(Parsed::Run(Options {
+                mode: Mode::Serve { .. } | Mode::Connect { .. },
+                ..
+            })) => Some(true),
+            _ => Some(false),
+        };
+        if let Some(own) = own {
+            let attached = ferry_platform_windows::attach_console(own);
+            OWN_CONSOLE.store(own && attached, Ordering::Relaxed);
+        }
+    }
+    if let Ok(Parsed::Run(options)) = parsed {
+        init_logging(options);
+    }
+}
+
+/// 常驻运行时总是写日志文件（缓存目录的 `logs/`），从终端运行时同时写到终端
+/// （Windows 上常驻运行不接终端）；其他命令只写到终端。
+fn init_logging(options: &Options) {
     use tracing_subscriber::fmt::writer::MakeWriterExt;
 
     let level = if options.verbose {
@@ -35,6 +67,8 @@ pub(crate) fn init_logging(options: &Options) {
         .with_target(false)
         .with_timer(tracing_subscriber::fmt::time::uptime());
     let terminal = std::io::stderr().is_terminal();
+    // Windows 的控制台窗口不一定认颜色控制码，不加颜色。
+    let ansi = terminal && !cfg!(target_os = "windows");
     let file = matches!(options.mode, Mode::Resident { .. })
         .then(|| log_file(options))
         .flatten()
@@ -45,10 +79,7 @@ pub(crate) fn init_logging(options: &Options) {
             .with_writer(file.and(std::io::stderr))
             .init(),
         Some(file) => builder.with_ansi(false).with_writer(file).init(),
-        None => builder
-            .with_ansi(terminal)
-            .with_writer(std::io::stderr)
-            .init(),
+        None => builder.with_ansi(ansi).with_writer(std::io::stderr).init(),
     }
 }
 
@@ -88,6 +119,7 @@ pub(crate) fn run(options: Options) -> ExitCode {
         Mode::Peers => return report(list_peers(&store)),
         Mode::Forget { target } => return report(forget(&store, &target)),
         Mode::Send { paths } => return report(send_files(&store, paths)),
+        Mode::Quit => return report(quit(&store)),
         Mode::PreviewCapsule { dir } => return report(crate::preview::write(&dir)),
         Mode::Serve { .. } | Mode::Connect { .. } => {}
     }
@@ -164,6 +196,7 @@ pub(crate) fn run(options: Options) -> ExitCode {
                 | Mode::Peers
                 | Mode::Forget { .. }
                 | Mode::Send { .. }
+                | Mode::Quit
                 | Mode::PreviewCapsule { .. } => {
                     unreachable!("已在上面处理")
                 }
@@ -178,7 +211,13 @@ pub(crate) fn run(options: Options) -> ExitCode {
             }
         }
     });
-    report(result)
+    let code = report(result);
+    // 自己开的控制台窗口随进程一起关闭：先停一下，让人看清最后的输出。
+    if OWN_CONSOLE.load(Ordering::Relaxed) {
+        eprintln!("\n按回车键关闭这个窗口");
+        let _ = std::io::stdin().read_line(&mut String::new());
+    }
+    code
 }
 
 /// 常驻运行。已经有一份在运行时，请它打开设置界面，然后退出。
@@ -284,6 +323,19 @@ fn send_files(
         .build()?;
     let reply = runtime.block_on(ferry_engine::resident::send_via_running(store, absolute))?;
     println!("{reply}");
+    Ok(())
+}
+
+/// 请正在运行的后台退出，等它退出后返回。
+fn quit(store: &Store) -> Result<(), Box<dyn std::error::Error>> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    if runtime.block_on(ferry_engine::resident::quit_running(store))? {
+        println!("ScreenFerry 已退出。");
+    } else {
+        println!("ScreenFerry 没有在运行。");
+    }
     Ok(())
 }
 

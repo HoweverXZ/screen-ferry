@@ -112,13 +112,6 @@ class DevicesPage extends StatelessWidget {
             ),
             children: [for (final d in state.found) _FoundCard(key: ValueKey('f-${d.fingerprint}'), device: d)],
           ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 6),
-          child: Text(
-            '连接全程 TLS 1.3 加密。首次连接时两台电脑会显示同一个 6 位配对码，核对一致后才会互相信任。点设备卡片可以单独设置它。',
-            style: TextStyle(fontSize: 13, color: c.muted, height: 1.6),
-          ),
-        ),
       ],
     );
   }

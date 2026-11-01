@@ -175,3 +175,32 @@ fn pairing_messages_stay_on_the_pairing_channel() {
         Err(DecodeError::WrongChannel { ty: 0x0008, .. })
     ));
 }
+
+#[test]
+fn file_messages_stay_on_their_channels() {
+    use ferry_types::TransferId;
+
+    let id = TransferId([3; 16]);
+    let mut buf = Vec::new();
+    // 控制消息只走数据连接，内容只走文件连接。
+    for channel in [Channel::Input, Channel::Pair, Channel::File] {
+        assert_eq!(
+            Codec::new(channel).encode(&Message::FileAccept { id }, &mut buf),
+            Err(EncodeError::WrongChannel(channel))
+        );
+    }
+    for channel in [Channel::Input, Channel::Pair, Channel::Data] {
+        assert_eq!(
+            Codec::new(channel).encode(&Message::FileDone, &mut buf),
+            Err(EncodeError::WrongChannel(channel))
+        );
+    }
+    // 心跳和告别在文件连接上照样可用。
+    Codec::new(Channel::File)
+        .encode(&Message::Ping { nonce: 1 }, &mut buf)
+        .expect("文件连接也能发心跳");
+    assert_eq!(
+        Codec::new(Channel::File).max_payload(),
+        Codec::new(Channel::Data).max_payload()
+    );
+}

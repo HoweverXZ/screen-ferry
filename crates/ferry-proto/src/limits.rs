@@ -12,11 +12,17 @@ pub const MAX_CLIPBOARD_FORMATS: usize = 16;
 /// 单个数据分块的最大字节数。
 pub const MAX_CHUNK_LEN: usize = 64 * 1024;
 
+/// 文件清单中单个路径的最大字节数（UTF-8），也是文件通告中名字的上限。
+pub const MAX_PATH_LEN: usize = 1024;
+
+/// 一条清单消息中最多的条目数。每条最多约 1 KiB，整条不会超过数据连接的单帧上限。
+pub const MAX_FILE_LIST: usize = 32;
+
 /// 配对随机数与承诺的字节数。
 pub const PAIRING_NONCE_LEN: usize = 32;
 
 /// 输入连接（以及配对连接）上单帧消息体的最大字节数。
 pub const MAX_INPUT_PAYLOAD: usize = 4 * 1024;
 
-/// 数据连接上单帧消息体的最大字节数：一个满载分块再加少量字段。
+/// 数据连接和文件连接上单帧消息体的最大字节数：一个满载分块再加少量字段。
 pub const MAX_DATA_PAYLOAD: usize = MAX_CHUNK_LEN + 64;

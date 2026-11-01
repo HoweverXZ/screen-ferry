@@ -77,6 +77,7 @@ activity[] { hour, switches, clips, connected_secs }         最近 48 小时，
 | `open_permission_settings` | | 打开系统中授予键鼠控制权限的页面 |
 | `clear_log` | | 清空日志 |
 | `open_settings` | | 请后台打开设置界面（另一份后台用） |
+| `send_files` | `paths`：本机绝对路径的列表 | 把这些文件和文件夹发给当前连着的对方（`screenferry send` 用），结果以 `toast` 和日志告知 |
 
 命令没有逐条回执：结果体现在随后的 `state`、`log`、`toast` 里。
 

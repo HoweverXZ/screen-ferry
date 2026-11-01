@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::convert::Infallible;
 use std::io::ErrorKind;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use ferry_core::KeyRemap;
@@ -25,7 +26,8 @@ use super::ui::UiEvent;
 use super::{Command, Host, Summary};
 use crate::client::{ClientConfig, ServerAddr, connect};
 use crate::error::{Error, Result};
-use crate::events::{Event, Events, FoundServer};
+use crate::events::{Event, Events, FoundServer, TransferState, TransferUpdate};
+use crate::files::Files;
 use crate::link::DEFAULT_PORT;
 use crate::server::{Live, ServerConfig, serve};
 
@@ -57,6 +59,8 @@ pub(crate) struct Runtime<H> {
     fingerprint: Fingerprint,
     events: Events,
     asks: mpsc::UnboundedSender<PairAsk>,
+    /// 文件传输。引擎重启后仍保留，断线重连后接着传。
+    files: Files,
 
     paused: bool,
     engine: Option<EngineTask>,
@@ -101,6 +105,7 @@ impl<H: Host> Runtime<H> {
         let fingerprint = store.identity(&name)?.fingerprint();
         let peers = store.peers()?;
         let autostart = host.autostart();
+        let files = Files::new(&store, events.clone());
         let mut runtime = Self {
             store,
             host,
@@ -109,6 +114,7 @@ impl<H: Host> Runtime<H> {
             fingerprint,
             events,
             asks,
+            files,
             paused: false,
             engine: None,
             retry_at: None,
@@ -186,6 +192,7 @@ impl<H: Host> Runtime<H> {
             store: self.store.clone(),
             announce: self.config.announce,
             events: self.events.clone(),
+            files: self.files.clone(),
         };
         let (displays, clipboard) = (self.host.displays(), self.host.clipboard());
         let port = self.host.listen_port();
@@ -213,6 +220,7 @@ impl<H: Host> Runtime<H> {
             clipboard: self.config.clipboard,
             store: self.store.clone(),
             events: self.events.clone(),
+            files: self.files.clone(),
         };
         let (displays, clipboard) = (self.host.displays(), self.host.clipboard());
         let handle = tokio::spawn(connect(config, inject, displays, clipboard, confirm));
@@ -339,7 +347,14 @@ impl<H: Host> Runtime<H> {
     // ── 引擎事件 ─────────────────────────────────
 
     pub(crate) fn on_engine(&mut self, event: Event) {
-        if !matches!(event, Event::Rtt(_)) {
+        let progress = matches!(
+            &event,
+            Event::Transfer(TransferUpdate {
+                state: TransferState::Running,
+                ..
+            })
+        );
+        if !matches!(event, Event::Rtt(_)) && !progress {
             self.dirty = true;
         }
         match event {
@@ -407,6 +422,7 @@ impl<H: Host> Runtime<H> {
                 );
             }
             Event::Rtt(rtt) => self.rtt.record(rtt),
+            Event::Transfer(update) => self.on_transfer(update),
             Event::Cursor { here, hotkey } => {
                 self.cursor_on_peer = !here;
                 let peer = self.peer_name();
@@ -566,7 +582,60 @@ impl<H: Host> Runtime<H> {
                 });
             }
             Request::OpenSettings => self.host.open_settings(),
+            Request::SendFiles { paths } => self.send_files(paths).await,
         }
+    }
+
+    async fn send_files(&mut self, paths: Vec<String>) {
+        let paths = paths.into_iter().map(PathBuf::from).collect();
+        match self.files.send(paths).await {
+            Ok(_) => {
+                let peer = self.peer_name();
+                self.toast(format!("开始发给 {peer}"));
+            }
+            Err(e) => self.toast(e.to_string()),
+        }
+    }
+
+    /// 文件传输有了进展：开始、结束、中断都记进日志，过程中的进度不记。
+    fn on_transfer(&mut self, update: TransferUpdate) {
+        let peer = self.peer_name();
+        let what = if update.items > 1 {
+            format!("{} 等 {} 项", update.name, update.items)
+        } else {
+            update.name.clone()
+        };
+        let size = size_text(update.bytes);
+        let files = format!("{} 个文件 · {size}", update.files);
+        let (text, detail) = match (&update.state, update.outgoing) {
+            (TransferState::Running, _) => return,
+            (TransferState::Waiting, true) => (format!("发送 {what} 到 {peer}"), files),
+            (TransferState::Waiting, false) => (format!("{peer} 发来 {what}"), files),
+            (TransferState::Done { .. }, true) => {
+                (format!("已发送 {what}"), format!("到 {peer} · {size}"))
+            }
+            (TransferState::Done { saved }, false) => {
+                let place = saved
+                    .first()
+                    .and_then(|p| p.parent())
+                    .map_or_else(String::new, |p| format!("保存在 {}", p.display()));
+                (format!("已收到 {what}"), place)
+            }
+            (TransferState::Interrupted, _) => {
+                (format!("传输中断：{what}"), "重新连上后接着传".into())
+            }
+            (TransferState::Cancelled { by_peer }, _) => (
+                format!("已取消：{what}"),
+                if *by_peer {
+                    "对方取消了"
+                } else {
+                    "本机取消了"
+                }
+                .into(),
+            ),
+            (TransferState::Failed { reason }, _) => (format!("传输失败：{what}"), reason.clone()),
+        };
+        self.log(LogKind::File, LogIcon::File, text, detail);
     }
 
     pub(crate) async fn on_command(&mut self, command: Command) {
@@ -908,5 +977,24 @@ fn side_label(side: Side) -> &'static str {
         Side::Right => "右侧",
         Side::Top => "上方",
         Side::Bottom => "下方",
+    }
+}
+
+/// 文件大小，给人看的写法。
+fn size_text(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["KB", "MB", "GB", "TB"];
+    if bytes < 1024 {
+        return format!("{bytes} B");
+    }
+    let mut value = bytes as f64 / 1024.0;
+    let mut unit = 0;
+    while value >= 1024.0 && unit + 1 < UNITS.len() {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if value < 10.0 {
+        format!("{value:.1} {}", UNITS[unit])
+    } else {
+        format!("{value:.0} {}", UNITS[unit])
     }
 }

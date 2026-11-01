@@ -5,6 +5,7 @@
 mod client;
 mod clipboard;
 mod events;
+mod files;
 mod pairing;
 mod resident;
 mod server;

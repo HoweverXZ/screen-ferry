@@ -1,9 +1,10 @@
 //! 消息总表：类型号、所属连接、消息体分发。
 
-use ferry_types::{Display, InputEvent, KeyAction, KeyCode, MouseButton, Point};
+use ferry_types::{Display, InputEvent, KeyAction, KeyCode, MouseButton, Point, TransferId};
 
 use crate::clipboard::{ClipboardOffer, ClipboardRequest};
 use crate::error::{DecodeError, EncodeError};
+use crate::file::{self, FileCancel, FileEnd, FileList, FileOffer, FileResume};
 use crate::handshake::{Bye, Channel, Hello, Reject, Welcome};
 use crate::limits::{MAX_DISPLAYS, PAIRING_NONCE_LEN};
 use crate::screen::Enter;
@@ -56,9 +57,31 @@ pub enum Message {
     ClipboardRequest(ClipboardRequest),
     Chunk(Chunk),
     Cancel(Cancel),
+    /// 提议发送一批文件。需要 `FILES` 能力。
+    FileOffer(FileOffer),
+    /// 接收方同意接收，随后由客户端打开文件连接。
+    FileAccept {
+        id: TransferId,
+    },
+    FileCancel(FileCancel),
+
+    // ── 文件连接 ──────────────────────────
+    /// 客户端打开文件连接后的第一条消息：这条连接用于哪次传输。
+    FileOpen {
+        id: TransferId,
+    },
+    FileList(FileList),
+    FileResume(FileResume),
+    /// 当前文件的下一段内容。
+    FileData {
+        data: Vec<u8>,
+    },
+    FileEnd(FileEnd),
+    /// 全部收好、校验通过并已放到最终位置。
+    FileDone,
 }
 
-/// 消息类型号。高字节是类别：0x00 握手、心跳与配对，0x01 输入，0x02 剪贴板，0x03 传输。
+/// 消息类型号。高字节是类别：0x00 握手、心跳与配对，0x01 输入，0x02 剪贴板，0x03 传输，0x04 文件。
 mod ty {
     pub(super) const HELLO: u16 = 0x0001;
     pub(super) const WELCOME: u16 = 0x0002;
@@ -84,6 +107,16 @@ mod ty {
 
     pub(super) const CHUNK: u16 = 0x0300;
     pub(super) const CANCEL: u16 = 0x0301;
+
+    pub(super) const FILE_OFFER: u16 = 0x0400;
+    pub(super) const FILE_ACCEPT: u16 = 0x0401;
+    pub(super) const FILE_CANCEL: u16 = 0x0402;
+    pub(super) const FILE_OPEN: u16 = 0x0410;
+    pub(super) const FILE_LIST: u16 = 0x0411;
+    pub(super) const FILE_RESUME: u16 = 0x0412;
+    pub(super) const FILE_DATA: u16 = 0x0413;
+    pub(super) const FILE_END: u16 = 0x0414;
+    pub(super) const FILE_DONE: u16 = 0x0415;
 }
 
 /// 类型号为 `ty` 的消息能否出现在 `channel` 上。未知类型返回 `None`。
@@ -99,7 +132,19 @@ pub(crate) fn allowed(ty: u16, channel: Channel) -> Option<bool> {
         | ty::POINTER_DELTA
         | ty::BUTTON
         | ty::WHEEL => Channel::Input,
-        ty::CLIPBOARD_OFFER | ty::CLIPBOARD_REQUEST | ty::CHUNK | ty::CANCEL => Channel::Data,
+        ty::CLIPBOARD_OFFER
+        | ty::CLIPBOARD_REQUEST
+        | ty::CHUNK
+        | ty::CANCEL
+        | ty::FILE_OFFER
+        | ty::FILE_ACCEPT
+        | ty::FILE_CANCEL => Channel::Data,
+        ty::FILE_OPEN
+        | ty::FILE_LIST
+        | ty::FILE_RESUME
+        | ty::FILE_DATA
+        | ty::FILE_END
+        | ty::FILE_DONE => Channel::File,
         _ => return None,
     };
     Some(home == channel)
@@ -131,6 +176,15 @@ impl Message {
             Self::ClipboardRequest(_) => ty::CLIPBOARD_REQUEST,
             Self::Chunk(_) => ty::CHUNK,
             Self::Cancel(_) => ty::CANCEL,
+            Self::FileOffer(_) => ty::FILE_OFFER,
+            Self::FileAccept { .. } => ty::FILE_ACCEPT,
+            Self::FileCancel(_) => ty::FILE_CANCEL,
+            Self::FileOpen { .. } => ty::FILE_OPEN,
+            Self::FileList(_) => ty::FILE_LIST,
+            Self::FileResume(_) => ty::FILE_RESUME,
+            Self::FileData { .. } => ty::FILE_DATA,
+            Self::FileEnd(_) => ty::FILE_END,
+            Self::FileDone => ty::FILE_DONE,
         }
     }
 
@@ -163,6 +217,14 @@ impl Message {
             Self::ClipboardRequest(m) => m.encode(w),
             Self::Chunk(m) => m.encode(w),
             Self::Cancel(m) => m.encode(w),
+            Self::FileOffer(m) => m.encode(w),
+            Self::FileAccept { id } | Self::FileOpen { id } => id.encode(w),
+            Self::FileCancel(m) => m.encode(w),
+            Self::FileList(m) => m.encode(w),
+            Self::FileResume(m) => m.encode(w),
+            Self::FileData { data } => file::encode_data(data, w),
+            Self::FileEnd(m) => m.encode(w),
+            Self::FileDone => Ok(()),
         }
     }
 
@@ -209,6 +271,21 @@ impl Message {
             ty::CLIPBOARD_REQUEST => Self::ClipboardRequest(ClipboardRequest::decode(r)?),
             ty::CHUNK => Self::Chunk(Chunk::decode(r)?),
             ty::CANCEL => Self::Cancel(Cancel::decode(r)?),
+            ty::FILE_OFFER => Self::FileOffer(FileOffer::decode(r)?),
+            ty::FILE_ACCEPT => Self::FileAccept {
+                id: TransferId::decode(r)?,
+            },
+            ty::FILE_CANCEL => Self::FileCancel(FileCancel::decode(r)?),
+            ty::FILE_OPEN => Self::FileOpen {
+                id: TransferId::decode(r)?,
+            },
+            ty::FILE_LIST => Self::FileList(FileList::decode(r)?),
+            ty::FILE_RESUME => Self::FileResume(FileResume::decode(r)?),
+            ty::FILE_DATA => Self::FileData {
+                data: file::decode_data(r)?,
+            },
+            ty::FILE_END => Self::FileEnd(FileEnd::decode(r)?),
+            ty::FILE_DONE => Self::FileDone,
             _ => return Err(DecodeError::UnknownMessage(ty)),
         })
     }

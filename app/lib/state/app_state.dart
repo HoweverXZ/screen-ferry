@@ -31,6 +31,7 @@ extension LogKindLabel on LogKind {
     LogKind.cursor => '光标',
     LogKind.clip => '剪贴板',
     LogKind.link => '设备与连接',
+    LogKind.file => '文件',
   };
 }
 
@@ -48,6 +49,7 @@ extension LogIconData on LogIcon {
     LogIcon.radar => Icons.radar_rounded,
     LogIcon.warning => Icons.warning_amber_rounded,
     LogIcon.settings => Icons.tune_rounded,
+    LogIcon.file => Icons.insert_drive_file_rounded,
   };
 }
 

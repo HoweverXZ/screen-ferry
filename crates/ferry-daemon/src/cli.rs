@@ -13,6 +13,7 @@ pub(crate) const USAGE: &str = "\
   screenferry connect [服务端地址] [通用选项]
   screenferry peers   [--data-dir 目录]
   screenferry forget  <设备名或指纹> [--data-dir 目录]
+  screenferry send    <文件或文件夹>... [--data-dir 目录]
 
 不带命令时常驻运行：按数据目录中的 config.toml 工作，菜单栏（任务栏）有图标，
 配对、设置都在设置界面里完成。启动时会打开设置界面；--autostart 表示登录时由系统启动，
@@ -24,6 +25,8 @@ pub(crate) const USAGE: &str = "\
              不填地址时在局域网里自动寻找：优先已配对的；从未配对过时，只有一台才自动连
   peers      列出已配对的设备
   forget     删除一台已配对的设备，下次连接需要重新配对
+  send       请正在运行的 ScreenFerry 把文件或文件夹发给它连着的电脑，
+             对方收到后放在“下载”文件夹
 
 serve 的选项：
   --listen   监听地址，默认 0.0.0.0:24810
@@ -78,6 +81,10 @@ pub(crate) enum Mode {
     Forget {
         target: String,
     },
+    /// 请正在运行的后台发送这些文件。
+    Send {
+        paths: Vec<PathBuf>,
+    },
 }
 
 pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, String> {
@@ -87,7 +94,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, St
         // 不带命令（或直接跟选项）：常驻运行。
         None => "resident".to_owned(),
         Some(first) if first.starts_with('-') => "resident".to_owned(),
-        Some(command @ ("serve" | "connect" | "peers" | "forget")) => {
+        Some(command @ ("serve" | "connect" | "peers" | "forget" | "send")) => {
             let command = command.to_owned();
             args.next();
             command
@@ -102,6 +109,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, St
     let mut announce = true;
     let mut clipboard = true;
     let mut positional = None;
+    let mut paths = Vec::new();
     let mut name = None;
     let mut data_dir = None;
     let mut verbose = false;
@@ -127,6 +135,9 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, St
             {
                 positional = Some(other.to_owned());
             }
+            other if command == "send" && !other.starts_with('-') => {
+                paths.push(PathBuf::from(other))
+            }
             other => return Err(format!("无法识别的参数：{other}")),
         }
     }
@@ -143,6 +154,8 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, St
             server: positional.as_deref().map(resolve).transpose()?,
         },
         "peers" => Mode::Peers,
+        "send" if paths.is_empty() => return Err("send 需要至少一个文件或文件夹".into()),
+        "send" => Mode::Send { paths },
         _ => Mode::Forget {
             target: positional.ok_or("forget 需要设备名或指纹，可先用 peers 查看")?,
         },

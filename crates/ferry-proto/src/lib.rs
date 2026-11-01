@@ -14,6 +14,7 @@ pub mod limits;
 mod clipboard;
 mod codec;
 mod error;
+mod file;
 mod handshake;
 mod message;
 mod screen;
@@ -23,6 +24,7 @@ mod wire;
 pub use clipboard::{ClipboardItem, ClipboardOffer, ClipboardRequest};
 pub use codec::{Codec, HEADER_LEN};
 pub use error::{DecodeError, EncodeError};
+pub use file::{EntryKind, FileCancel, FileEnd, FileEntry, FileList, FileOffer, FileResume};
 pub use handshake::{
     Bye, ByeReason, Capabilities, Channel, Hello, PROTOCOL_VERSION, Reject, RejectReason, Welcome,
 };

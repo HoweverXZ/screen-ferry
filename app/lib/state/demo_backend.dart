@@ -184,6 +184,9 @@ class DemoBackend implements Backend {
       case ClearLogRequest():
         _log.clear();
         emit(const ToastNotice('日志已清空'));
+      case SendFilesRequest(:final paths):
+        _addLog(LogKind.file, LogIcon.file, '发送 ${paths.length} 项到 $_peerName', '演示模式不会真的发送');
+        emit(ToastNotice('开始发给 $_peerName'));
       case HelloRequest() || OpenPermissionSettingsRequest() || OpenSettingsRequest():
         break;
     }

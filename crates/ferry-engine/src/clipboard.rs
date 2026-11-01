@@ -1,4 +1,5 @@
-//! 剪贴板同步：在数据连接上运行，服务端与客户端共用。
+//! 剪贴板同步：在数据连接上运行，服务端与客户端共用。数据连接上的文件控制消息也在这里收发，
+//! 交给 [`FileLink`]。
 //!
 //! 同一时刻只有一台是“活动端”（光标所在的那台）。规则只有两条：
 //!
@@ -29,6 +30,7 @@ use tracing::{debug, info, warn};
 
 use crate::error::{Error, Result};
 use crate::events::{ClipSummary, Event, Events};
+use crate::files::FileLink;
 use crate::link::send;
 
 /// 活动端检查本机剪贴板的间隔。
@@ -62,19 +64,22 @@ pub(crate) enum Start {
 ///
 /// 数据连接比输入连接晚建立，期间光标可能已经切走，
 /// 所以连上时是否通告由 `start` 决定，而不看这一刻谁是活动端。
+/// `sync` 为假（没有协商剪贴板能力）时只收发文件控制消息。
 pub(crate) fn spawn<S, C>(
     framed: Framed<S>,
     clipboard: SharedClipboard<C>,
     active: watch::Receiver<bool>,
     start: Start,
     events: Events,
+    sync: bool,
+    files: Option<FileLink>,
 ) -> ClipboardTask
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     C: Clipboard,
 {
     ClipboardTask(tokio::spawn(async move {
-        let mut sync = ClipboardSync::new(framed, clipboard, active, events);
+        let mut sync = ClipboardSync::new(framed, clipboard, active, events, sync, files);
         match sync.run(start).await {
             Ok(()) => debug!("数据连接已关闭"),
             Err(e) => warn!("剪贴板同步中断：{e}"),
@@ -98,6 +103,10 @@ struct ClipboardSync<S, C> {
     events: Events,
     /// 最近一次报告“已被对方拉走”的通告序号，同一份内容的几个格式只报告一次。
     reported: Option<u32>,
+    /// 是否同步剪贴板。
+    sync: bool,
+    /// 文件传输的控制消息。
+    files: Option<FileLink>,
 }
 
 /// 正在拉取的一份对方内容。各格式都到齐后一次写入本机剪贴板。
@@ -118,6 +127,8 @@ where
         clipboard: SharedClipboard<C>,
         active: watch::Receiver<bool>,
         events: Events,
+        sync: bool,
+        files: Option<FileLink>,
     ) -> Self {
         Self {
             framed,
@@ -131,13 +142,15 @@ where
             next_transfer: 1,
             events,
             reported: None,
+            sync,
+            files,
         }
     }
 
     async fn run(&mut self, start: Start) -> Result<()> {
         let count = self.lock().change_count();
         self.seen = count;
-        if start == Start::Announce {
+        if self.sync && start == Start::Announce {
             self.offer_local().await?;
         }
 
@@ -153,6 +166,9 @@ where
                     if changed.is_err() {
                         return Ok(()); // 会话已结束
                     }
+                    if !self.sync {
+                        continue;
+                    }
                     if self.is_active() {
                         self.start_fetch().await?;
                     } else {
@@ -160,9 +176,12 @@ where
                     }
                 }
                 _ = tick.tick() => {
-                    if self.is_active() {
+                    if self.sync && self.is_active() {
                         self.poll().await?;
                     }
+                }
+                Some(message) = next_file_message(&mut self.files) => {
+                    send(&mut self.framed, &message).await?;
                 }
             }
         }
@@ -188,6 +207,13 @@ where
                 {
                     debug!(reason = cancel.reason.0, "对方取消了一个格式的传输");
                     self.finish_if_done()?;
+                }
+            }
+            message @ (Message::FileOffer(_)
+            | Message::FileAccept { .. }
+            | Message::FileCancel(_)) => {
+                if let Some(files) = &self.files {
+                    files.on_control(message);
                 }
             }
             other => debug!(?other, "数据连接上忽略消息"),
@@ -362,5 +388,13 @@ where
 
     fn lock(&self) -> MutexGuard<'_, C> {
         self.clipboard.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+/// 下一条要发出的文件控制消息；没有文件传输时永远等待。
+async fn next_file_message(files: &mut Option<FileLink>) -> Option<Message> {
+    match files {
+        Some(files) => files.next().await,
+        None => std::future::pending().await,
     }
 }

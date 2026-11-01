@@ -2,13 +2,17 @@
 
 use ferry_proto::{
     Bye, ByeReason, Cancel, CancelReason, Capabilities, Channel, Chunk, ClipboardItem,
-    ClipboardOffer, ClipboardRequest, Codec, Enter, Hello, Message, PROTOCOL_VERSION, Reject,
-    RejectReason, Welcome,
+    ClipboardOffer, ClipboardRequest, Codec, Enter, EntryKind, FileCancel, FileEnd, FileEntry,
+    FileList, FileOffer, FileResume, Hello, Message, PROTOCOL_VERSION, Reject, RejectReason,
+    Welcome,
 };
 use ferry_types::{
     ClipboardFormat, Display, DisplayId, InputEvent, KeyAction, KeyCode, LockKeys, MouseButton,
-    Point, Rect, WHEEL_NOTCH,
+    Point, Rect, TransferId, WHEEL_NOTCH,
 };
+
+/// 样例里用的传输号。
+pub const TRANSFER: TransferId = TransferId([0xA5; 16]);
 
 /// 每种消息至少一个样例，以及它所属的连接。
 pub fn samples() -> Vec<(Channel, Message)> {
@@ -144,6 +148,66 @@ pub fn samples() -> Vec<(Channel, Message)> {
                 reason: CancelReason::STALE,
             }),
         ),
+        (
+            Channel::Data,
+            Message::FileOffer(FileOffer {
+                id: TRANSFER,
+                name: "设计稿".into(),
+                items: 2,
+                files: 37,
+                bytes: 88_080_384,
+            }),
+        ),
+        (Channel::Data, Message::FileAccept { id: TRANSFER }),
+        (
+            Channel::Data,
+            Message::FileCancel(FileCancel {
+                id: TRANSFER,
+                reason: CancelReason::CANCELLED,
+            }),
+        ),
+        (Channel::File, Message::FileOpen { id: TRANSFER }),
+        (
+            Channel::File,
+            Message::FileList(FileList {
+                entries: vec![
+                    FileEntry {
+                        path: "设计稿".into(),
+                        kind: EntryKind::Dir,
+                        size: 0,
+                        modified: 0,
+                    },
+                    FileEntry {
+                        path: "设计稿/首页.png".into(),
+                        kind: EntryKind::File,
+                        size: 2_400_000,
+                        modified: 1_793_400_000_000,
+                    },
+                ],
+                last: true,
+            }),
+        ),
+        (
+            Channel::File,
+            Message::FileResume(FileResume {
+                index: 1,
+                offset: 65_536,
+            }),
+        ),
+        (
+            Channel::File,
+            Message::FileData {
+                data: vec![0xEE; 300],
+            },
+        ),
+        (
+            Channel::File,
+            Message::FileEnd(FileEnd {
+                index: 1,
+                sha256: [0x5A; 32],
+            }),
+        ),
+        (Channel::File, Message::FileDone),
     ]
 }
 

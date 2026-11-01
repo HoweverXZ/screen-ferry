@@ -110,6 +110,7 @@ void main() {
       const OpenPermissionSettingsRequest(),
       const ClearLogRequest(),
       const OpenSettingsRequest(),
+      const SendFilesRequest(['/Users/me/Desktop/证书.p12', '/Users/me/Desktop/设计稿']),
     ];
     expect(ours, hasLength(requests.length));
     for (var i = 0; i < ours.length; i++) {

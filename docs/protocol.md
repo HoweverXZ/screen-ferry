@@ -10,15 +10,16 @@
 
 ## 1. 连接
 
-每对设备之间建立两条 TCP 连接，均运行在 TLS 1.3 之上，用同一套设备证书双向认证。TLS 握手使用 ALPN 标识 `screenferry`，不是本协议的连接在 TLS 阶段就会被拒绝。首次连接时另有一条短暂的配对连接，配对完成即关闭。
+每对设备之间建立两条常驻的 TCP 连接，均运行在 TLS 1.3 之上，用同一套设备证书双向认证。TLS 握手使用 ALPN 标识 `screenferry`，不是本协议的连接在 TLS 阶段就会被拒绝。首次连接时另有一条短暂的配对连接，配对完成即关闭；每次传文件另开一条文件连接，传完即关闭。
 
 | 连接 | 内容 | 单帧消息体上限 |
 |---|---|---|
 | 输入连接 | 键鼠事件、屏幕切换、显示器布局、心跳 | 4 KiB |
 | 数据连接 | 剪贴板通告与内容、分块传输、心跳 | 64 KiB + 64 字节 |
 | 配对连接 | 配对码所需的随机数与双方的确认 | 4 KiB |
+| 文件连接 | 一次文件传输的清单与内容 | 64 KiB + 64 字节 |
 
-两条连接各自独立收发，大数据传输不会阻塞键鼠事件。
+各条连接独立收发，大文件不会阻塞键鼠事件和剪贴板。所有连接都由客户端发起，服务端只监听一个端口。
 
 ### 身份与信任
 
@@ -52,11 +53,12 @@
 ```
 
 - 每条连接的第一条消息必须是 `Hello`，接受方以 `Welcome` 或 `Reject` 回应。握手完成前，除这三条和 `Bye` 外的消息都是协议违规。
-- 先建立输入连接，拿到会话号 `S`；数据连接带上 `S`，接受方据此把两条连接归到同一会话。
+- 先建立输入连接，拿到会话号 `S`；数据连接和文件连接带上 `S`，接受方据此把它们归到同一会话。
 - **版本**：双方版本必须相同，否则接受方回 `Reject(INCOMPATIBLE_VERSION)`，并带上自己的版本号，便于提示用户升级哪一端。
 - **能力**：`Welcome` 中的能力是双方能力的交集。只能发送已协商能力范围内的消息：
   - `PointerDelta` 需要 `RELATIVE_POINTER`
   - 剪贴板消息需要 `CLIPBOARD`
+  - 文件消息和文件连接需要 `FILES`
 - `Hello`、`Welcome`、`Reject` 的消息体格式在所有版本中永久不变，版本不同的双方也总能完成协商。
 - 配对连接的 `Hello` 中 `session` 填 0，`capabilities` 不起作用。
 
@@ -86,7 +88,7 @@
 
 ## 5. 消息
 
-类型号的高字节表示类别：`0x00` 握手、心跳与配对，`0x01` 输入，`0x02` 剪贴板，`0x03` 传输。
+类型号的高字节表示类别：`0x00` 握手、心跳与配对，`0x01` 输入，`0x02` 剪贴板，`0x03` 传输，`0x04` 文件。
 
 | 类型号 | 消息 | 连接 | 消息体 |
 |---|---|---|---|
@@ -111,6 +113,15 @@
 | `0x0201` | ClipboardRequest | 数据 | `seq u32` · `format u8` · `transfer u32` |
 | `0x0300` | Chunk | 数据 | `transfer u32` · `last bool` · `data bytes`，最多 64 KiB |
 | `0x0301` | Cancel | 数据 | `transfer u32` · `reason u16` |
+| `0x0400` | FileOffer | 数据 | `id [16]` · `name str` · `items u32` · `files u32` · `bytes u64` |
+| `0x0401` | FileAccept | 数据 | `id [16]` |
+| `0x0402` | FileCancel | 数据 | `id [16]` · `reason u16` |
+| `0x0410` | FileOpen | 文件 | `id [16]` |
+| `0x0411` | FileList | 文件 | `list<FileEntry>`，最多 32 个 · `last bool` |
+| `0x0412` | FileResume | 文件 | `index u32` · `offset u64` |
+| `0x0413` | FileData | 文件 | `data bytes`，最多 64 KiB |
+| `0x0414` | FileEnd | 文件 | `index u32` · `sha256 [32]` |
+| `0x0415` | FileDone | 文件 | 无 |
 
 设备名 `name` 最多 128 字节。
 
@@ -121,14 +132,18 @@
 | Point | `x i32` · `y i32` |
 | Rect | `x i32` · `y i32` · `width u32` · `height u32` |
 | Display | `id u32` · `bounds Rect` · `scale_percent u16` · `primary bool` |
+| FileEntry | `path str` · `kind u8` · `size u64` · `modified u64` |
 | ClipboardItem | `format u8` · `size u64` |
 
 ### 取值
 
 | 字段 | 取值 |
 |---|---|
-| `channel` | 1 输入，2 数据，3 配对 |
-| `capabilities` | 位 0 `RELATIVE_POINTER`，位 1 `CLIPBOARD`；未知位保留，协商时自然被交集去掉 |
+| `channel` | 1 输入，2 数据，3 配对，4 文件 |
+| `capabilities` | 位 0 `RELATIVE_POINTER`，位 1 `CLIPBOARD`，位 2 `FILES`；未知位保留，协商时自然被交集去掉 |
+| `kind` | 1 文件，2 文件夹 |
+| `path`、`name` | 最多 1024 字节；`path` 为相对路径，以 `/` 分隔 |
+| `modified` | 自 1970 年起的毫秒数，0 表示不知道 |
 | `code` | USB HID 扩展用法码：高 16 位用法页，低 16 位用法 ID。键盘页 `0x07`，消费者页 `0x0C` |
 | `action` | 1 按下，2 松开，3 连发 |
 | `locks` | 位 0 Caps Lock，位 1 Num Lock，位 2 Scroll Lock；其他位必须为 0 |
@@ -138,7 +153,7 @@
 | `format` | 1 纯文本（UTF-8，换行统一为 `\n`），2 HTML（UTF-8），3 RTF，4 PNG |
 | Reject `reason` | 1 版本不兼容，2 会话不存在，3 正被其他设备控制，4 尚未配对 |
 | Bye `reason` | 0 正常关闭，1 被新连接取代，2 协议违规，3 心跳超时 |
-| Cancel `reason` | 0 主动取消，1 内容已过期，2 超过大小上限，3 源数据不可用 |
+| Cancel、FileCancel `reason` | 0 主动取消，1 内容已过期，2 超过大小上限，3 源数据不可用 |
 
 `format` 和各个 `reason` 以后可能新增取值，接收方遇到不认识的值应当按"未知"处理，不算协议违规。
 
@@ -180,6 +195,30 @@ A（复制的一方）                         B（粘贴的一方）
 - 写入对方内容后，接收方须记下这次写入，不能把它当作新的复制再通告回去。
 - 请求的 `seq` 已经过期时，回 `Cancel(STALE)`。
 - 接收方觉得内容太大时，可以不请求，或者中途发 `Cancel(TOO_LARGE)`。
+
+### 文件
+
+```
+发送方                         接收方（这里假设接收方是客户端）
+  ── FileOffer { id, "设计稿", 2 项, 37 个文件, 84 MB } ─▶     （数据连接）
+  ◀───────────────────────── FileAccept { id } ──
+                     （客户端新开一条文件连接）
+  ◀── Hello { channel: 文件, session: S } … FileOpen { id } ──  （文件连接）
+  ── FileList { 32 个条目, last: false } ────────▶
+  ── FileList { 5 个条目,  last: true  } ────────▶
+  ◀──────────────── FileResume { index: 0, offset: 0 } ──
+  ── FileData … FileEnd { index: 1, sha256 } ──▶
+  ── FileData … FileEnd { index: 2, sha256 } ──▶
+  ◀───────────────────────────────── FileDone ──
+```
+
+- 控制消息走数据连接，内容走单独的文件连接。文件连接总由客户端打开：客户端发送时，收到 `FileAccept` 后打开；客户端接收时，回 `FileAccept` 后打开。服务端收到 `FileOpen` 时，`id` 必须对应本会话中已通告、已接受的传输，否则关闭连接。
+- `id` 由发送方随机生成。会话中断后，发送方在下次连上时用同一个 `id` 重新发 `FileOffer`，接收方据此接着收。
+- 清单按顺序列出所有条目，文件夹在它包含的条目之前。路径不能是绝对路径，不能含空段、`.` 或 `..`；接收方须按本机规则清洗文件名，不能信任对方给的名字。
+- 接收方回 `FileResume` 说明从清单中第 `index` 个条目的第 `offset` 个字节开始；全新传输为 `(0, 0)`。之后发送方从这里开始，按清单顺序发出每个文件的内容：若干条 `FileData`（空文件没有），再加一条 `FileEnd`，附整个文件的 SHA-256。文件夹没有内容。
+- 每个文件收到的字节数必须等于清单中的 `size`，SHA-256 必须一致，否则接收方关闭连接，这次传输失败。
+- 全部收好、校验通过并放到最终位置后，接收方回 `FileDone`，双方关闭文件连接。
+- 任一方都可以随时在数据连接上发 `FileCancel` 并关闭文件连接。
 
 ### 配对
 

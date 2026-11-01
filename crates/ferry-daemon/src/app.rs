@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 use std::process::ExitCode;
 
 use ferry_core::KeyRemap;
-use ferry_engine::{ClientConfig, Events, Live, ServerAddr, ServerConfig};
+use ferry_engine::{ClientConfig, Events, Files, Live, ServerAddr, ServerConfig};
 use ferry_store::Store;
 use ferry_trust::Fingerprint;
 use tracing::{error, info};
@@ -87,6 +87,7 @@ pub(crate) fn run(options: Options) -> ExitCode {
         Mode::Resident { autostart } => return report(resident(store, autostart)),
         Mode::Peers => return report(list_peers(&store)),
         Mode::Forget { target } => return report(forget(&store, &target)),
+        Mode::Send { paths } => return report(send_files(&store, paths)),
         Mode::Serve { .. } | Mode::Connect { .. } => {}
     }
 
@@ -100,6 +101,7 @@ pub(crate) fn run(options: Options) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    let files = Files::new(&store, Events::none());
     let result = runtime.block_on(async move {
         let work = async {
             match options.mode {
@@ -121,6 +123,7 @@ pub(crate) fn run(options: Options) -> ExitCode {
                         store,
                         announce,
                         events: Events::none(),
+                        files,
                     };
                     serve(listen, config).await
                 }
@@ -131,10 +134,11 @@ pub(crate) fn run(options: Options) -> ExitCode {
                         clipboard: options.clipboard,
                         store,
                         events: Events::none(),
+                        files,
                     };
                     connect(config).await
                 }
-                Mode::Resident { .. } | Mode::Peers | Mode::Forget { .. } => {
+                Mode::Resident { .. } | Mode::Peers | Mode::Forget { .. } | Mode::Send { .. } => {
                     unreachable!("已在上面处理")
                 }
             }
@@ -235,6 +239,25 @@ fn list_peers(store: &Store) -> Result<(), Box<dyn std::error::Error>> {
     for peer in peers.iter() {
         println!("  {}  {}", peer.fingerprint, peer.name);
     }
+    Ok(())
+}
+
+/// 请正在运行的后台发送文件。路径先转成绝对路径，后台的工作目录与这里不同。
+fn send_files(
+    store: &Store,
+    paths: Vec<std::path::PathBuf>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut absolute = Vec::with_capacity(paths.len());
+    for path in paths {
+        let path =
+            std::fs::canonicalize(&path).map_err(|e| format!("找不到 {}：{e}", path.display()))?;
+        absolute.push(path.to_string_lossy().into_owned());
+    }
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let reply = runtime.block_on(ferry_engine::resident::send_via_running(store, absolute))?;
+    println!("{reply}");
     Ok(())
 }
 

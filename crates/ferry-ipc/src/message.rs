@@ -34,6 +34,8 @@ pub enum Request {
     ClearLog,
     /// 请后台打开设置界面。另一份后台启动时用它把用户引到已在运行的这一份。
     OpenSettings,
+    /// 把这些文件和文件夹（本机的绝对路径）发给当前连着的对方。结果以 `toast` 和日志告知。
+    SendFiles { paths: Vec<String> },
 }
 
 /// 后台 → 界面。
@@ -256,6 +258,7 @@ pub enum LogKind {
     Cursor,
     Clip,
     Link,
+    File,
 }
 
 /// 日志左侧的图标。
@@ -274,6 +277,7 @@ pub enum LogIcon {
     Radar,
     Warning,
     Settings,
+    File,
 }
 
 /// 请用户核对的配对码。

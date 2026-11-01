@@ -48,6 +48,12 @@ fn requests() -> Vec<Request> {
         Request::OpenPermissionSettings,
         Request::ClearLog,
         Request::OpenSettings,
+        Request::SendFiles {
+            paths: vec![
+                "/Users/me/Desktop/证书.p12".into(),
+                "/Users/me/Desktop/设计稿".into(),
+            ],
+        },
     ]
 }
 

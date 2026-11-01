@@ -18,8 +18,9 @@ ferry-proto.workspace = true
 ferry-store.workspace = true
 ferry-trust.workspace = true
 ferry-types.workspace = true
+ring.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["macros", "net", "rt", "sync", "time"] }
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "rt", "sync", "time"] }
 tracing.workspace = true
 
 [dev-dependencies]

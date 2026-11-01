@@ -23,6 +23,8 @@ pub enum Channel {
     Data,
     /// 配对：首次连接时交换配对码所需的随机数，完成后即关闭。
     Pair,
+    /// 文件：一次文件传输一条，传完即关闭。
+    File,
 }
 
 impl fmt::Display for Channel {
@@ -31,6 +33,7 @@ impl fmt::Display for Channel {
             Self::Input => "输入",
             Self::Data => "数据",
             Self::Pair => "配对",
+            Self::File => "文件",
         })
     }
 }
@@ -45,6 +48,8 @@ bitflags! {
         const RELATIVE_POINTER = 1 << 0;
         /// 剪贴板同步。
         const CLIPBOARD = 1 << 1;
+        /// 文件传输。
+        const FILES = 1 << 2;
     }
 }
 
@@ -54,7 +59,7 @@ pub struct Hello {
     pub version: u16,
     pub channel: Channel,
     pub capabilities: Capabilities,
-    /// 输入连接填 0；数据连接填输入连接握手时拿到的会话号。
+    /// 输入连接填 0；数据连接和文件连接填输入连接握手时拿到的会话号。
     pub session: u64,
     /// 发起方的设备名，用于显示。
     pub name: String,
@@ -169,6 +174,7 @@ impl Body for Channel {
             Self::Input => 1,
             Self::Data => 2,
             Self::Pair => 3,
+            Self::File => 4,
         });
         Ok(())
     }
@@ -178,6 +184,7 @@ impl Body for Channel {
             1 => Ok(Self::Input),
             2 => Ok(Self::Data),
             3 => Ok(Self::Pair),
+            4 => Ok(Self::File),
             _ => Err(DecodeError::InvalidValue("连接类型")),
         }
     }

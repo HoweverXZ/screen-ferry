@@ -7,7 +7,7 @@ use ferry_trust::{Identity, PeerList};
 use ferry_types::Config;
 
 use crate::config;
-use crate::dirs::{default_cache_dir, default_data_dir};
+use crate::dirs::{default_cache_dir, default_data_dir, default_downloads_dir};
 use crate::error::{Error, Result};
 use crate::file::{self, io};
 use crate::peers;
@@ -18,6 +18,8 @@ pub struct Store {
     root: PathBuf,
     /// 运行时文件（例如 `ipc.json`）所在的目录。
     cache: PathBuf,
+    /// 收到的文件放在这里。
+    downloads: PathBuf,
 }
 
 impl Store {
@@ -25,16 +27,18 @@ impl Store {
     pub fn open_default() -> Result<Self> {
         let mut store = Self::open(default_data_dir()?)?;
         store.cache = default_cache_dir()?;
+        store.downloads = default_downloads_dir()?;
         Ok(store)
     }
 
-    /// 打开指定的数据目录，不存在时创建。运行时文件也放在这个目录里，
+    /// 打开指定的数据目录，不存在时创建。运行时文件和收到的文件（`received/`）也放在这个目录里，
     /// 这样用 `--data-dir` 运行的几份后台互不干扰。
     pub fn open(root: impl Into<PathBuf>) -> Result<Self> {
         let root = root.into();
         fs::create_dir_all(&root).map_err(|e| io(&root, e))?;
         Ok(Self {
             cache: root.clone(),
+            downloads: root.join("received"),
             root,
         })
     }
@@ -102,6 +106,16 @@ impl Store {
     /// 日志目录（缓存目录下的 `logs/`），可以随时清空。
     pub fn logs_dir(&self) -> PathBuf {
         self.cache.join("logs")
+    }
+
+    /// 正在接收的文件（缓存目录下的 `partial/`），每次传输一个子目录。可以随时清空。
+    pub fn partial_dir(&self) -> PathBuf {
+        self.cache.join("partial")
+    }
+
+    /// 收完的文件放在哪里：本机的“下载”文件夹；用 `--data-dir` 打开时为其中的 `received/`。
+    pub fn downloads_dir(&self) -> PathBuf {
+        self.downloads.clone()
     }
 
     fn config_path(&self) -> PathBuf {

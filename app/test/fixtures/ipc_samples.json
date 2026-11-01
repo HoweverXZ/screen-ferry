@@ -227,6 +227,13 @@
     },
     {
       "type": "open_settings"
+    },
+    {
+      "paths": [
+        "/Users/me/Desktop/证书.p12",
+        "/Users/me/Desktop/设计稿"
+      ],
+      "type": "send_files"
     }
   ],
   "version": 1

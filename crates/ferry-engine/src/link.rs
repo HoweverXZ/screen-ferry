@@ -16,9 +16,9 @@ pub const DEFAULT_PORT: u16 = 24810;
 /// 本机声明的可选能力。
 pub(crate) fn capabilities(clipboard: bool) -> Capabilities {
     if clipboard {
-        Capabilities::CLIPBOARD
+        Capabilities::CLIPBOARD | Capabilities::FILES
     } else {
-        Capabilities::empty()
+        Capabilities::FILES
     }
 }
 

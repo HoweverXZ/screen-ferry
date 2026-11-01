@@ -177,6 +177,37 @@ impl Drop for RemoveOnDrop {
 
 /// 另一份后台是否已在运行：`ipc.json` 指向的端口能握手成功。
 /// 在运行时请它打开设置界面并返回 `true`，当前进程应当退出。
+/// 请正在运行的后台把这些文件发给它连着的对方，返回后台给的提示。
+///
+/// `paths` 须是绝对路径：后台的工作目录与调用方不同。
+pub async fn send_via_running(store: &Store, paths: Vec<String>) -> Result<String, String> {
+    use ferry_ipc::{Notice, Request};
+
+    let endpoint = match Endpoint::load(&store.ipc_endpoint_path()) {
+        Ok(Some(endpoint)) => endpoint,
+        _ => return Err("ScreenFerry 没有在运行，请先打开它".into()),
+    };
+    let mut conn = ferry_ipc::connect(&endpoint)
+        .await
+        .map_err(|e| format!("连不上正在运行的 ScreenFerry：{e}"))?;
+    conn.send(&Request::SendFiles { paths })
+        .await
+        .map_err(|e| format!("发不出请求：{e}"))?;
+    // 后台展开大文件夹需要一点时间；先推来的状态快照和日志跳过，只等提示。
+    let reply = async {
+        loop {
+            match conn.recv::<Notice>().await {
+                Ok(Some(Notice::Toast { text })) => return Ok(text),
+                Ok(Some(_)) => {}
+                _ => return Err("ScreenFerry 没有回复".to_owned()),
+            }
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(60), reply)
+        .await
+        .map_err(|_| "等 ScreenFerry 回复超时".to_owned())?
+}
+
 pub async fn hand_over_to_running(store: &Store) -> bool {
     use ferry_ipc::{Notice, Request};
 

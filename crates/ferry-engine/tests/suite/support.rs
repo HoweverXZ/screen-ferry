@@ -10,8 +10,8 @@ use std::time::Duration;
 
 use ferry_core::{KeyRemap, Side};
 use ferry_engine::{
-    ClientConfig, ConfirmPairing, Error, Events, Live, PairingRequest, ServerAddr, ServerConfig,
-    connect, serve,
+    ClientConfig, ConfirmPairing, Error, Events, Files, Live, PairingRequest, ServerAddr,
+    ServerConfig, connect, serve,
 };
 use ferry_platform::CaptureEvent;
 use ferry_platform_mock::{MockCapture, MockClipboard, MockDisplays, MockInject};
@@ -113,6 +113,10 @@ pub struct Rig {
     /// 两端的显示器，可以中途修改。
     pub mac_displays: MockDisplays,
     pub pc_displays: MockDisplays,
+    /// 两端的文件传输。收到的文件在各自数据目录的 `received/` 里。
+    pub mac_files: Files,
+    pub pc_files: Files,
+    pc_events: Events,
     /// 服务端（Mac）。
     pub mac: Device,
     /// 客户端（PC）。
@@ -166,6 +170,8 @@ impl Rig {
         let inject = MockInject::new();
         let mac_displays = MockDisplays::new(vec![display(1000, 800, 100)]);
         let pc_displays = MockDisplays::new(vec![display(1920, 1080, 150)]);
+        let mac_files = Files::new(&setup.mac.store, setup.mac_events.clone());
+        let pc_files = Files::new(&setup.pc.store, setup.pc_events.clone());
 
         let server = tokio::spawn({
             let capture = capture.clone();
@@ -185,6 +191,7 @@ impl Rig {
                 store: setup.mac.store.clone(),
                 announce: setup.discover,
                 events: setup.mac_events.clone(),
+                files: mac_files.clone(),
             };
             async move {
                 match serve(listener, config, capture, displays, clipboard, confirm).await {
@@ -194,7 +201,13 @@ impl Rig {
             }
         });
         let client = if setup.start_client {
-            Self::spawn_client(&setup, addr, inject.clone(), pc_displays.clone())
+            Self::spawn_client(
+                &setup,
+                addr,
+                inject.clone(),
+                pc_displays.clone(),
+                pc_files.clone(),
+            )
         } else {
             tokio::spawn(std::future::pending())
         };
@@ -204,6 +217,9 @@ impl Rig {
             inject,
             mac_displays,
             pc_displays,
+            mac_files,
+            pc_files,
+            pc_events: setup.pc_events.clone(),
             mac: setup.mac,
             pc: setup.pc,
             mac_clipboard: setup.mac_clipboard,
@@ -220,6 +236,7 @@ impl Rig {
         addr: SocketAddr,
         inject: MockInject,
         displays: MockDisplays,
+        files: Files,
     ) -> JoinHandle<Error> {
         let clipboard = setup.pc_clipboard.clone();
         let confirm = setup.pc_confirm.clone();
@@ -233,6 +250,7 @@ impl Rig {
             clipboard: true,
             store: setup.pc.store.clone(),
             events: setup.pc_events.clone(),
+            files,
         };
         tokio::spawn(async move {
             match connect(config, inject, displays, clipboard, confirm).await {
@@ -240,6 +258,25 @@ impl Rig {
                 Err(e) => e,
             }
         })
+    }
+
+    /// 模拟断线：停掉客户端再重新启动，数据目录和文件传输都沿用原来的。
+    pub fn restart_client(&mut self) {
+        self.client.abort();
+        let setup = Setup {
+            pc: self.pc.clone(),
+            pc_clipboard: self.pc_clipboard.clone(),
+            pc_confirm: self.pc_confirm.clone(),
+            pc_events: self.pc_events.clone(),
+            ..Setup::default()
+        };
+        self.client = Self::spawn_client(
+            &setup,
+            self.addr,
+            self.inject.clone(),
+            self.pc_displays.clone(),
+            self.pc_files.clone(),
+        );
     }
 
     /// 停掉两端，留下数据目录供下一个 `Rig` 使用。

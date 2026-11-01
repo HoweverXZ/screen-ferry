@@ -34,6 +34,10 @@ pub enum Error {
     BadAddress(String),
     #[error(transparent)]
     Ipc(#[from] ferry_ipc::Error),
+    #[error("还没有连上对方，或者对方不支持传文件")]
+    NotConnected,
+    #[error("{0}")]
+    Transfer(String),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

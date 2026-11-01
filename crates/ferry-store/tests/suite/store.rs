@@ -149,3 +149,11 @@ fn a_custom_data_dir_keeps_its_runtime_files_inside() {
     let store = Store::open(dir.path()).unwrap();
     assert_eq!(store.ipc_endpoint_path(), dir.path().join("ipc.json"));
 }
+
+#[test]
+fn a_custom_data_dir_keeps_received_files_inside_it() {
+    let dir = TempDir::new();
+    let store = Store::open(dir.path()).unwrap();
+    assert_eq!(store.downloads_dir(), dir.path().join("received"));
+    assert_eq!(store.partial_dir(), dir.path().join("partial"));
+}

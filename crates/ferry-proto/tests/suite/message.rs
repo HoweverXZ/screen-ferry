@@ -32,10 +32,19 @@ fn kind(message: &Message) -> &'static str {
         Message::ClipboardRequest(_) => "ClipboardRequest",
         Message::Chunk(_) => "Chunk",
         Message::Cancel(_) => "Cancel",
+        Message::FileOffer(_) => "FileOffer",
+        Message::FileAccept { .. } => "FileAccept",
+        Message::FileCancel(_) => "FileCancel",
+        Message::FileOpen { .. } => "FileOpen",
+        Message::FileList(_) => "FileList",
+        Message::FileResume(_) => "FileResume",
+        Message::FileData { .. } => "FileData",
+        Message::FileEnd(_) => "FileEnd",
+        Message::FileDone => "FileDone",
     }
 }
 
-const MESSAGE_KINDS: usize = 21;
+const MESSAGE_KINDS: usize = 30;
 
 fn decode(channel: Channel, buf: &[u8]) -> Result<Option<(Message, usize)>, DecodeError> {
     Codec::new(channel).decode(buf)
@@ -191,5 +200,77 @@ fn enforces_chunk_limit() {
     assert_eq!(
         codec.encode(&chunk(MAX_CHUNK_LEN + 1), &mut buf),
         Err(EncodeError::LimitExceeded("分块大小")),
+    );
+}
+
+#[test]
+fn file_messages_wire_format_is_frozen() {
+    use ferry_proto::{FileOffer, FileResume};
+    use ferry_types::TransferId;
+
+    let resume = Message::FileResume(FileResume {
+        index: 2,
+        offset: 1,
+    });
+    #[rustfmt::skip]
+    let expected = [
+        0x12, 0x04, 12, 0, 0, 0,   // 类型 FileResume，消息体 12 字节
+        2, 0, 0, 0,                // 第 2 个条目
+        1, 0, 0, 0, 0, 0, 0, 0,    // 第 1 个字节
+    ];
+    assert_eq!(encode(Channel::File, &resume), expected);
+
+    let offer = Message::FileOffer(FileOffer {
+        id: TransferId([1; 16]),
+        name: "a".into(),
+        items: 1,
+        files: 1,
+        bytes: 5,
+    });
+    let bytes = encode(Channel::Data, &offer);
+    assert_eq!(&bytes[..2], &[0x00, 0x04], "类型 FileOffer");
+    assert_eq!(bytes.len(), 6 + 16 + 3 + 4 + 4 + 8);
+}
+
+#[test]
+fn file_lists_and_paths_are_bounded() {
+    use ferry_proto::limits::{MAX_FILE_LIST, MAX_PATH_LEN};
+    use ferry_proto::{EntryKind, FileEntry, FileList};
+
+    let entry = |path: String| FileEntry {
+        path,
+        kind: EntryKind::File,
+        size: 1,
+        modified: 0,
+    };
+    let full = Message::FileList(FileList {
+        entries: (0..MAX_FILE_LIST)
+            .map(|_| entry("x".repeat(MAX_PATH_LEN)))
+            .collect(),
+        last: false,
+    });
+    let mut buf = Vec::new();
+    Codec::new(Channel::File)
+        .encode(&full, &mut buf)
+        .expect("最满的一段清单也放得进一帧");
+
+    let too_many = Message::FileList(FileList {
+        entries: (0..=MAX_FILE_LIST).map(|_| entry("x".into())).collect(),
+        last: true,
+    });
+    assert!(
+        Codec::new(Channel::File)
+            .encode(&too_many, &mut Vec::new())
+            .is_err()
+    );
+
+    let too_long = Message::FileList(FileList {
+        entries: vec![entry("x".repeat(MAX_PATH_LEN + 1))],
+        last: true,
+    });
+    assert!(
+        Codec::new(Channel::File)
+            .encode(&too_long, &mut Vec::new())
+            .is_err()
     );
 }

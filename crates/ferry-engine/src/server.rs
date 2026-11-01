@@ -5,7 +5,7 @@
 //!
 //! 所有连接都走 TLS 1.3。只有配对过的设备能建立会话；陌生设备会先发起配对，
 //! 由两边的用户核对配对码。客户端握手后会用拿到的会话号再连一条数据连接，
-//! 用来同步剪贴板。
+//! 用来同步剪贴板和收发文件控制消息；每次传文件再连一条文件连接。
 
 use std::convert::Infallible;
 use std::sync::{Arc, Mutex};
@@ -29,6 +29,7 @@ use tracing::{debug, info, warn};
 use crate::clipboard::{self, ClipboardTask, SharedClipboard, Start};
 use crate::error::{Error, Result};
 use crate::events::{Event, Events};
+use crate::files::Files;
 use crate::heartbeat::{self, Heartbeat};
 use crate::link::{DISPLAY_CHECK, HANDSHAKE_TIMEOUT, capabilities, primary_scale, send};
 use crate::pairing::{self, ConfirmPairing, Outcome};
@@ -46,6 +47,8 @@ pub struct ServerConfig {
     pub announce: bool,
     /// 对外报告的事件。
     pub events: Events,
+    /// 文件传输。跨会话保留，断线重连后接着传。
+    pub files: Files,
 }
 
 /// 会话中途也能立即生效的设置。
@@ -221,8 +224,8 @@ where
                     Channel::Input if peers.contains(&peer) => Ok(id),
                     Channel::Input => Err(RejectReason::NOT_PAIRED),
                     Channel::Pair => Ok(id),
-                    // 数据连接只能在输入连接之后、带着它的会话号来。
-                    Channel::Data => Err(RejectReason::UNKNOWN_SESSION),
+                    // 数据连接和文件连接只能在输入连接之后、带着它的会话号来。
+                    Channel::Data | Channel::File => Err(RejectReason::UNKNOWN_SESSION),
                 }
             });
         let (hello, welcome) = match timeout(HANDSHAKE_TIMEOUT, handshake).await {
@@ -323,8 +326,9 @@ where
 
         self.active.send_replace(true);
         let clipboard = welcome.capabilities.contains(Capabilities::CLIPBOARD);
+        let files = welcome.capabilities.contains(Capabilities::FILES);
         let (data_tx, mut data_rx) = mpsc::channel(1);
-        // 会话结束时随之丢弃，剪贴板同步也就停了。
+        // 会话结束时随之丢弃，剪贴板同步和文件传输也就停了。
         let mut _clipboard_task: Option<ClipboardTask> = None;
 
         let mut heartbeat = Heartbeat::new();
@@ -336,11 +340,14 @@ where
         loop {
             tokio::select! {
                 accepted = listener.accept() => match accepted {
-                    Ok((stream, addr)) => self.accept_data(stream, id, peer, clipboard, data_tx.clone(), addr),
+                    Ok((stream, addr)) => {
+                        let accept = Accept { id, peer, clipboard, files, established: data_tx.clone() };
+                        self.accept_data(stream, accept, addr);
+                    }
                     Err(e) => warn!("接受连接失败：{e}"),
                 },
                 Some(data) = data_rx.recv() => {
-                    info!("数据连接已建立，开始同步剪贴板");
+                    info!("数据连接已建立");
                     let active = self.active.subscribe();
                     let task = clipboard::spawn(
                         data,
@@ -348,6 +355,8 @@ where
                         active,
                         Start::Announce,
                         self.config.events.clone(),
+                        clipboard,
+                        files.then(|| self.config.files.attach(None)),
                     );
                     _clipboard_task = Some(task);
                 }
@@ -396,34 +405,38 @@ where
 
     /// 会话期间到来的连接只能是本会话的数据连接。握手放到后台，不耽误键鼠转发。
     ///
-    /// 数据连接必须来自同一台设备（证书指纹相同），并带着本会话的会话号。
-    fn accept_data(
-        &self,
-        stream: TcpStream,
-        id: u64,
-        peer: Fingerprint,
-        clipboard: bool,
-        established: mpsc::Sender<Framed<ServerStream>>,
-        addr: std::net::SocketAddr,
-    ) {
+    /// 数据连接和文件连接必须来自同一台设备（证书指纹相同），并带着本会话的会话号。
+    /// 数据连接交给会话；文件连接交给文件传输。
+    fn accept_data(&self, stream: TcpStream, accept: Accept, addr: std::net::SocketAddr) {
         let capabilities = self.capabilities;
         let name = self.config.name.clone();
         let tls = self.tls.clone();
+        let files = self.config.files.clone();
         tokio::spawn(async move {
+            let Accept {
+                id,
+                peer,
+                clipboard,
+                files: file_cap,
+                established,
+            } = accept;
             let handshake = async {
                 let (mut framed, from) = tls.accept(stream).await?;
-                ferry_net::accept(&mut framed, capabilities, &name, |hello| {
+                let ours = |hello: &Hello| hello.session == id && from == peer;
+                let (hello, _) = ferry_net::accept(&mut framed, capabilities, &name, |hello| {
                     match hello.channel {
-                        Channel::Data if hello.session == id && from == peer && clipboard => Ok(id),
-                        Channel::Data => Err(RejectReason::UNKNOWN_SESSION),
+                        Channel::Data if ours(hello) && (clipboard || file_cap) => Ok(id),
+                        Channel::File if ours(hello) && file_cap => Ok(id),
+                        Channel::Data | Channel::File => Err(RejectReason::UNKNOWN_SESSION),
                         Channel::Input | Channel::Pair => Err(RejectReason::BUSY),
                     }
                 })
                 .await?;
-                Ok::<_, Error>(framed)
+                Ok::<_, Error>((hello.channel, framed))
             };
             match timeout(HANDSHAKE_TIMEOUT, handshake).await {
-                Ok(Ok(framed)) => {
+                Ok(Ok((Channel::File, framed))) => files.serve(framed),
+                Ok(Ok((_, framed))) => {
                     let _ = established.send(framed).await;
                 }
                 Ok(Err(e)) => warn!(%addr, "拒绝了一个连接：{e}"),
@@ -618,6 +631,18 @@ where
             }
         }
     }
+}
+
+/// 会话期间接受新连接所需的信息。
+struct Accept {
+    id: u64,
+    peer: Fingerprint,
+    /// 双方是否都开启了剪贴板同步。
+    clipboard: bool,
+    /// 双方是否都支持传文件。
+    files: bool,
+    /// 数据连接建好后交给会话。
+    established: mpsc::Sender<Framed<ServerStream>>,
 }
 
 /// Ctrl + Option（Alt）是否都按着。左右两侧的键都算。

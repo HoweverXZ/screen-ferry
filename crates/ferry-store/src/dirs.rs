@@ -48,6 +48,17 @@ pub fn default_cache_dir() -> Result<PathBuf> {
     }
 }
 
+/// 本机的“下载”文件夹，收到的文件放在这里：
+///
+/// - macOS：`~/Downloads/`
+/// - Windows：`%USERPROFILE%\Downloads\`
+pub fn default_downloads_dir() -> Result<PathBuf> {
+    match env::consts::OS {
+        "windows" => Ok(var_dir("USERPROFILE")?.join("Downloads")),
+        _ => Ok(var_dir("HOME")?.join("Downloads")),
+    }
+}
+
 fn var_dir(name: &'static str) -> Result<PathBuf> {
     env::var_os(name)
         .filter(|v| !v.is_empty())

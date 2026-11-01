@@ -246,6 +246,7 @@ dependencies = [
  "ferry-store",
  "ferry-trust",
  "ferry-types",
+ "ring",
  "thiserror",
  "tokio",
  "tracing",

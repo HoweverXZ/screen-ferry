@@ -1,12 +1,13 @@
-//! 引擎对外报告的事件：连接与断开、往返延迟、光标进出、剪贴板同步、配对结果。
+//! 引擎对外报告的事件：连接与断开、往返延迟、光标进出、剪贴板同步、配对结果、文件传输。
 //!
 //! 常驻后台用它们拼出给设置界面看的状态；命令行模式不关心，传 [`Events::none`]。
 
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use ferry_trust::Fingerprint;
-use ferry_types::ClipboardContent;
+use ferry_types::{ClipboardContent, TransferId};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 /// 一件发生了的事。
@@ -41,6 +42,49 @@ pub enum Event {
     },
     /// 配对没有成功。`by_peer` 表示是对方拒绝的。
     PairingRejected { name: String, by_peer: bool },
+    /// 一次文件传输有了进展。传输中最多每 0.1 秒报告一次。
+    Transfer(TransferUpdate),
+}
+
+/// 一次文件传输的现状。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TransferUpdate {
+    pub id: TransferId,
+    /// 本机是发送方。
+    pub outgoing: bool,
+    /// 显示用的名字：只有一项时是它的名字，多项时是第一项的名字。
+    pub name: String,
+    /// 顶层项目数。
+    pub items: u32,
+    /// 全部文件数，不含文件夹。
+    pub files: u32,
+    /// 全部文件的总字节数。
+    pub bytes: u64,
+    /// 已经传过去（或已经收到）的字节数，续传时包括上次已传的部分。
+    pub done: u64,
+    pub state: TransferState,
+}
+
+/// 文件传输处在哪一步。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TransferState {
+    /// 已通告，等对方接受、等文件连接打开。
+    Waiting,
+    Running,
+    /// 完成。接收方附上放好的顶层项目；发送方为空。
+    Done {
+        saved: Vec<PathBuf>,
+    },
+    /// 连接断了。发送方会在下次连上时接着传，接收方保留已收到的部分。
+    Interrupted,
+    /// 被取消。`by_peer` 表示是对方取消的。
+    Cancelled {
+        by_peer: bool,
+    },
+    /// 出错，不会再继续。
+    Failed {
+        reason: String,
+    },
 }
 
 /// 局域网里发现的一台服务端。

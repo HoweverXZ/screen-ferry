@@ -31,6 +31,7 @@ use tracing::{debug, info, warn};
 use crate::clipboard::{self, ClipboardTask, SharedClipboard, Start};
 use crate::error::{Error, Result};
 use crate::events::{Event, Events, FoundServer};
+use crate::files::{FileLink, Files, Opener};
 use crate::link::{CONNECT_TIMEOUT, DISPLAY_CHECK, HANDSHAKE_TIMEOUT, capabilities, send};
 use crate::pairing::{self, ConfirmPairing, Outcome};
 
@@ -64,6 +65,8 @@ pub struct ClientConfig {
     pub store: Store,
     /// 对外报告的事件。
     pub events: Events,
+    /// 文件传输。跨会话保留，断线重连后接着传。
+    pub files: Files,
 }
 
 /// 运行客户端：连接服务端，断开后自动重连。
@@ -332,14 +335,25 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
         });
 
         // 会话结束时随之丢弃，剪贴板同步也就停了。
-        let _clipboard_task = if welcome.capabilities.contains(Capabilities::CLIPBOARD) {
-            match connect_data(&self.tls, config, addr, caps, welcome.session, server).await {
+        let clipboard = welcome.capabilities.contains(Capabilities::CLIPBOARD);
+        let files = welcome.capabilities.contains(Capabilities::FILES);
+        let link = Link {
+            tls: self.tls.clone(),
+            name: config.name.clone(),
+            addr,
+            caps,
+            session: welcome.session,
+            server,
+        };
+        let _data_task = if clipboard || files {
+            match link.connect(Channel::Data).await {
                 Ok(data) => {
-                    info!("数据连接已建立，开始同步剪贴板");
-                    Some(self.sync_clipboard(data))
+                    info!("数据连接已建立");
+                    let files = files.then(|| config.files.attach(Some(link.opener())));
+                    Some(self.start_data(data, clipboard, files))
                 }
                 Err(e) => {
-                    warn!("数据连接失败，本次不同步剪贴板：{e}");
+                    warn!("数据连接失败，本次不同步剪贴板、不能传文件：{e}");
                     None
                 }
             }
@@ -487,13 +501,20 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
         }
     }
 
-    fn sync_clipboard(&self, data: Framed<ClientStream>) -> ClipboardTask {
+    fn start_data(
+        &self,
+        data: Framed<ClientStream>,
+        sync: bool,
+        files: Option<FileLink>,
+    ) -> ClipboardTask {
         clipboard::spawn(
             data,
             self.clipboard.clone(),
             self.active.subscribe(),
             Start::Quiet,
             self.events.clone(),
+            sync,
+            files,
         )
     }
 
@@ -543,25 +564,40 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
     }
 }
 
-/// 带着输入连接的会话号建立数据连接。对方必须与输入连接是同一台设备。
-async fn connect_data(
-    tls: &Tls,
-    config: &ClientConfig,
+/// 本会话中再连一条数据连接或文件连接所需的信息。
+#[derive(Clone)]
+struct Link {
+    tls: Tls,
+    name: String,
     addr: SocketAddr,
     caps: Capabilities,
     session: u64,
     server: Fingerprint,
-) -> Result<Framed<ClientStream>> {
-    let handshake = async {
-        let (mut framed, peer) = tls.connect(addr, Channel::Data).await?;
-        if peer != server {
-            return Err(Error::PeerMismatch);
-        }
-        let hello = Hello::new(Channel::Data, caps, session, config.name.clone());
-        ferry_net::initiate(&mut framed, hello).await?;
-        Ok::<_, Error>(framed)
-    };
-    timeout(CONNECT_TIMEOUT, handshake)
-        .await
-        .map_err(|_| Error::Timeout("建立数据连接"))?
+}
+
+impl Link {
+    /// 带着会话号连一条数据连接或文件连接，并确认连到的还是同一台服务端。
+    async fn connect(&self, channel: Channel) -> Result<Framed<ClientStream>> {
+        let handshake = async {
+            let (mut framed, peer) = self.tls.connect(self.addr, channel).await?;
+            if peer != self.server {
+                return Err(Error::PeerMismatch);
+            }
+            let hello = Hello::new(channel, self.caps, self.session, self.name.clone());
+            ferry_net::initiate(&mut framed, hello).await?;
+            Ok::<_, Error>(framed)
+        };
+        timeout(CONNECT_TIMEOUT, handshake)
+            .await
+            .map_err(|_| Error::Timeout("建立连接"))?
+    }
+
+    /// 文件传输每次需要时调用，新开一条文件连接。
+    fn opener(&self) -> Opener {
+        let link = self.clone();
+        Arc::new(move || {
+            let link = link.clone();
+            Box::pin(async move { link.connect(Channel::File).await })
+        })
+    }
 }

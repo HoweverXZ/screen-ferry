@@ -12,6 +12,6 @@ mod file;
 mod peers;
 mod store;
 
-pub use dirs::{default_cache_dir, default_data_dir};
+pub use dirs::{default_cache_dir, default_data_dir, default_downloads_dir};
 pub use error::{Error, Result};
 pub use store::Store;

@@ -313,7 +313,13 @@ void main() {
     final id = backend.requestPairing('会议室 PC');
     await settle(tester);
     expect(find.text('与“会议室 PC”配对'), findsOneWidget);
-    expect(find.text('4'), findsOneWidget, reason: '配对码逐位显示');
+    // 只在对话框里找：首页的统计数字随时间变化，也可能恰好是 4。
+    final dialog = find.byWidgetPredicate((w) => w.runtimeType.toString() == '_PairingDialog');
+    expect(
+      find.descendant(of: dialog, matching: find.text('4')),
+      findsOneWidget,
+      reason: '配对码逐位显示',
+    );
 
     backend.emit(PairingClosedNotice(id));
     await settle(tester);

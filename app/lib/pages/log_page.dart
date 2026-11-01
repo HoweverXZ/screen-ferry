@@ -9,7 +9,7 @@ import '../widgets/controls.dart';
 import '../widgets/page_scaffold.dart';
 import '../widgets/surface.dart';
 
-enum _Filter { all, cursor, clip, link }
+enum _Filter { all, cursor, clip, file, link }
 
 class LogPage extends StatefulWidget {
   const LogPage({super.key});
@@ -28,6 +28,7 @@ class _LogPageState extends State<LogPage> {
     _Filter.all => true,
     _Filter.cursor => e.kind == LogKind.cursor,
     _Filter.clip => e.kind == LogKind.clip,
+    _Filter.file => e.kind == LogKind.file,
     _Filter.link => e.kind == LogKind.link,
   };
 
@@ -54,6 +55,7 @@ class _LogPageState extends State<LogPage> {
                 (_Filter.all, '全部'),
                 (_Filter.cursor, '光标'),
                 (_Filter.clip, '剪贴板'),
+                (_Filter.file, '文件'),
                 (_Filter.link, '设备与连接'),
               ],
               value: _filter,

@@ -39,9 +39,9 @@ enum LinkStatus { paused, starting, waiting, searching, connecting, connected, s
 
 enum ProblemKind { permission, portInUse, other }
 
-enum LogKind { cursor, clip, link }
+enum LogKind { cursor, clip, link, file }
 
-enum LogIcon { power, link, unlink, lock, cursor, clipboard, pause, play, layout, radar, warning, settings }
+enum LogIcon { power, link, unlink, lock, cursor, clipboard, pause, play, layout, radar, warning, settings, file }
 
 // ── 状态 ─────────────────────────────────────
 
@@ -509,6 +509,15 @@ class OpenSettingsRequest extends Request {
 
   @override
   Json toJson() => {'type': 'open_settings'};
+}
+
+/// 把这些文件和文件夹（本机绝对路径）发给当前连着的对方。
+class SendFilesRequest extends Request {
+  const SendFilesRequest(this.paths);
+  final List<String> paths;
+
+  @override
+  Json toJson() => {'type': 'send_files', 'paths': paths};
 }
 
 /// 要修改的设置；为 null 的字段不变，也不会发出去。

@@ -90,6 +90,9 @@ pub struct Setup {
     pub edge: EdgeFeed,
     /// 服务端的文件传输；不给时按 `mac` 的数据目录新建。
     pub mac_files: Option<Files>,
+    /// 客户端的边缘投递报告去处与文件传输；默认不需要、按 `pc` 的数据目录新建。
+    pub pc_edge: EdgeFeed,
+    pub pc_files: Option<Files>,
 }
 
 impl Default for Setup {
@@ -108,6 +111,8 @@ impl Default for Setup {
             pc_events: Events::none(),
             edge: EdgeFeed::none(),
             mac_files: None,
+            pc_edge: EdgeFeed::none(),
+            pc_files: None,
         }
     }
 }
@@ -180,7 +185,10 @@ impl Rig {
             .mac_files
             .clone()
             .unwrap_or_else(|| Files::new(&setup.mac.store, setup.mac_events.clone()));
-        let pc_files = Files::new(&setup.pc.store, setup.pc_events.clone());
+        let pc_files = setup
+            .pc_files
+            .clone()
+            .unwrap_or_else(|| Files::new(&setup.pc.store, setup.pc_events.clone()));
 
         let server = tokio::spawn({
             let capture = capture.clone();
@@ -261,6 +269,7 @@ impl Rig {
             store: setup.pc.store.clone(),
             events: setup.pc_events.clone(),
             files,
+            edge: setup.pc_edge.clone(),
         };
         tokio::spawn(async move {
             match connect(config, inject, displays, clipboard, confirm).await {

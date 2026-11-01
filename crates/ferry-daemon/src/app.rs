@@ -137,6 +137,7 @@ pub(crate) fn run(options: Options) -> ExitCode {
                         store,
                         events: Events::none(),
                         files,
+                        edge: EdgeFeed::none(),
                     };
                     connect(config).await
                 }

@@ -21,6 +21,8 @@ fn kind(message: &Message) -> &'static str {
         Message::Displays(_) => "Displays",
         Message::Enter(_) => "Enter",
         Message::Leave { .. } => "Leave",
+        Message::PeerSide { .. } => "PeerSide",
+        Message::DropHint(_) => "DropHint",
         Message::Input(event) => match event {
             InputEvent::Key { .. } => "Key",
             InputEvent::PointerMotion { .. } => "PointerMotion",
@@ -44,7 +46,7 @@ fn kind(message: &Message) -> &'static str {
     }
 }
 
-const MESSAGE_KINDS: usize = 30;
+const MESSAGE_KINDS: usize = 32;
 
 fn decode(channel: Channel, buf: &[u8]) -> Result<Option<(Message, usize)>, DecodeError> {
     Codec::new(channel).decode(buf)
@@ -273,4 +275,41 @@ fn file_lists_and_paths_are_bounded() {
             .encode(&too_long, &mut Vec::new())
             .is_err()
     );
+}
+
+#[test]
+fn drop_hints_keep_their_ranges() {
+    use ferry_proto::{DropHint, HintState};
+
+    let hint = |along, closeness| {
+        Message::DropHint(DropHint {
+            state: HintState::Near,
+            along,
+            closeness,
+            name: String::new(),
+            items: 1,
+            bytes: 0,
+        })
+    };
+    let mut buf = Vec::new();
+    assert!(
+        Codec::new(Channel::Input)
+            .encode(&hint(10_000, 100), &mut buf)
+            .is_ok()
+    );
+    assert!(
+        Codec::new(Channel::Input)
+            .encode(&hint(10_001, 0), &mut Vec::new())
+            .is_err()
+    );
+    assert!(
+        Codec::new(Channel::Input)
+            .encode(&hint(0, 101), &mut Vec::new())
+            .is_err()
+    );
+
+    // 解码时同样检查：手工把 along 改成 10001。
+    let along_at = 6 + 1;
+    buf[along_at..along_at + 2].copy_from_slice(&10_001u16.to_le_bytes());
+    assert!(Codec::new(Channel::Input).decode(&buf).is_err());
 }

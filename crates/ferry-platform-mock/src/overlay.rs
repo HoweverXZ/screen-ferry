@@ -19,6 +19,7 @@ struct State {
     shown: Option<(Frame, Scene)>,
     drag_count: i64,
     dragged: Vec<PathBuf>,
+    watching: Option<Frame>,
     opened: Vec<PathBuf>,
     revealed: Vec<PathBuf>,
 }
@@ -45,6 +46,11 @@ impl MockOverlay {
         if let Some(sink) = self.lock().sink.as_mut() {
             sink(event);
         }
+    }
+
+    /// 正在留意的贴边区域。
+    pub fn watching(&self) -> Option<Frame> {
+        self.lock().watching
     }
 
     /// 请求打开过的文件。
@@ -82,6 +88,10 @@ impl Overlay for MockOverlay {
 
     fn dragged_files(&self) -> Vec<PathBuf> {
         self.lock().dragged.clone()
+    }
+
+    fn watch_edge(&mut self, strip: Option<Frame>) {
+        self.lock().watching = strip;
     }
 
     fn open(&self, path: &Path) {

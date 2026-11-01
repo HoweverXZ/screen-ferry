@@ -50,6 +50,8 @@ bitflags! {
         const CLIPBOARD = 1 << 1;
         /// 文件传输。
         const FILES = 1 << 2;
+        /// 边缘投递：告诉对方相邻的方向，拖动中提示对方提前滑出接收胶囊。
+        const EDGE_DROP = 1 << 3;
     }
 }
 

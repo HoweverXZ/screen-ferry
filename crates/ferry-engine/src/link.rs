@@ -15,15 +15,26 @@ pub const DEFAULT_PORT: u16 = 24810;
 
 /// 本机声明的可选能力。
 pub(crate) fn capabilities(clipboard: bool) -> Capabilities {
+    let base = Capabilities::FILES | Capabilities::EDGE_DROP;
     if clipboard {
-        Capabilities::CLIPBOARD | Capabilities::FILES
+        base | Capabilities::CLIPBOARD
     } else {
-        Capabilities::FILES
+        base
     }
 }
 
 pub(crate) const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 pub(crate) const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// 整数矩形转成浮层用的浮点矩形。
+pub(crate) fn frame_of(rect: ferry_types::Rect) -> ferry_types::Frame {
+    ferry_types::Frame::new(
+        rect.x as f32,
+        rect.y as f32,
+        rect.width as f32,
+        rect.height as f32,
+    )
+}
 
 /// 会话期间每隔这么久检查一次本机的显示器布局（改分辨率、缩放、插拔显示器），变了就告诉对方。
 /// 查询一次只要几微秒。

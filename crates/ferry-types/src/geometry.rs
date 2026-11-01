@@ -58,3 +58,15 @@ pub enum Side {
     Top,
     Bottom,
 }
+
+impl Side {
+    /// 从对方看过来的方向：A 在 B 的左边，B 就在 A 的右边。
+    pub fn opposite(self) -> Self {
+        match self {
+            Self::Left => Self::Right,
+            Self::Right => Self::Left,
+            Self::Top => Self::Bottom,
+            Self::Bottom => Self::Top,
+        }
+    }
+}

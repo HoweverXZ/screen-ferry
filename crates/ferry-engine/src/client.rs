@@ -16,23 +16,26 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use ferry_core::Pressed;
+use ferry_core::{Pressed, bounds};
 use ferry_net::discovery::{Browser, Lookup, pick};
 use ferry_net::{ClientStream, Framed, Tls};
 use ferry_platform::{Clipboard, Displays, Error as PlatformError, InputInject};
 use ferry_proto::{Capabilities, Channel, Hello, Message, RejectReason};
 use ferry_store::Store;
 use ferry_trust::{Fingerprint, Peer};
-use ferry_types::{InputEvent, LockKeys, Point};
+use ferry_types::{Display, InputEvent, LockKeys, Point, Side};
 use tokio::sync::watch;
 use tokio::time::{MissedTickBehavior, interval, sleep, timeout};
 use tracing::{debug, info, warn};
 
 use crate::clipboard::{self, ClipboardTask, SharedClipboard, Start};
+use crate::edge_drop::{Edge, EdgeFeed};
 use crate::error::{Error, Result};
 use crate::events::{Event, Events, FoundServer};
 use crate::files::{FileLink, Files, Opener};
-use crate::link::{CONNECT_TIMEOUT, DISPLAY_CHECK, HANDSHAKE_TIMEOUT, capabilities, send};
+use crate::link::{
+    CONNECT_TIMEOUT, DISPLAY_CHECK, HANDSHAKE_TIMEOUT, capabilities, frame_of, primary_scale, send,
+};
 use crate::pairing::{self, ConfirmPairing, Outcome};
 
 /// 两次连接尝试之间的间隔。
@@ -67,6 +70,8 @@ pub struct ClientConfig {
     pub events: Events,
     /// 文件传输。跨会话保留，断线重连后接着传。
     pub files: Files,
+    /// 边缘投递：报告本机光标和朝向服务端的那条边。
+    pub edge: EdgeFeed,
 }
 
 /// 运行客户端：连接服务端，断开后自动重连。
@@ -106,6 +111,8 @@ where
         events: config.events.clone(),
         in_session: false,
         cursor_hidden: false,
+        edge: config.edge.clone(),
+        peer_side: None,
     };
     let mut searching = false;
     let mut seen = Vec::new();
@@ -121,6 +128,9 @@ where
             }
         };
         let result = client.session(&config, &displays, &target).await;
+        client.peer_side = None;
+        client.edge.edge(None);
+        client.edge.pointer(|p| p.here = false);
         client.release_all();
         client.hide_cursor(false);
         client.active.send_replace(false);
@@ -274,6 +284,10 @@ struct Client<I: InputInject, K, P> {
     in_session: bool,
     /// 本机光标是否被隐藏（光标在服务端屏幕上）。
     cursor_hidden: bool,
+    /// 边缘投递：报告本机光标和朝向服务端的那条边。
+    edge: EdgeFeed,
+    /// 服务端在本机的哪一侧；服务端说了才知道。
+    peer_side: Option<Side>,
 }
 
 /// 无论因为什么停下（包括整个引擎被关掉），都松开对方按着的键、让本机光标重新出现。
@@ -382,6 +396,9 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                         info!("本机的显示器布局已更新，已告知服务端");
                         send(&mut framed, &Message::Displays(now.clone())).await?;
                         screens = now;
+                        if let Some(side) = self.peer_side {
+                            self.publish_edge(side, &screens, &welcome.name);
+                        }
                     }
                     continue;
                 }
@@ -419,6 +436,7 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                         warn!("同步锁定键失败：{e}");
                     }
                     self.active.send_replace(true);
+                    self.edge.pointer(|p| p.here = true);
                     info!(at = ?enter.position, "光标进入本机");
                     self.events.emit(Event::Cursor {
                         here: true,
@@ -429,6 +447,7 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                     self.release_all();
                     self.hide_cursor(true);
                     self.active.send_replace(false);
+                    self.edge.pointer(|p| p.here = false);
                     info!("光标离开本机");
                     self.events.emit(Event::Cursor {
                         here: false,
@@ -436,6 +455,10 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                     });
                 }
                 Some(Message::Input(event)) => self.apply(event),
+                Some(Message::PeerSide { side }) => {
+                    info!(?side, "服务端在本机的这一侧");
+                    self.publish_edge(side, &screens, &welcome.name);
+                }
                 Some(Message::Displays(_)) => {}
                 Some(other) => debug!(?other, "忽略消息"),
             }
@@ -530,12 +553,32 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
             _ => {}
         }
         self.pressed.track(&event);
+        let held = self.pressed.any_button();
+        self.edge.pointer(|p| p.held = held);
         self.inject(&event);
     }
 
     fn move_to(&mut self, position: Point) {
         self.cursor = position;
         self.inject(&InputEvent::PointerMotion { position });
+        self.edge.pointer(|p| {
+            p.x = position.x as f32;
+            p.y = position.y as f32;
+        });
+    }
+
+    /// 告诉边缘投递：朝向服务端的是哪条边、本机屏幕多大。
+    fn publish_edge(&mut self, side: Side, screens: &[Display], peer: &str) {
+        self.peer_side = Some(side);
+        let Some(rect) = bounds(screens) else {
+            return;
+        };
+        self.edge.edge(Some(Edge {
+            side,
+            screen: frame_of(rect),
+            scale: f32::from(primary_scale(screens)) / 100.0,
+            peer: peer.to_owned(),
+        }));
     }
 
     /// 光标在服务端屏幕上时隐藏本机光标，回到本机时重新显示。失败只影响显示，不影响控制。
@@ -553,6 +596,7 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
         for event in self.pressed.release_all(self.cursor) {
             self.inject(&event);
         }
+        self.edge.pointer(|p| p.held = false);
     }
 
     fn inject(&mut self, event: &InputEvent) {

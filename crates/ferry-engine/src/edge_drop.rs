@@ -22,6 +22,8 @@ use crate::files::Files;
 const NEAR: f32 = 210.0;
 /// 离边缘多近（点）胶囊长到最大。
 const CLOSE: f32 = 80.0;
+/// 留意拖动时贴边接收条的宽度（点）。
+const STRIP: f32 = 6.0;
 /// 动画的帧间隔。
 const FRAME: Duration = Duration::from_millis(16);
 /// “已发送”“已取消”这类提示停留多久。
@@ -133,6 +135,7 @@ impl EdgeDrop {
             card: None,
             target: None,
             pending_along: None,
+            watching: None,
             shown: false,
             moving: false,
             dirty: false,
@@ -204,6 +207,8 @@ struct Worker<O> {
     target: Option<(Look, Frame)>,
     /// 刚放下文件、进度还没来时，胶囊的位置。
     pending_along: Option<f32>,
+    /// 正在请平台留意的贴边区域。
+    watching: Option<Frame>,
     /// 浮层窗口是否在屏幕上。
     shown: bool,
     /// 动画还在动：继续按帧画。
@@ -240,6 +245,7 @@ impl<O: Overlay> Worker<O> {
             }
             let now = Instant::now();
             self.expire(now);
+            self.watch();
             self.decide();
             let dt = (now - last).as_secs_f32();
             last = now;
@@ -298,6 +304,14 @@ impl<O: Overlay> Worker<O> {
             OverlayEvent::DragEntered { files } => {
                 if let Some(drag) = &mut self.drag {
                     drag.over = files;
+                    // 有的系统（Windows）要到拖进接收条才知道拖的是什么。
+                    if drag.files.is_none() {
+                        drag.files = Some(if files {
+                            self.overlay.dragged_files()
+                        } else {
+                            Vec::new()
+                        });
+                    }
                 }
             }
             OverlayEvent::DragExited => {
@@ -411,6 +425,24 @@ impl<O: Overlay> Worker<O> {
             .is_some_and(|job| job.update.id == update.id)
         {
             self.job = None;
+        }
+    }
+
+    /// 拖着还不知道是什么的东西靠近边缘时，请平台在贴边留意；知道了或离开了就不再留意。
+    fn watch(&mut self) {
+        let pointer = *self.pointer.borrow();
+        let edge = self.edge.borrow().clone();
+        let wanted = match (&self.drag, &edge) {
+            (Some(drag), Some(edge))
+                if pointer.here && drag.files.is_none() && distance(edge, &pointer) <= NEAR =>
+            {
+                Some(strip_of(edge))
+            }
+            _ => None,
+        };
+        if wanted != self.watching {
+            self.overlay.watch_edge(wanted);
+            self.watching = wanted;
         }
     }
 
@@ -558,6 +590,18 @@ fn distance(edge: &Edge, p: &Pointer) -> f32 {
         Side::Bottom => s.bottom() - 1.0 - p.y,
     };
     d.max(0.0) / edge.scale.max(0.01)
+}
+
+/// 贴着朝向对方那条边的一窄条（桌面坐标）。
+fn strip_of(edge: &Edge) -> Frame {
+    let s = edge.screen;
+    let w = STRIP * edge.scale;
+    match edge.side {
+        Side::Left => Frame::new(s.x, s.y, w, s.h),
+        Side::Right => Frame::new(s.right() - w, s.y, w, s.h),
+        Side::Top => Frame::new(s.x, s.y, s.w, w),
+        Side::Bottom => Frame::new(s.x, s.bottom() - w, s.w, w),
+    }
 }
 
 fn along_of(edge: &Edge, p: &Pointer) -> f32 {

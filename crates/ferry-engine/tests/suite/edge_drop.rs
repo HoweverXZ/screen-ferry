@@ -196,3 +196,120 @@ async fn dragging_something_other_than_files_shows_nothing() {
     assert!(overlay.shown().is_none(), "拖窗口不出现胶囊");
     left_button(&rig, false);
 }
+
+#[tokio::test]
+async fn without_a_drag_clipboard_the_edge_is_watched_until_files_come_in() {
+    let (rig, overlay, _edge) = rig_with_edge_drop().await;
+    let source = TempDir::new();
+    fs::create_dir_all(source.path()).unwrap();
+    let file = source.path().join("素材.zip");
+    fs::write(&file, b"zip").unwrap();
+
+    // 像 Windows 那样：按下鼠标靠近边缘时，还不知道拖的是什么。
+    press_and_drag(&rig, &overlay, None).await;
+    eventually("在贴边留意", || {
+        pointer(&rig, 960, 400);
+        overlay.watching().is_some()
+    })
+    .await;
+    let strip = overlay.watching().unwrap();
+    assert!(
+        strip.x >= 990.0 && strip.right() <= 1000.5,
+        "贴着右边缘的一窄条：{strip:?}"
+    );
+    assert!(overlay.shown().is_none(), "还不知道是文件时不出现胶囊");
+
+    // 拖着文件进了接收条：直接展开成“松手发送”，不再留意。
+    overlay.start_drag(vec![file]);
+    overlay.emit(OverlayEvent::DragEntered { files: true });
+    eventually("展开成松手发送", || {
+        texts(&overlay).contains(&"松手发送到".to_owned())
+    })
+    .await;
+    eventually("不再留意", || overlay.watching().is_none()).await;
+    left_button(&rig, false);
+}
+
+/// 一台带着边缘投递的客户端（1920×1080，服务端在它的左侧），会话已经建好。
+async fn client_with_edge_drop() -> (Rig, MockOverlay, Arc<EdgeDrop>) {
+    let pc = Device::new();
+    let (events, mut rx) = Events::channel();
+    let files = Files::new(&pc.store, events);
+    let overlay = MockOverlay::new();
+    let edge = Arc::new(EdgeDrop::spawn(overlay.clone(), files.clone(), ACCENT));
+    tokio::spawn({
+        let edge = edge.clone();
+        async move {
+            while let Some(event) = rx.recv().await {
+                if let Event::Transfer(update) = event {
+                    edge.transfer(update);
+                }
+            }
+        }
+    });
+    let rig = Rig::with(Setup {
+        pc,
+        pc_files: Some(files),
+        pc_edge: edge.feed(),
+        ..Setup::default()
+    })
+    .await;
+    rig.enter().await;
+    rig.leave().await;
+    (rig, overlay, edge)
+}
+
+#[tokio::test]
+async fn the_client_learns_its_edge_from_the_server_and_shows_received_files() {
+    let (rig, overlay, _edge) = client_with_edge_drop().await;
+    let source = TempDir::new();
+    fs::create_dir_all(source.path()).unwrap();
+    let file = source.path().join("季度报告.pdf");
+    fs::write(&file, b"pdf").unwrap();
+
+    rig.mac_files
+        .send(vec![file])
+        .await
+        .expect("服务端发出文件");
+    eventually("客户端收完变成卡片", || {
+        texts(&overlay).contains(&"打开".to_owned())
+    })
+    .await;
+    let (window, _) = overlay.shown().unwrap();
+    assert!(
+        window.x < 100.0,
+        "服务端在客户端左侧，卡片贴左边缘：{window:?}"
+    );
+}
+
+#[tokio::test]
+async fn dragging_files_to_the_edge_on_the_client_sends_them_to_the_server() {
+    let (rig, overlay, _edge) = client_with_edge_drop().await;
+    let source = TempDir::new();
+    fs::create_dir_all(source.path()).unwrap();
+    let file = source.path().join("会议纪要.docx");
+    fs::write(&file, b"notes").unwrap();
+
+    // 光标进入客户端（从它的左边缘进来），按下鼠标：服务端把按键转给客户端注入。
+    rig.enter().await;
+    left_button(&rig, true);
+    eventually("客户端在贴边留意", || {
+        rig.push(-1, 0);
+        overlay.watching().is_some()
+    })
+    .await;
+
+    // 拖着文件推到左边缘，进了接收条。
+    overlay.start_drag(vec![file.clone()]);
+    overlay.emit(OverlayEvent::DragEntered { files: true });
+    eventually("客户端展开成松手发送", || {
+        texts(&overlay).contains(&"松手发送到".to_owned())
+    })
+    .await;
+    overlay.emit(OverlayEvent::Dropped { paths: vec![file] });
+    left_button(&rig, false);
+
+    let got = rig.mac.store.downloads_dir().join("会议纪要.docx");
+    eventually("服务端收到文件", || got.is_file()).await;
+    assert_eq!(fs::read(&got).unwrap(), b"notes");
+}

@@ -13,6 +13,7 @@ pub mod limits;
 
 mod clipboard;
 mod codec;
+mod edge;
 mod error;
 mod file;
 mod handshake;
@@ -23,6 +24,7 @@ mod wire;
 
 pub use clipboard::{ClipboardItem, ClipboardOffer, ClipboardRequest};
 pub use codec::{Codec, HEADER_LEN};
+pub use edge::{DropHint, HintState};
 pub use error::{DecodeError, EncodeError};
 pub use file::{EntryKind, FileCancel, FileEnd, FileEntry, FileList, FileOffer, FileResume};
 pub use handshake::{

@@ -32,7 +32,7 @@ use crate::error::{Error, Result};
 use crate::events::{Event, Events};
 use crate::files::Files;
 use crate::heartbeat::{self, Heartbeat};
-use crate::link::{DISPLAY_CHECK, HANDSHAKE_TIMEOUT, capabilities, primary_scale, send};
+use crate::link::{DISPLAY_CHECK, HANDSHAKE_TIMEOUT, capabilities, frame_of, primary_scale, send};
 use crate::pairing::{self, ConfirmPairing, Outcome};
 
 pub struct ServerConfig {
@@ -171,6 +171,8 @@ struct Server<C, D, K, P> {
     in_session: bool,
     /// 报告给边缘投递的那条边；会话中且对方能收文件时才有。
     edge: Option<Edge>,
+    /// 对方懂边缘投递的消息（`PeerSide`、`DropHint`）。
+    edge_drop: bool,
 }
 
 impl<C, D, K, P> Server<C, D, K, P>
@@ -208,6 +210,7 @@ where
             pressed: Pressed::new(),
             in_session: false,
             edge: None,
+            edge_drop: false,
         })
     }
 
@@ -340,6 +343,11 @@ where
         }
         self.config.edge.edge(self.edge.clone());
         self.config.edge.pointer(|p| p.here = true);
+        self.edge_drop = welcome.capabilities.contains(Capabilities::EDGE_DROP);
+        if self.edge_drop {
+            let side = side.opposite();
+            send(&mut framed, &Message::PeerSide { side }).await?;
+        }
         // 设置的发送方已经不在（命令行模式）时，不再等它的变化。
         let mut live_open = true;
 
@@ -616,6 +624,10 @@ where
             edge.side = side;
             self.config.edge.edge(Some(edge.clone()));
         }
+        if self.edge_drop {
+            let side = side.opposite();
+            send(framed, &Message::PeerSide { side }).await?;
+        }
         self.perform(transition, framed, false).await
     }
 
@@ -670,15 +682,6 @@ where
             }
         }
     }
-}
-
-fn frame_of(rect: ferry_types::Rect) -> ferry_types::Frame {
-    ferry_types::Frame::new(
-        rect.x as f32,
-        rect.y as f32,
-        rect.width as f32,
-        rect.height as f32,
-    )
 }
 
 /// 会话期间接受新连接所需的信息。

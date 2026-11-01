@@ -315,6 +315,8 @@ dependencies = [
  "ferry-platform",
  "ferry-types",
  "windows",
+ "windows-core",
+ "windows-numerics",
 ]
 
 [[package]]

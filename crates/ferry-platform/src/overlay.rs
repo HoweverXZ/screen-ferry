@@ -44,6 +44,15 @@ pub trait Overlay: Send {
     /// 正在拖的文件和文件夹；拖的不是文件时为空。
     fn dragged_files(&self) -> Vec<PathBuf>;
 
+    /// 拖着东西靠近朝向对方的边时，留意贴边的这一条区域 `strip`（桌面坐标）；`None` 为不再留意。
+    ///
+    /// 有的系统（Windows）没法提前知道别的程序在拖什么，只能在这里放一条看不见的接收条：
+    /// 拖进来的是文件，[`drag_count`](Self::drag_count) 和 [`dragged_files`](Self::dragged_files)
+    /// 随之更新，并发出 [`OverlayEvent::DragEntered`]。能提前知道的系统什么也不用做。
+    fn watch_edge(&mut self, strip: Option<Frame>) {
+        let _ = strip;
+    }
+
     /// 用默认程序打开。
     fn open(&self, path: &Path);
 

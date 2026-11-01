@@ -2,13 +2,13 @@
 
 use ferry_proto::{
     Bye, ByeReason, Cancel, CancelReason, Capabilities, Channel, Chunk, ClipboardItem,
-    ClipboardOffer, ClipboardRequest, Codec, Enter, EntryKind, FileCancel, FileEnd, FileEntry,
-    FileList, FileOffer, FileResume, Hello, Message, PROTOCOL_VERSION, Reject, RejectReason,
-    Welcome,
+    ClipboardOffer, ClipboardRequest, Codec, DropHint, Enter, EntryKind, FileCancel, FileEnd,
+    FileEntry, FileList, FileOffer, FileResume, Hello, HintState, Message, PROTOCOL_VERSION,
+    Reject, RejectReason, Welcome,
 };
 use ferry_types::{
     ClipboardFormat, Display, DisplayId, InputEvent, KeyAction, KeyCode, LockKeys, MouseButton,
-    Point, Rect, TransferId, WHEEL_NOTCH,
+    Point, Rect, Side, TransferId, WHEEL_NOTCH,
 };
 
 /// 样例里用的传输号。
@@ -89,6 +89,18 @@ pub fn samples() -> Vec<(Channel, Message)> {
             }),
         ),
         (Channel::Input, Message::Leave { seq: 42 }),
+        (Channel::Input, Message::PeerSide { side: Side::Right }),
+        (
+            Channel::Input,
+            Message::DropHint(DropHint {
+                state: HintState::Over,
+                along: 4_800,
+                closeness: 100,
+                name: "证书.p12".into(),
+                items: 1,
+                bytes: 3_277,
+            }),
+        ),
         input(InputEvent::Key {
             code: KeyCode::LEFT_SHIFT,
             action: KeyAction::Down,

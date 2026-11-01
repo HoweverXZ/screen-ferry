@@ -227,6 +227,7 @@ impl<H: Host> Runtime<H> {
             store: self.store.clone(),
             events: self.events.clone(),
             files: self.files.clone(),
+            edge: self.edge.feed(),
         };
         let (displays, clipboard) = (self.host.displays(), self.host.clipboard());
         let handle = tokio::spawn(connect(config, inject, displays, clipboard, confirm));

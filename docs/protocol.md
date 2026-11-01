@@ -59,6 +59,7 @@
   - `PointerDelta` 需要 `RELATIVE_POINTER`
   - 剪贴板消息需要 `CLIPBOARD`
   - 文件消息和文件连接需要 `FILES`
+  - `PeerSide`、`DropHint` 需要 `EDGE_DROP`
 - `Hello`、`Welcome`、`Reject` 的消息体格式在所有版本中永久不变，版本不同的双方也总能完成协商。
 - 配对连接的 `Hello` 中 `session` 填 0，`capabilities` 不起作用。
 
@@ -104,6 +105,8 @@
 | `0x0100` | Displays | 输入 | `list<Display>`，最多 32 个 |
 | `0x0101` | Enter | 输入 | `seq u32` · `position Point` · `locks u8` |
 | `0x0102` | Leave | 输入 | `seq u32` |
+| `0x0103` | PeerSide | 输入 | `side u8` |
+| `0x0104` | DropHint | 输入 | `state u8` · `along u16` · `closeness u8` · `name str` · `items u32` · `bytes u64` |
 | `0x0110` | Key | 输入 | `code u32` · `action u8` |
 | `0x0120` | PointerMotion | 输入 | `position Point` |
 | `0x0121` | PointerDelta | 输入 | `dx i32` · `dy i32` |
@@ -140,7 +143,11 @@
 | 字段 | 取值 |
 |---|---|
 | `channel` | 1 输入，2 数据，3 配对，4 文件 |
-| `capabilities` | 位 0 `RELATIVE_POINTER`，位 1 `CLIPBOARD`，位 2 `FILES`；未知位保留，协商时自然被交集去掉 |
+| `capabilities` | 位 0 `RELATIVE_POINTER`，位 1 `CLIPBOARD`，位 2 `FILES`，位 3 `EDGE_DROP`；未知位保留，协商时自然被交集去掉 |
+| `side` | 1 左，2 右，3 上，4 下 |
+| DropHint `state` | 0 收起，1 靠近，2 在胶囊上 |
+| `along` | 沿相邻那条边的位置，0–10000（左右边从上往下，上下边从左往右） |
+| `closeness` | 有多靠近边缘，0–100 |
 | `kind` | 1 文件，2 文件夹 |
 | `path`、`name` | 最多 1024 字节；`path` 为相对路径，以 `/` 分隔 |
 | `modified` | 自 1970 年起的毫秒数，0 表示不知道 |
@@ -219,6 +226,12 @@ A（复制的一方）                         B（粘贴的一方）
 - 每个文件收到的字节数必须等于清单中的 `size`，SHA-256 必须一致，否则接收方关闭连接，这次传输失败。
 - 全部收好、校验通过并放到最终位置后，接收方回 `FileDone`，双方关闭文件连接。
 - 任一方都可以随时在数据连接上发 `FileCancel` 并关闭文件连接。
+
+### 边缘投递
+
+- 服务端在会话开始和用户改变方向时发 `PeerSide`，告诉客户端“服务端在你的哪一侧”。客户端据此知道朝向服务端的是哪条边，在那里显示胶囊。
+- 拖着文件靠近相邻的边缘时，发送方发 `DropHint`：`Near` 带上靠近程度，`Over` 表示已在胶囊上；离开边缘、放下或取消后发 `Gone`。接收方据此在同一位置提前滑出接收胶囊。提示只影响显示，真正的发送仍走“文件”一节的流程。
+- `along` 用比例而不是坐标，两边分辨率不同也能对齐。
 
 ### 配对
 

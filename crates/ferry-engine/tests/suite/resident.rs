@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Duration;
 
 use ferry_engine::resident::{self, Command, Host};
-use ferry_engine::{ClientConfig, Events, Files, ServerAddr, connect};
+use ferry_engine::{ClientConfig, EdgeFeed, Events, Files, ServerAddr, connect};
 use ferry_ipc::{
     Connection, Endpoint, LinkStatus, Notice, PairingPrompt, ProblemKind, Request, SettingsPatch,
     State,
@@ -254,6 +254,7 @@ async fn first_pairing_is_confirmed_in_the_ui() {
             store: pc.store.clone(),
             events: Events::none(),
             files: Files::new(&pc.store, Events::none()),
+            edge: EdgeFeed::none(),
         },
         MockInject::new(),
         MockDisplays::new(vec![Display {
@@ -385,6 +386,7 @@ async fn pairing_with_no_ui_open_opens_the_settings() {
             store: pc.store.clone(),
             events: Events::none(),
             files: Files::new(&pc.store, Events::none()),
+            edge: EdgeFeed::none(),
         },
         MockInject::new(),
         MockDisplays::default(),

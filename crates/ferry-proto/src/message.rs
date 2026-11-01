@@ -1,8 +1,9 @@
 //! 消息总表：类型号、所属连接、消息体分发。
 
-use ferry_types::{Display, InputEvent, KeyAction, KeyCode, MouseButton, Point, TransferId};
+use ferry_types::{Display, InputEvent, KeyAction, KeyCode, MouseButton, Point, Side, TransferId};
 
 use crate::clipboard::{ClipboardOffer, ClipboardRequest};
+use crate::edge::DropHint;
 use crate::error::{DecodeError, EncodeError};
 use crate::file::{self, FileCancel, FileEnd, FileList, FileOffer, FileResume};
 use crate::handshake::{Bye, Channel, Hello, Reject, Welcome};
@@ -51,6 +52,12 @@ pub enum Message {
         seq: u32,
     },
     Input(InputEvent),
+    /// 发送方位于接收方的哪一侧。会话开始和方向改变时发送。需要 `EDGE_DROP` 能力。
+    PeerSide {
+        side: Side,
+    },
+    /// 拖动中的提示，见 [`DropHint`]。需要 `EDGE_DROP` 能力。
+    DropHint(DropHint),
 
     // ── 数据连接 ──────────────────────────
     ClipboardOffer(ClipboardOffer),
@@ -96,6 +103,8 @@ mod ty {
     pub(super) const DISPLAYS: u16 = 0x0100;
     pub(super) const ENTER: u16 = 0x0101;
     pub(super) const LEAVE: u16 = 0x0102;
+    pub(super) const PEER_SIDE: u16 = 0x0103;
+    pub(super) const DROP_HINT: u16 = 0x0104;
     pub(super) const KEY: u16 = 0x0110;
     pub(super) const POINTER_MOTION: u16 = 0x0120;
     pub(super) const POINTER_DELTA: u16 = 0x0121;
@@ -127,6 +136,8 @@ pub(crate) fn allowed(ty: u16, channel: Channel) -> Option<bool> {
         ty::DISPLAYS
         | ty::ENTER
         | ty::LEAVE
+        | ty::PEER_SIDE
+        | ty::DROP_HINT
         | ty::KEY
         | ty::POINTER_MOTION
         | ty::POINTER_DELTA
@@ -165,6 +176,8 @@ impl Message {
             Self::Displays(_) => ty::DISPLAYS,
             Self::Enter(_) => ty::ENTER,
             Self::Leave { .. } => ty::LEAVE,
+            Self::PeerSide { .. } => ty::PEER_SIDE,
+            Self::DropHint(_) => ty::DROP_HINT,
             Self::Input(event) => match event {
                 InputEvent::Key { .. } => ty::KEY,
                 InputEvent::PointerMotion { .. } => ty::POINTER_MOTION,
@@ -213,6 +226,8 @@ impl Message {
                 Ok(())
             }
             Self::Input(event) => encode_input(event, w),
+            Self::PeerSide { side } => side.encode(w),
+            Self::DropHint(m) => m.encode(w),
             Self::ClipboardOffer(m) => m.encode(w),
             Self::ClipboardRequest(m) => m.encode(w),
             Self::Chunk(m) => m.encode(w),
@@ -246,6 +261,10 @@ impl Message {
             ty::DISPLAYS => Self::Displays(r.list(MAX_DISPLAYS, "显示器数量")?),
             ty::ENTER => Self::Enter(Enter::decode(r)?),
             ty::LEAVE => Self::Leave { seq: r.u32()? },
+            ty::PEER_SIDE => Self::PeerSide {
+                side: Side::decode(r)?,
+            },
+            ty::DROP_HINT => Self::DropHint(DropHint::decode(r)?),
             ty::KEY => Self::Input(InputEvent::Key {
                 code: KeyCode::decode(r)?,
                 action: KeyAction::decode(r)?,

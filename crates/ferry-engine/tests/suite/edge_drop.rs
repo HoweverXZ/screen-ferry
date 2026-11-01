@@ -13,13 +13,10 @@ use crate::support::{Device, Rig, Setup, TempDir, eventually};
 
 const ACCENT: Rgba = Rgba::hex(0x0A6CFF, 255);
 
-/// 一台带着边缘投递的服务端（本机 1000×800，客户端在右侧），会话已经建好、光标在本机。
-///
-/// 常驻后台会把文件传输的进展转给边缘投递，这里由一个小任务代劳。
-async fn rig_with_edge_drop() -> (Rig, MockOverlay, Arc<EdgeDrop>) {
-    let mac = Device::new();
+/// 给一台设备配上边缘投递。常驻后台会把文件传输的进展转给边缘投递，这里由一个小任务代劳。
+fn edge_drop_for(device: &Device) -> (Files, MockOverlay, Arc<EdgeDrop>) {
     let (events, mut rx) = Events::channel();
-    let files = Files::new(&mac.store, events);
+    let files = Files::new(&device.store, events);
     let overlay = MockOverlay::new();
     let edge = Arc::new(EdgeDrop::spawn(overlay.clone(), files.clone(), ACCENT));
     tokio::spawn({
@@ -32,6 +29,13 @@ async fn rig_with_edge_drop() -> (Rig, MockOverlay, Arc<EdgeDrop>) {
             }
         }
     });
+    (files, overlay, edge)
+}
+
+/// 一台带着边缘投递的服务端（本机 1000×800，客户端在右侧），会话已经建好、光标在本机。
+async fn rig_with_edge_drop() -> (Rig, MockOverlay, Arc<EdgeDrop>) {
+    let mac = Device::new();
+    let (files, overlay, edge) = edge_drop_for(&mac);
     let rig = Rig::with(Setup {
         mac,
         mac_files: Some(files),
@@ -43,6 +47,52 @@ async fn rig_with_edge_drop() -> (Rig, MockOverlay, Arc<EdgeDrop>) {
     rig.enter().await;
     rig.leave().await;
     (rig, overlay, edge)
+}
+
+/// 两端都带着边缘投递：服务端 1000×800，客户端 1920×1080（150%）在它右侧。
+struct Pair {
+    rig: Rig,
+    mac: MockOverlay,
+    pc: MockOverlay,
+    _edges: [Arc<EdgeDrop>; 2],
+}
+
+async fn pair_with_edge_drop() -> Pair {
+    let (mac, pc) = (Device::new(), Device::new());
+    let (mac_files, mac_overlay, mac_edge) = edge_drop_for(&mac);
+    let (pc_files, pc_overlay, pc_edge) = edge_drop_for(&pc);
+    let rig = Rig::with(Setup {
+        mac,
+        pc,
+        mac_files: Some(mac_files),
+        pc_files: Some(pc_files),
+        edge: mac_edge.feed(),
+        pc_edge: pc_edge.feed(),
+        ..Setup::default()
+    })
+    .await;
+    rig.enter().await;
+    rig.leave().await;
+    Pair {
+        rig,
+        mac: mac_overlay,
+        pc: pc_overlay,
+        _edges: [mac_edge, pc_edge],
+    }
+}
+
+/// 胶囊沿竖直方向的中心。
+fn middle_y(overlay: &MockOverlay) -> f32 {
+    overlay
+        .shown()
+        .map_or(f32::NAN, |(frame, _)| frame.y + frame.h / 2.0)
+}
+
+fn source_file(dir: &TempDir, name: &str, bytes: &[u8]) -> std::path::PathBuf {
+    fs::create_dir_all(dir.path()).unwrap();
+    let file = dir.path().join(name);
+    fs::write(&file, bytes).unwrap();
+    file
 }
 
 fn texts(overlay: &MockOverlay) -> Vec<String> {
@@ -233,20 +283,7 @@ async fn without_a_drag_clipboard_the_edge_is_watched_until_files_come_in() {
 /// 一台带着边缘投递的客户端（1920×1080，服务端在它的左侧），会话已经建好。
 async fn client_with_edge_drop() -> (Rig, MockOverlay, Arc<EdgeDrop>) {
     let pc = Device::new();
-    let (events, mut rx) = Events::channel();
-    let files = Files::new(&pc.store, events);
-    let overlay = MockOverlay::new();
-    let edge = Arc::new(EdgeDrop::spawn(overlay.clone(), files.clone(), ACCENT));
-    tokio::spawn({
-        let edge = edge.clone();
-        async move {
-            while let Some(event) = rx.recv().await {
-                if let Event::Transfer(update) = event {
-                    edge.transfer(update);
-                }
-            }
-        }
-    });
+    let (files, overlay, edge) = edge_drop_for(&pc);
     let rig = Rig::with(Setup {
         pc,
         pc_files: Some(files),
@@ -312,4 +349,152 @@ async fn dragging_files_to_the_edge_on_the_client_sends_them_to_the_server() {
     let got = rig.mac.store.downloads_dir().join("会议纪要.docx");
     eventually("服务端收到文件", || got.is_file()).await;
     assert_eq!(fs::read(&got).unwrap(), b"notes");
+}
+
+#[tokio::test]
+async fn dragging_toward_the_edge_slides_out_the_receiving_capsule_on_the_other_side() {
+    let Pair { rig, mac, pc, .. } = pair_with_edge_drop().await;
+    let source = TempDir::new();
+    let file = source_file(&source, "设计稿.fig", &[7; 2048]);
+
+    // 在本机 1/4 高度处拖向右边缘：对方在它左边缘的 1/4 高度处（1080 × 1/4 = 270）提前滑出胶囊。
+    pointer(&rig, 500, 200);
+    press_and_drag(&rig, &mac, Some(vec![file.clone()])).await;
+    eventually("对方提前滑出接收胶囊", || {
+        pointer(&rig, 900, 200);
+        pc.shown().is_some()
+    })
+    .await;
+    let (window, _) = pc.shown().unwrap();
+    assert!(window.x < 100.0, "贴着对方的左边缘：{window:?}");
+    eventually("在对应的高度", || {
+        (middle_y(&pc) - 270.0).abs() < 20.0
+    })
+    .await;
+
+    // 拖到本机胶囊上：对方展开成“松手即接收”，并说明是什么。
+    mac.emit(OverlayEvent::DragEntered { files: true });
+    eventually("对方展开成松手即接收", || {
+        texts(&pc).contains(&"松手即接收".to_owned())
+    })
+    .await;
+    let shown = texts(&pc);
+    assert!(shown.contains(&"来自 mac".to_owned()), "{shown:?}");
+    assert!(
+        shown.contains(&"设计稿.fig · 2.0 KB".to_owned()),
+        "{shown:?}"
+    );
+
+    // 放下：对方在同一高度显示收到的卡片。
+    mac.emit(OverlayEvent::Dropped {
+        paths: vec![file.clone()],
+    });
+    left_button(&rig, false);
+    let got = rig.pc.store.downloads_dir().join("设计稿.fig");
+    eventually("对方收到文件", || got.is_file()).await;
+    eventually("对方显示收到的卡片", || {
+        texts(&pc).contains(&"打开".to_owned())
+    })
+    .await;
+    eventually("卡片在同一高度", || {
+        (middle_y(&pc) - 270.0).abs() < 20.0
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn moving_away_from_the_edge_hides_the_receiving_capsule() {
+    let Pair { rig, mac, pc, .. } = pair_with_edge_drop().await;
+    let source = TempDir::new();
+    let file = source_file(&source, "a.txt", b"a");
+
+    pointer(&rig, 500, 400);
+    press_and_drag(&rig, &mac, Some(vec![file])).await;
+    eventually("对方提前滑出接收胶囊", || {
+        pointer(&rig, 900, 400);
+        pc.shown().is_some()
+    })
+    .await;
+
+    // 拖回屏幕中间：两边都收起。
+    eventually("本机收起", || {
+        pointer(&rig, 500, 400);
+        mac.shown().is_none()
+    })
+    .await;
+    eventually("对方也收起", || pc.shown().is_none()).await;
+
+    // 再靠近又出现；这次直接松开鼠标（取消拖动），对方同样收起。
+    eventually("对方再次滑出", || {
+        pointer(&rig, 900, 400);
+        pc.shown().is_some()
+    })
+    .await;
+    left_button(&rig, false);
+    eventually("松开后对方收起", || pc.shown().is_none()).await;
+}
+
+#[tokio::test]
+async fn dragging_on_the_client_slides_out_the_receiving_capsule_on_the_server() {
+    let Pair { rig, mac, pc, .. } = pair_with_edge_drop().await;
+    let source = TempDir::new();
+    let file = source_file(&source, "照片.heic", b"heic");
+
+    // 光标在客户端屏幕中间高度推向左边缘，拖着文件进了接收条。
+    rig.enter().await;
+    left_button(&rig, true);
+    eventually("客户端在贴边留意", || {
+        rig.push(-1, 0);
+        pc.watching().is_some()
+    })
+    .await;
+    pc.start_drag(vec![file]);
+    pc.emit(OverlayEvent::DragEntered { files: true });
+
+    // 服务端在右边缘的中间高度（800 × 1/2 = 400）展开成“松手即接收”。
+    eventually("服务端展开成松手即接收", || {
+        texts(&mac).contains(&"松手即接收".to_owned())
+    })
+    .await;
+    assert!(texts(&mac).contains(&"来自 pc".to_owned()));
+    let (window, _) = mac.shown().unwrap();
+    assert!(window.right() > 900.0, "贴着服务端的右边缘：{window:?}");
+    eventually("在对应的高度", || {
+        (middle_y(&mac) - 400.0).abs() < 20.0
+    })
+    .await;
+
+    pc.emit(OverlayEvent::DragExited);
+    left_button(&rig, false);
+}
+
+#[tokio::test]
+async fn after_the_peer_disconnects_dragging_files_shows_not_connected() {
+    let (rig, overlay, _edge) = rig_with_edge_drop().await;
+    let source = TempDir::new();
+    let file = source_file(&source, "a.txt", b"a");
+
+    // 对方断开。之后照样能拖文件到边缘，只是显示“未连接”。
+    rig.client.abort();
+    pointer(&rig, 500, 400);
+    press_and_drag(&rig, &overlay, Some(vec![file.clone()])).await;
+    eventually("靠近边缘时滑出胶囊", || {
+        pointer(&rig, 900, 400);
+        overlay.shown().is_some()
+    })
+    .await;
+    overlay.emit(OverlayEvent::DragEntered { files: true });
+    eventually("显示未连接", || {
+        texts(&overlay).contains(&"连上后才能发送".to_owned())
+    })
+    .await;
+    assert!(texts(&overlay).contains(&"未连接".to_owned()));
+
+    // 放下也发不出去，说明原因。
+    overlay.emit(OverlayEvent::Dropped { paths: vec![file] });
+    left_button(&rig, false);
+    eventually("提示发不出去", || {
+        texts(&overlay).contains(&"发不出去".to_owned())
+    })
+    .await;
 }

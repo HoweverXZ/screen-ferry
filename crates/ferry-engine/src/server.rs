@@ -27,7 +27,7 @@ use tokio::time::{MissedTickBehavior, interval, timeout};
 use tracing::{debug, info, warn};
 
 use crate::clipboard::{self, ClipboardTask, SharedClipboard, Start};
-use crate::edge_drop::{Edge, EdgeFeed};
+use crate::edge_drop::{Edge, EdgeFeed, gone};
 use crate::error::{Error, Result};
 use crate::events::{Event, Events};
 use crate::files::Files;
@@ -114,11 +114,22 @@ where
     });
 
     let mut session = 0u64;
+    let mut screens = interval(DISPLAY_CHECK);
+    screens.set_missed_tick_behavior(MissedTickBehavior::Skip);
     loop {
         let accepted = tokio::select! {
             accepted = listener.accept() => accepted,
-            // 没有客户端时，本机输入直接丢弃。
-            _ = server.events.recv() => continue,
+            // 没有客户端时，本机输入只用来提示“未连接”。
+            event = server.events.recv() => {
+                if let Some(event) = event {
+                    server.idle_input(event);
+                }
+                continue;
+            }
+            _ = screens.tick() => {
+                server.idle_displays();
+                continue;
+            }
         };
         let (stream, peer) = match accepted {
             Ok(accepted) => accepted,
@@ -169,7 +180,7 @@ struct Server<C, D, K, P> {
     pressed: Pressed,
     /// 已建立会话、还没报告断开。
     in_session: bool,
-    /// 报告给边缘投递的那条边；会话中且对方能收文件时才有。
+    /// 报告给边缘投递的那条边：对方能收文件时才有。断开后保留，标为未连接。
     edge: Option<Edge>,
     /// 对方懂边缘投递的消息（`PeerSide`、`DropHint`）。
     edge_drop: bool,
@@ -258,8 +269,12 @@ where
             addr,
         });
         let result = self.session(framed, peer, hello, welcome, listener).await;
-        self.edge = None;
-        self.config.edge.edge(None);
+        self.edge_drop = false;
+        if let Some(edge) = &mut self.edge {
+            edge.online = false;
+        }
+        self.config.edge.edge(self.edge.clone());
+        self.config.edge.remote(None);
         result?;
         Ok(Ended::Session)
     }
@@ -333,14 +348,16 @@ where
             "握手完成：把光标推出本机 {side:?} 侧边缘即可切换过去",
         );
         self.switch = Some(EdgeSwitch::new(local_rect, remote_rect, side, scale));
-        if welcome.capabilities.contains(Capabilities::FILES) {
-            self.edge = Some(Edge {
+        self.edge = welcome
+            .capabilities
+            .contains(Capabilities::FILES)
+            .then(|| Edge {
                 side,
                 screen: frame_of(local_rect),
                 scale: f32::from(primary_scale(&local)) / 100.0,
                 peer: hello.name.clone(),
+                online: true,
             });
-        }
         self.config.edge.edge(self.edge.clone());
         self.config.edge.pointer(|p| p.here = true);
         self.edge_drop = welcome.capabilities.contains(Capabilities::EDGE_DROP);
@@ -363,6 +380,8 @@ where
         tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
         let mut screens = interval(DISPLAY_CHECK);
         screens.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        let mut hints = self.config.edge.hints();
+        hints.mark_unchanged();
 
         loop {
             tokio::select! {
@@ -399,6 +418,12 @@ where
                     let side = self.config.live.borrow_and_update().side;
                     self.change_side(side, &mut framed).await?;
                 }
+                changed = hints.changed(), if self.edge_drop => {
+                    if changed.is_ok() {
+                        let hint = hints.borrow_and_update().clone();
+                        send(&mut framed, &Message::DropHint(hint.unwrap_or_else(gone))).await?;
+                    }
+                }
                 message = framed.recv() => match message? {
                     Some(Message::Pong { nonce }) => {
                         if let Some(rtt) = heartbeat.pong(nonce) {
@@ -410,6 +435,7 @@ where
                         remote = displays;
                         self.update_remote(&local, &remote);
                     }
+                    Some(Message::DropHint(hint)) => self.config.edge.remote(Some(hint)),
                     Some(Message::Bye(_)) | None => return Ok(()),
                     Some(other) => debug!(?other, "忽略消息"),
                 },
@@ -668,6 +694,60 @@ where
         if let (Some(switch), Some(rect)) = (self.switch.as_mut(), bounds(remote)) {
             switch.set_remote(rect, relative_scale(local, remote));
             info!(remote = ?rect, "对方的显示器布局已更新");
+        }
+    }
+
+    /// 没有客户端时的本机输入：边缘投递据此提示“未连接”。
+    fn idle_input(&mut self, captured: Captured) {
+        if captured.grabbed {
+            return;
+        }
+        let Some(edge) = &mut self.edge else {
+            return;
+        };
+        match captured.event {
+            CaptureEvent::Pointer { position, .. } => {
+                let side = self.config.live.borrow().side;
+                if edge.side != side {
+                    edge.side = side;
+                    self.config.edge.edge(Some(edge.clone()));
+                }
+                self.config.edge.pointer(|p| {
+                    p.x = position.x as f32;
+                    p.y = position.y as f32;
+                    p.here = true;
+                });
+            }
+            CaptureEvent::Button { button, pressed } => {
+                self.pressed.track(&InputEvent::Button {
+                    button,
+                    pressed,
+                    position: Point::default(),
+                });
+                let held = self.pressed.any_button();
+                self.config.edge.pointer(|p| p.held = held);
+            }
+            CaptureEvent::Wheel { .. } | CaptureEvent::Key { .. } => {}
+        }
+    }
+
+    /// 没有客户端时显示器变了：更新那条边，“未连接”胶囊仍贴着屏幕边缘。
+    fn idle_displays(&mut self) {
+        let Some(edge) = &mut self.edge else {
+            return;
+        };
+        let Ok(now) = self.displays.displays() else {
+            return;
+        };
+        let Some(rect) = bounds(&now) else {
+            return;
+        };
+        let screen = frame_of(rect);
+        let scale = f32::from(primary_scale(&now)) / 100.0;
+        if edge.screen != screen || edge.scale != scale {
+            edge.screen = screen;
+            edge.scale = scale;
+            self.config.edge.edge(Some(edge.clone()));
         }
     }
 

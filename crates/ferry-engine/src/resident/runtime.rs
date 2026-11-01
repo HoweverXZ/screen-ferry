@@ -241,6 +241,7 @@ impl<H: Host> Runtime<H> {
             task.handle.abort();
             let _ = task.handle.await;
         }
+        self.edge.feed().reset();
         self.drop_link();
         self.retry_at = None;
     }

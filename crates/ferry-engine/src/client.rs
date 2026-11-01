@@ -29,7 +29,7 @@ use tokio::time::{MissedTickBehavior, interval, sleep, timeout};
 use tracing::{debug, info, warn};
 
 use crate::clipboard::{self, ClipboardTask, SharedClipboard, Start};
-use crate::edge_drop::{Edge, EdgeFeed};
+use crate::edge_drop::{Edge, EdgeFeed, gone};
 use crate::error::{Error, Result};
 use crate::events::{Event, Events, FoundServer};
 use crate::files::{FileLink, Files, Opener};
@@ -130,6 +130,7 @@ where
         let result = client.session(&config, &displays, &target).await;
         client.peer_side = None;
         client.edge.edge(None);
+        client.edge.remote(None);
         client.edge.pointer(|p| p.here = false);
         client.release_all();
         client.hide_cursor(false);
@@ -351,6 +352,7 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
         // 会话结束时随之丢弃，剪贴板同步也就停了。
         let clipboard = welcome.capabilities.contains(Capabilities::CLIPBOARD);
         let files = welcome.capabilities.contains(Capabilities::FILES);
+        let edge_drop = welcome.capabilities.contains(Capabilities::EDGE_DROP);
         let link = Link {
             tls: self.tls.clone(),
             name: config.name.clone(),
@@ -384,9 +386,18 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
         silence.set_missed_tick_behavior(MissedTickBehavior::Skip);
         let mut screen_check = interval(DISPLAY_CHECK);
         screen_check.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        let mut hints = self.edge.hints();
+        hints.mark_unchanged();
         loop {
             let message = tokio::select! {
                 message = framed.recv() => message?,
+                changed = hints.changed(), if edge_drop => {
+                    if changed.is_ok() {
+                        let hint = hints.borrow_and_update().clone();
+                        send(&mut framed, &Message::DropHint(hint.unwrap_or_else(gone))).await?;
+                    }
+                    continue;
+                }
                 _ = screen_check.tick() => {
                     // 改了分辨率、缩放或插拔显示器：告诉服务端，它按新的范围移动光标。
                     // 查询偶尔失败（例如显示器正在切换）时等下一次。
@@ -459,6 +470,7 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                     info!(?side, "服务端在本机的这一侧");
                     self.publish_edge(side, &screens, &welcome.name);
                 }
+                Some(Message::DropHint(hint)) => self.edge.remote(Some(hint)),
                 Some(Message::Displays(_)) => {}
                 Some(other) => debug!(?other, "忽略消息"),
             }
@@ -578,6 +590,7 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
             screen: frame_of(rect),
             scale: f32::from(primary_scale(screens)) / 100.0,
             peer: peer.to_owned(),
+            online: true,
         }));
     }
 

@@ -292,6 +292,7 @@ name = "ferry-platform-macos"
 version = "0.1.0"
 dependencies = [
  "dispatch2",
+ "ferry-core",
  "ferry-platform",
  "ferry-types",
  "objc2",

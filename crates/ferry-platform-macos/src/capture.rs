@@ -1,8 +1,11 @@
 //! 输入捕获：`InputCapture` 的 macOS 实现。
 //!
 //! 用 CGEventTap 在会话层拦截鼠标事件，回调运行在专用线程的 CFRunLoop 上。抓取期间：
-//! - 光标与鼠标解耦，光标停在原地，事件里仍带有相对位移；
-//! - 本机光标隐藏起来，免得对方屏幕上的光标在动、本机屏幕边缘还停着一个；
+//! - 光标与鼠标解耦，事件里仍带有相对位移；
+//! - 本机光标挪到主显示器中央并藏起来，免得对方屏幕上的光标在动、本机屏幕上还停着一个。
+//!   不能停在离开的那条边上藏：那里可能是 Dock 或菜单栏，系统会把光标的控制权给它们，藏不住
+//!   （见 [`crate::inject::cursor`]）。挪动之后系统报告的下一次位移里会混进这段距离，
+//!   切过去和切回来时都记下挪了多远，从随后的位移里减掉（见 [`ferry_core::WarpJump`]）；
 //! - 事件被吞掉，本机程序收不到。
 //!
 //! 结束抓取时先把光标放到回来的位置，再交还本机。系统默认在程序移动光标之后把真实鼠标
@@ -22,9 +25,11 @@ use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr::{self, NonNull};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Once, mpsc};
+use std::sync::{Arc, Mutex, MutexGuard, Once, OnceLock, mpsc};
 use std::thread::{self, JoinHandle};
+use std::time::Instant;
 
+use ferry_core::WarpJump;
 use ferry_platform::{CaptureEvent, CaptureSink, Captured, Error, InputCapture, Result};
 use ferry_types::{KeyAction, KeyCode, LockKeys, MouseButton, Point, WHEEL_NOTCH};
 use objc2::rc::autoreleasepool;
@@ -33,14 +38,15 @@ use objc2_core_foundation::{
     CFMachPort, CFRetained, CFRunLoop, CGPoint, kCFRunLoopCommonModes, kCFRunLoopDefaultMode,
 };
 use objc2_core_graphics::{
-    CGAssociateMouseAndMouseCursorPosition, CGDisplayHideCursor, CGDisplayShowCursor, CGEvent,
-    CGEventField, CGEventFilterMask, CGEventFlags, CGEventSource, CGEventSourceStateID,
-    CGEventSuppressionState, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
-    CGEventTapProxy, CGEventType, CGMainDisplayID, CGWarpMouseCursorPosition,
+    CGAssociateMouseAndMouseCursorPosition, CGEvent, CGEventField, CGEventFilterMask, CGEventFlags,
+    CGEventSource, CGEventSourceStateID, CGEventSuppressionState, CGEventTapLocation,
+    CGEventTapOptions, CGEventTapPlacement, CGEventTapProxy, CGEventType,
+    CGWarpMouseCursorPosition,
 };
 use objc2_foundation::NSString;
 
 use crate::display::check;
+use crate::inject::cursor::{CursorHider, park_point};
 use crate::keymap::{hid_code, media_key, modifier_flag};
 use crate::permission::ACCESSIBILITY;
 
@@ -108,14 +114,14 @@ pub(crate) fn allow_cursor_control_in_background() {
     });
 }
 
-/// 关掉系统在移动光标之后对真实键鼠的压制。
+/// 关掉系统在移动光标之后对真实键鼠的压制。注入那边藏光标时也要用。
 ///
 /// 程序移动光标（warp）或发出合成事件后，系统默认在 0.25 秒内忽略本机的鼠标和键盘。
 /// 光标从对方屏幕回来时要先放到落点，这一压就是用户手上明显的一顿。这里把压制时长设为 0，
 /// 并且即使处于压制期也照常放行本机键鼠。两个接口被标为过时，但仍然有效，
 /// 而且没有别的接口能管到 warp 之后的这段压制。设置作用于整个进程，重复调用没有副作用。
 #[allow(deprecated)]
-fn disable_local_suppression() {
+pub(crate) fn disable_local_suppression() {
     use objc2_core_graphics::{
         CGSetLocalEventsFilterDuringSuppressionState, CGSetLocalEventsSuppressionInterval,
     };
@@ -135,8 +141,11 @@ pub(crate) fn live_cursor() -> Option<Point> {
 
 pub struct MacCapture {
     grabbed: Arc<AtomicBool>,
-    /// 本机光标是否被隐藏。隐藏与显示由系统计数，必须一一对应，所以记下来。
-    cursor_hidden: AtomicBool,
+    cursor: CursorHider,
+    /// 最近一次程序挪动光标，从随后的位移里减掉。
+    warp_jump: Arc<Mutex<WarpJump>>,
+    /// 抓取时光标停在哪里，结束抓取时从那里挪回来。
+    parked: Mutex<Option<Point>>,
     worker: Option<Worker>,
 }
 
@@ -156,6 +165,7 @@ unsafe impl Send for RunLoop {}
 struct TapState {
     sink: CaptureSink,
     grabbed: Arc<AtomicBool>,
+    warp_jump: Arc<Mutex<WarpJump>>,
     tap: Option<CFRetained<CFMachPort>>,
     /// 交给本机处理、尚未松开的键。
     local_keys: BTreeSet<KeyCode>,
@@ -165,23 +175,10 @@ impl MacCapture {
     pub fn new() -> Self {
         Self {
             grabbed: Arc::new(AtomicBool::new(false)),
-            cursor_hidden: AtomicBool::new(false),
+            cursor: CursorHider::new(),
+            warp_jump: Arc::new(Mutex::new(WarpJump::new())),
+            parked: Mutex::new(None),
             worker: None,
-        }
-    }
-
-    fn hide_cursor(&self) {
-        if self.cursor_hidden.swap(true, Ordering::SeqCst) {
-            return;
-        }
-        allow_cursor_control_in_background();
-        // 隐藏失败不影响切换，只是本机屏幕上还看得到光标。
-        let _ = CGDisplayHideCursor(CGMainDisplayID());
-    }
-
-    fn show_cursor(&self) {
-        if self.cursor_hidden.swap(false, Ordering::SeqCst) {
-            let _ = CGDisplayShowCursor(CGMainDisplayID());
         }
     }
 }
@@ -202,13 +199,14 @@ impl InputCapture for MacCapture {
         }
         disable_local_suppression();
         let grabbed = Arc::clone(&self.grabbed);
+        let warp_jump = Arc::clone(&self.warp_jump);
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = Arc::clone(&stop);
         let (ready_tx, ready_rx) = mpsc::channel();
 
         let thread = thread::Builder::new()
             .name("ferry-capture".into())
-            .spawn(move || run(grabbed, thread_stop, sink, ready_tx))
+            .spawn(move || run(grabbed, warp_jump, thread_stop, sink, ready_tx))
             .map_err(|e| Error::Os {
                 call: "thread::spawn",
                 detail: e.to_string(),
@@ -243,13 +241,23 @@ impl InputCapture for MacCapture {
             "CGAssociateMouseAndMouseCursorPosition",
         )?;
         self.grabbed.store(true, Ordering::SeqCst);
-        self.hide_cursor();
+        // 先记下要挪多远再挪：挪完之后马上就可能来一个混着这段距离的事件。
+        let park = park_point();
+        if let Some(from) = live_cursor() {
+            lock(&self.warp_jump).warped(from, park, now_ms());
+        }
+        if self.cursor.hide(park, false) {
+            *lock(&self.parked) = Some(park);
+        }
         Ok(())
     }
 
     fn release(&self, at: Point) -> Result<()> {
         // 每次都再设一遍：开始捕获之后，别处的代码也可能改动它。
         disable_local_suppression();
+        if let Some(park) = lock(&self.parked).take() {
+            lock(&self.warp_jump).warped(park, at, now_ms());
+        }
         let to = CGPoint::new(f64::from(at.x), f64::from(at.y));
         let warped = check(CGWarpMouseCursorPosition(to), "CGWarpMouseCursorPosition");
         // 无论光标是否移动成功都要重新关联，否则本机鼠标会一直失灵。
@@ -260,7 +268,7 @@ impl InputCapture for MacCapture {
         // 光标放好之后才结束抓取：从这一刻起标记为未抓取的事件，位置都是回来之后的。
         self.grabbed.store(false, Ordering::SeqCst);
         // 光标已经放到回来的位置，再让它出现。
-        self.show_cursor();
+        self.cursor.show();
         warped.and(associated)
     }
 
@@ -280,7 +288,7 @@ impl Drop for MacCapture {
         if self.grabbed.swap(false, Ordering::SeqCst) {
             let _ = CGAssociateMouseAndMouseCursorPosition(true);
         }
-        self.show_cursor();
+        self.cursor.show();
         if let Some(worker) = self.worker.take() {
             worker.stop.store(true, Ordering::SeqCst);
             worker.run_loop.0.stop();
@@ -292,6 +300,7 @@ impl Drop for MacCapture {
 /// 捕获线程主体：建立事件 tap，运行 run loop 直到被要求退出。
 fn run(
     grabbed: Arc<AtomicBool>,
+    warp_jump: Arc<Mutex<WarpJump>>,
     stop: Arc<AtomicBool>,
     sink: CaptureSink,
     ready: mpsc::Sender<Result<RunLoop>>,
@@ -299,6 +308,7 @@ fn run(
     let state = Box::into_raw(Box::new(TapState {
         sink,
         grabbed,
+        warp_jump,
         tap: None,
         local_keys: BTreeSet::new(),
     }));
@@ -399,6 +409,13 @@ unsafe extern "C-unwind" fn on_event(
         // 判断是否撞到边缘要用光标此刻的位置；查询一次约 1 微秒。
         *position = live;
     }
+    if let CaptureEvent::Pointer { dx, dy, .. } = &mut captured {
+        (*dx, *dy) = lock(&state.warp_jump).correct(*dx, *dy, now_ms());
+        if grabbed && *dx == 0 && *dy == 0 {
+            // 只是挪动本身，手上没有动。
+            return verdict;
+        }
+    }
 
     if let CaptureEvent::Key { code, action } = captured {
         if !grabbed {
@@ -438,6 +455,16 @@ unsafe extern "C-unwind" fn on_event(
         );
     }
     verdict
+}
+
+/// 此刻的毫秒数，起点是第一次调用。
+fn now_ms() -> u64 {
+    static ORIGIN: OnceLock<Instant> = OnceLock::new();
+    ORIGIN.get_or_init(Instant::now).elapsed().as_millis() as u64
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// 把事件交给 sink，标明它是否被抓取吞掉了。panic 不能穿过系统框架，这里截住。

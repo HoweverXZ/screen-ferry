@@ -575,6 +575,23 @@ void main() {
     expect(state.cursorPeer?.name, '办公室 PC');
   });
 
+  testWidgets('光标切到另一台电脑时，界面把光标设成隐藏；回来后恢复', (tester) async {
+    final backend = DemoBackend(animate: false);
+    final state = await launch(tester, const Size(1160, 780), backend: backend);
+    final (office, _, _) = await openLayout(tester, state);
+    Finder hiding() => find.byWidgetPredicate((w) => w is MouseRegion && w.cursor == SystemMouseCursors.none);
+    expect(hiding(), findsNothing);
+
+    backend.cursor = office;
+    await settle(tester);
+    expect(state.cursorOnPeer, isTrue);
+    expect(hiding(), findsOneWidget);
+
+    backend.cursor = null;
+    await settle(tester);
+    expect(hiding(), findsNothing);
+  });
+
   testWidgets('只有一台设备时说明它在哪一侧，没有设备时提示去配对', (tester) async {
     final state = await launch(tester, const Size(1160, 780));
     final (_, study, notebook) = await openLayout(tester, state);

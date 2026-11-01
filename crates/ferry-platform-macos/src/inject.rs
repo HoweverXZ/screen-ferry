@@ -13,7 +13,7 @@
 //! 光标在对方屏幕上时隐藏本机光标（见 [`cursor`]）。
 
 mod caps_lock;
-mod cursor;
+pub(crate) mod cursor;
 
 use std::time::{Duration, Instant};
 
@@ -329,7 +329,11 @@ impl InputInject for MacInject {
 
     fn set_cursor_hidden(&mut self, hidden: bool) -> Result<()> {
         if hidden {
-            self.cursor.hide();
+            // 藏的时候光标被挪到了中央；之后的点击、拖动从那里算起。
+            let park = cursor::park_point();
+            if self.cursor.hide(park, true) {
+                self.at = point(park);
+            }
         } else {
             self.cursor.show();
         }

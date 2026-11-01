@@ -1,21 +1,26 @@
 //! 把本机光标藏起来：光标停在一个 1×1 的窗口上，这个窗口的光标是全透明的，于是看不见。
 //! 本机用户一动鼠标，光标离开这一个像素就会重新出现，不需要额外处理。
 //!
+//! 藏着的时候每隔一会儿看一眼：光标还停在那里、却不在这个窗口上（别的置顶窗口后来盖了上来），
+//! 就把窗口重新放到最上面、再把光标放回去，让它重新用透明的光标。
+//!
 //! 窗口要有消息循环才能设置光标形状，所以它跑在自己的线程上。藏起和收起都同步等它做完：
 //! 调用方紧接着注入的移动必须排在后面，否则光标刚移到入口，又被挪回屏幕中央。
 
+use std::cell::Cell;
 use std::sync::mpsc;
 use std::thread;
 
 use ferry_platform::{Error, Result};
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateCursor, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW,
-    GetSystemMetrics, HWND_TOPMOST, MSG, PostMessageW, PostQuitMessage, RegisterClassW,
-    SM_CXCURSOR, SM_CXSCREEN, SM_CYCURSOR, SM_CYSCREEN, SMTO_ABORTIFHUNG, SW_HIDE, SWP_NOACTIVATE,
-    SWP_SHOWWINDOW, SendMessageTimeoutW, SetCursorPos, SetWindowPos, ShowWindow, TranslateMessage,
-    WM_APP, WM_DESTROY, WNDCLASSW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    CreateCursor, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetCursorPos,
+    GetMessageW, GetSystemMetrics, HWND_TOPMOST, KillTimer, MSG, PostMessageW, PostQuitMessage,
+    RegisterClassW, SM_CXCURSOR, SM_CXSCREEN, SM_CYCURSOR, SM_CYSCREEN, SMTO_ABORTIFHUNG, SW_HIDE,
+    SWP_NOACTIVATE, SWP_SHOWWINDOW, SendMessageTimeoutW, SetCursorPos, SetTimer, SetWindowPos,
+    ShowWindow, TranslateMessage, WM_APP, WM_DESTROY, WM_TIMER, WNDCLASSW, WS_EX_NOACTIVATE,
+    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WindowFromPoint,
 };
 use windows::core::w;
 
@@ -27,6 +32,14 @@ const WM_SHOW_CURSOR: u32 = WM_APP + 11;
 const WM_STOP: u32 = WM_APP + 12;
 /// 等隐藏窗口处理完一条消息最多等这么久（毫秒）。正常情况下不到一毫秒。
 const SEND_TIMEOUT_MS: u32 = 200;
+/// 藏着的时候多久看一眼（毫秒）。
+const CHECK_MS: u32 = 250;
+const CHECK_TIMER: usize = 1;
+
+thread_local! {
+    /// 藏着的时候光标停在哪里；没藏时为 `None`。只在窗口所在的线程上读写。
+    static PARKED: Cell<Option<(i32, i32)>> = const { Cell::new(None) };
+}
 
 #[derive(Debug)]
 pub(crate) struct CursorHider {
@@ -174,20 +187,31 @@ unsafe extern "system" fn window_proc(
                     GetSystemMetrics(SM_CXSCREEN) / 2,
                     GetSystemMetrics(SM_CYSCREEN) / 2,
                 );
-                let _ = SetWindowPos(
-                    hwnd,
-                    Some(HWND_TOPMOST),
-                    x,
-                    y,
-                    1,
-                    1,
-                    SWP_NOACTIVATE | SWP_SHOWWINDOW,
-                );
-                let _ = SetCursorPos(x, y);
+                park(hwnd, x, y);
+                PARKED.with(|p| p.set(Some((x, y))));
+                SetTimer(Some(hwnd), CHECK_TIMER, CHECK_MS, None);
                 LRESULT(0)
             }
             WM_SHOW_CURSOR => {
+                PARKED.with(|p| p.set(None));
+                let _ = KillTimer(Some(hwnd), CHECK_TIMER);
                 let _ = ShowWindow(hwnd, SW_HIDE);
+                LRESULT(0)
+            }
+            WM_TIMER if wparam.0 == CHECK_TIMER => {
+                let Some((x, y)) = PARKED.with(Cell::get) else {
+                    let _ = KillTimer(Some(hwnd), CHECK_TIMER);
+                    return LRESULT(0);
+                };
+                let mut now = POINT::default();
+                if GetCursorPos(&mut now).is_ok() && (now.x, now.y) != (x, y) {
+                    // 光标被挪走了（多半是本机的人自己动了鼠标）：它本来就该出现，不再看着。
+                    PARKED.with(|p| p.set(None));
+                    let _ = KillTimer(Some(hwnd), CHECK_TIMER);
+                } else if WindowFromPoint(POINT { x, y }) != hwnd {
+                    // 别的置顶窗口盖了上来，光标用的是它的样子。
+                    park(hwnd, x, y);
+                }
                 LRESULT(0)
             }
             WM_STOP => {
@@ -200,6 +224,27 @@ unsafe extern "system" fn window_proc(
             }
             _ => DefWindowProcW(hwnd, msg, wparam, lparam),
         }
+    }
+}
+
+/// 把窗口放到最上面的 (x, y)，光标移上去。移动光标会让窗口收到 WM_SETCURSOR，换成透明的光标。
+///
+/// # Safety
+///
+/// `hwnd` 必须是本线程创建的隐藏窗口。
+unsafe fn park(hwnd: HWND, x: i32, y: i32) {
+    // SAFETY: 调用方保证窗口有效且属于本线程。
+    unsafe {
+        let _ = SetWindowPos(
+            hwnd,
+            Some(HWND_TOPMOST),
+            x,
+            y,
+            1,
+            1,
+            SWP_NOACTIVATE | SWP_SHOWWINDOW,
+        );
+        let _ = SetCursorPos(x, y);
     }
 }
 

@@ -1,5 +1,5 @@
 //! 核心逻辑：屏幕布局、边缘切换、多台设备的布局与切换、会话状态机、按键状态跟踪、收到的文件名规则、边缘投递胶囊、
-//! 剪贴板格式转换。
+//! 剪贴板格式转换、挪动光标后位移的修正。
 //!
 //! 层级：L1。纯逻辑，无 IO、无异步。
 
@@ -13,9 +13,11 @@ mod key_remap;
 mod layout;
 mod neighbors;
 mod pressed;
+mod warp_jump;
 
 pub use edge_switch::{EdgeSwitch, Transition};
 pub use key_remap::KeyRemap;
 pub use layout::{Side, bounds};
 pub use neighbors::{Neighbors, Place};
 pub use pressed::Pressed;
+pub use warp_jump::WarpJump;

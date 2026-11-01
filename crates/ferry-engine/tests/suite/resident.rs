@@ -51,7 +51,7 @@ impl Host for MockHost {
         Ok(MockInject::new())
     }
     fn displays(&self) -> MockDisplays {
-        MockDisplays(vec![Display {
+        MockDisplays::new(vec![Display {
             id: DisplayId(1),
             bounds: Rect::new(0, 0, 1000, 800),
             scale_percent: 100,
@@ -250,7 +250,7 @@ async fn first_pairing_is_confirmed_in_the_ui() {
             events: Events::none(),
         },
         MockInject::new(),
-        MockDisplays(vec![Display {
+        MockDisplays::new(vec![Display {
             id: DisplayId(1),
             bounds: Rect::new(0, 0, 1920, 1080),
             scale_percent: 150,

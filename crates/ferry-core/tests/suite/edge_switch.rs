@@ -321,3 +321,28 @@ fn the_overshoot_is_scaled_between_the_two_sides() {
         "9 - 15：远端推出 6 → 本机 12"
     );
 }
+
+#[test]
+fn local_layout_change_moves_the_edges() {
+    let mut s = switch(Side::Right);
+    s.set_local(Rect::new(0, 0, 800, 600), 100);
+
+    assert_eq!(
+        s.local_motion(Point::new(798, 300), 1, 0),
+        None,
+        "还没到新的边缘"
+    );
+    assert_eq!(
+        enter(&mut s, Point::new(799, 300), 1, 0),
+        Point::new(1, 540),
+        "纵坐标按新的高度换算：300/600 → 540/1080"
+    );
+    assert_eq!(
+        s.leave(),
+        Some(Transition::Leave {
+            seq: 1,
+            local_at: Point::new(798, 300)
+        }),
+        "回来时落在新的范围内"
+    );
+}

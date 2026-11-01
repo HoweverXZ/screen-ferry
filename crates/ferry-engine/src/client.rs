@@ -31,7 +31,7 @@ use tracing::{debug, info, warn};
 use crate::clipboard::{self, ClipboardTask, SharedClipboard, Start};
 use crate::error::{Error, Result};
 use crate::events::{Event, Events, FoundServer};
-use crate::link::{CONNECT_TIMEOUT, HANDSHAKE_TIMEOUT, capabilities, send};
+use crate::link::{CONNECT_TIMEOUT, DISPLAY_CHECK, HANDSHAKE_TIMEOUT, capabilities, send};
 use crate::pairing::{self, ConfirmPairing, Outcome};
 
 /// 两次连接尝试之间的间隔。
@@ -319,7 +319,8 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                 }
                 Ok(result) => result?,
             };
-        send(&mut framed, &Message::Displays(displays.displays()?)).await?;
+        let mut screens = displays.displays()?;
+        send(&mut framed, &Message::Displays(screens.clone())).await?;
         info!(server = %welcome.name, fingerprint = %server, "已连接，等待光标进入");
         self.in_session = true;
         // 刚连上时光标在服务端屏幕上。
@@ -353,9 +354,23 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
         ping.set_missed_tick_behavior(MissedTickBehavior::Skip);
         let mut silence = interval(SILENCE_TIMEOUT / 4);
         silence.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        let mut screen_check = interval(DISPLAY_CHECK);
+        screen_check.set_missed_tick_behavior(MissedTickBehavior::Skip);
         loop {
             let message = tokio::select! {
                 message = framed.recv() => message?,
+                _ = screen_check.tick() => {
+                    // 改了分辨率、缩放或插拔显示器：告诉服务端，它按新的范围移动光标。
+                    // 查询偶尔失败（例如显示器正在切换）时等下一次。
+                    if let Ok(now) = displays.displays()
+                        && now != screens
+                    {
+                        info!("本机的显示器布局已更新，已告知服务端");
+                        send(&mut framed, &Message::Displays(now.clone())).await?;
+                        screens = now;
+                    }
+                    continue;
+                }
                 _ = ping.tick() => {
                     let nonce = epoch.elapsed().as_micros() as u64;
                     send(&mut framed, &Message::Ping { nonce }).await?;

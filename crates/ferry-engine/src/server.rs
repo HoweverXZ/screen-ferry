@@ -30,7 +30,7 @@ use crate::clipboard::{self, ClipboardTask, SharedClipboard, Start};
 use crate::error::{Error, Result};
 use crate::events::{Event, Events};
 use crate::heartbeat::{self, Heartbeat};
-use crate::link::{HANDSHAKE_TIMEOUT, capabilities, primary_scale, send};
+use crate::link::{DISPLAY_CHECK, HANDSHAKE_TIMEOUT, capabilities, primary_scale, send};
 use crate::pairing::{self, ConfirmPairing, Outcome};
 
 pub struct ServerConfig {
@@ -300,9 +300,9 @@ where
         while self.events.try_recv().is_ok() {}
         let id = welcome.session;
 
-        let local = self.displays.displays()?;
+        let mut local = self.displays.displays()?;
         send(&mut framed, &Message::Displays(local.clone())).await?;
-        let remote = timeout(HANDSHAKE_TIMEOUT, expect_displays(&mut framed))
+        let mut remote = timeout(HANDSHAKE_TIMEOUT, expect_displays(&mut framed))
             .await
             .map_err(|_| Error::Timeout("等待对方的显示器信息"))??;
 
@@ -330,6 +330,8 @@ where
         let mut heartbeat = Heartbeat::new();
         let mut tick = interval(heartbeat::TICK);
         tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        let mut screens = interval(DISPLAY_CHECK);
+        screens.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         loop {
             tokio::select! {
@@ -368,10 +370,14 @@ where
                         }
                     }
                     Some(Message::Ping { nonce }) => send(&mut framed, &Message::Pong { nonce }).await?,
-                    Some(Message::Displays(displays)) => self.update_remote(&local, &displays),
+                    Some(Message::Displays(displays)) => {
+                        remote = displays;
+                        self.update_remote(&local, &remote);
+                    }
                     Some(Message::Bye(_)) | None => return Ok(()),
                     Some(other) => debug!(?other, "忽略消息"),
                 },
+                _ = screens.tick() => self.refresh_local(&mut local, &remote, &mut framed).await?,
                 _ = tick.tick() => {
                     if heartbeat.timed_out() {
                         let _ = send(&mut framed, &Message::Bye(Bye { reason: ByeReason::TIMEOUT })).await;
@@ -568,6 +574,30 @@ where
 
     fn is_remote(&self) -> bool {
         self.switch.as_ref().is_some_and(EdgeSwitch::is_remote)
+    }
+
+    /// 本机的显示器布局变了：之后的进出按新的范围判断，并告诉对方。
+    async fn refresh_local(
+        &mut self,
+        local: &mut Vec<Display>,
+        remote: &[Display],
+        framed: &mut Framed<ServerStream>,
+    ) -> Result<()> {
+        // 查询偶尔失败（例如显示器正在切换）时等下一次。
+        let Ok(now) = self.displays.displays() else {
+            return Ok(());
+        };
+        if now == *local {
+            return Ok(());
+        }
+        let (Some(switch), Some(rect)) = (self.switch.as_mut(), bounds(&now)) else {
+            return Ok(());
+        };
+        switch.set_local(rect, relative_scale(&now, remote));
+        info!(local = ?rect, "本机的显示器布局已更新");
+        send(framed, &Message::Displays(now.clone())).await?;
+        *local = now;
+        Ok(())
     }
 
     fn update_remote(&mut self, local: &[Display], remote: &[Display]) {

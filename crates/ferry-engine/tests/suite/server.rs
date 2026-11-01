@@ -1,7 +1,7 @@
 use ferry_platform::CaptureEvent;
 use ferry_types::{InputEvent, KeyAction, KeyCode, MouseButton, Point};
 
-use crate::support::{EDGE, ENTRY, RETURN, Rig, eventually};
+use crate::support::{EDGE, ENTRY, RETURN, Rig, display, eventually};
 
 fn motion(x: i32, y: i32) -> InputEvent {
     InputEvent::PointerMotion {
@@ -121,6 +121,54 @@ async fn input_from_before_a_switch_is_not_replayed_after_it() {
     });
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     assert!(!rig.capture.is_grabbed(), "过时的移动没有让光标再切过去");
+}
+
+#[tokio::test]
+async fn a_client_display_change_mid_session_is_followed() {
+    let rig = Rig::start().await;
+    rig.enter().await;
+
+    // 客户端把分辨率改小：服务端随后按新的范围移动光标，右边缘从 1919 变成 1279。
+    rig.pc_displays.set(vec![display(1280, 720, 150)]);
+    eventually("服务端按新的范围移动光标", || {
+        rig.push(-10, 0);
+        rig.push(2000, 0);
+        matches!(
+            rig.inject.events().last(),
+            Some(InputEvent::PointerMotion { position }) if position.x == 1279
+        )
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn a_server_display_change_mid_session_is_followed() {
+    let rig = Rig::start().await;
+    // 先完整进出一次，确认会话已经在进行。
+    rig.enter().await;
+    rig.leave().await;
+
+    // 服务端把分辨率改小：右边缘从 999 变成 799。
+    rig.mac_displays.set(vec![display(800, 600, 100)]);
+    eventually("从新的右边缘进入", || {
+        if rig.capture.is_grabbed() {
+            return true;
+        }
+        rig.capture.emit(CaptureEvent::Pointer {
+            position: Point::new(799, 300),
+            dx: 1,
+            dy: 0,
+        });
+        false
+    })
+    .await;
+
+    rig.leave().await;
+    let landed = rig.capture.last_release().expect("回到本机时放好了光标");
+    assert!(
+        landed.x < 800 && landed.y < 600,
+        "落在新的范围内：{landed:?}"
+    );
 }
 
 fn key(code: KeyCode, action: KeyAction) -> InputEvent {

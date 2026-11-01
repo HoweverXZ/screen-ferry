@@ -65,6 +65,12 @@ impl EdgeSwitch {
         self.remote_at
     }
 
+    /// 本机的显示器布局变了（改分辨率、插拔显示器）。之后的进出都按新的范围判断。
+    pub fn set_local(&mut self, local: Rect, scale_percent: u16) {
+        self.local = local;
+        self.scale_percent = i64::from(scale_percent);
+    }
+
     /// 远端的显示器布局变了。光标在远端时会被收进新的范围内。
     pub fn set_remote(&mut self, remote: Rect, scale_percent: u16) {
         self.remote = remote;

@@ -5,6 +5,12 @@
 //! - 本机光标隐藏起来，免得对方屏幕上的光标在动、本机屏幕边缘还停着一个；
 //! - 事件被吞掉，本机程序收不到。
 //!
+//! 结束抓取时先把光标放到回来的位置，再交还本机。系统默认在程序移动光标之后把真实鼠标
+//! 压住 0.25 秒，回来时就会顿一下，所以开始捕获时把这段压制关掉。
+//!
+//! 光标在本机时，移动事件报告的是此刻的光标位置，而不是事件里记下的位置：事件可能排了一会儿队，
+//! 刚交还控制时排在前面的事件还带着抓取期间那个被固定的位置。
+//!
 //! 键盘：光标在本机时只记录哪些键按着，不交给 sink；抓取期间转交 sink 并吞掉。
 //! 抓取前就按着的键，之后的连发和松开仍交给本机，免得本机以为它一直按着。
 //!
@@ -28,9 +34,9 @@ use objc2_core_foundation::{
 };
 use objc2_core_graphics::{
     CGAssociateMouseAndMouseCursorPosition, CGDisplayHideCursor, CGDisplayShowCursor, CGEvent,
-    CGEventField, CGEventFlags, CGEventSource, CGEventSourceStateID, CGEventTapLocation,
-    CGEventTapOptions, CGEventTapPlacement, CGEventTapProxy, CGEventType, CGMainDisplayID,
-    CGWarpMouseCursorPosition,
+    CGEventField, CGEventFilterMask, CGEventFlags, CGEventSource, CGEventSourceStateID,
+    CGEventSuppressionState, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
+    CGEventTapProxy, CGEventType, CGMainDisplayID, CGWarpMouseCursorPosition,
 };
 use objc2_foundation::NSString;
 
@@ -102,6 +108,31 @@ fn allow_cursor_control_in_background() {
     });
 }
 
+/// 关掉系统在移动光标之后对真实键鼠的压制。
+///
+/// 程序移动光标（warp）或发出合成事件后，系统默认在 0.25 秒内忽略本机的鼠标和键盘。
+/// 光标从对方屏幕回来时要先放到落点，这一压就是用户手上明显的一顿。这里把压制时长设为 0，
+/// 并且即使处于压制期也照常放行本机键鼠。两个接口被标为过时，但仍然有效，
+/// 而且没有别的接口能管到 warp 之后的这段压制。设置作用于整个进程，重复调用没有副作用。
+#[allow(deprecated)]
+fn disable_local_suppression() {
+    use objc2_core_graphics::{
+        CGSetLocalEventsFilterDuringSuppressionState, CGSetLocalEventsSuppressionInterval,
+    };
+    let _ = CGSetLocalEventsSuppressionInterval(0.0);
+    let _ = CGSetLocalEventsFilterDuringSuppressionState(
+        CGEventFilterMask::all(),
+        CGEventSuppressionState::EventSuppressionStateSuppressionInterval,
+    );
+}
+
+/// 此刻的光标位置。
+fn live_cursor() -> Option<Point> {
+    let probe = CGEvent::new(None)?;
+    let p = CGEvent::location(Some(&probe));
+    Some(Point::new(p.x.floor() as i32, p.y.floor() as i32))
+}
+
 pub struct MacCapture {
     grabbed: Arc<AtomicBool>,
     /// 本机光标是否被隐藏。隐藏与显示由系统计数，必须一一对应，所以记下来。
@@ -169,6 +200,7 @@ impl InputCapture for MacCapture {
                 detail: "已经在捕获".into(),
             });
         }
+        disable_local_suppression();
         let grabbed = Arc::clone(&self.grabbed);
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = Arc::clone(&stop);
@@ -216,10 +248,11 @@ impl InputCapture for MacCapture {
     }
 
     fn release(&self, at: Point) -> Result<()> {
+        // 每次都再设一遍：开始捕获之后，别处的代码也可能改动它。
+        disable_local_suppression();
         let to = CGPoint::new(f64::from(at.x), f64::from(at.y));
         let warped = check(CGWarpMouseCursorPosition(to), "CGWarpMouseCursorPosition");
         // 无论光标是否移动成功都要重新关联，否则本机鼠标会一直失灵。
-        // 紧跟在 warp 之后关联，还能避免系统让光标停顿约 0.25 秒。
         let associated = check(
             CGAssociateMouseAndMouseCursorPosition(true),
             "CGAssociateMouseAndMouseCursorPosition",
@@ -342,7 +375,8 @@ unsafe extern "C-unwind" fn on_event(
         return event.as_ptr();
     }
 
-    let grabbed = state.grabbed.load(Ordering::Relaxed);
+    // 与 `release` 中的写入配对：读到未抓取时，光标一定已经放到了回来的位置。
+    let grabbed = state.grabbed.load(Ordering::SeqCst);
     // 抓取期间吞掉事件，否则交给本机。
     let verdict = if grabbed {
         ptr::null_mut()
@@ -350,7 +384,7 @@ unsafe extern "C-unwind" fn on_event(
         event.as_ptr()
     };
     // SAFETY: 系统保证回调期间事件有效。
-    let Some(captured) = translate(ty, unsafe { event.as_ref() }) else {
+    let Some(mut captured) = translate(ty, unsafe { event.as_ref() }) else {
         // 不认识的系统事件（亮度、电源键等）始终交给本机，不能吞掉。
         return if ty == SYSTEM_DEFINED {
             event.as_ptr()
@@ -358,6 +392,13 @@ unsafe extern "C-unwind" fn on_event(
             verdict
         };
     };
+    if let CaptureEvent::Pointer { position, .. } = &mut captured
+        && !grabbed
+        && let Some(live) = live_cursor()
+    {
+        // 判断是否撞到边缘要用光标此刻的位置；查询一次约 1 微秒。
+        *position = live;
+    }
 
     if let CaptureEvent::Key { code, action } = captured {
         if !grabbed {

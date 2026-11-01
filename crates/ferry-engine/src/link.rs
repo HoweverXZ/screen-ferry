@@ -25,6 +25,10 @@ pub(crate) fn capabilities(clipboard: bool) -> Capabilities {
 pub(crate) const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 pub(crate) const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// 会话期间每隔这么久检查一次本机的显示器布局（改分辨率、缩放、插拔显示器），变了就告诉对方。
+/// 查询一次只要几微秒。
+pub(crate) const DISPLAY_CHECK: Duration = Duration::from_secs(1);
+
 /// 单条消息的发送上限。对方卡死时不至于把本机一起卡住。
 const SEND_TIMEOUT: Duration = Duration::from_millis(500);
 

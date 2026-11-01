@@ -110,6 +110,9 @@ pub struct Rig {
     pub addr: SocketAddr,
     pub capture: MockCapture,
     pub inject: MockInject,
+    /// 两端的显示器，可以中途修改。
+    pub mac_displays: MockDisplays,
+    pub pc_displays: MockDisplays,
     /// 服务端（Mac）。
     pub mac: Device,
     /// 客户端（PC）。
@@ -123,7 +126,7 @@ pub struct Rig {
     pub client: JoinHandle<Error>,
 }
 
-fn display(width: u32, height: u32, scale_percent: u16) -> Display {
+pub fn display(width: u32, height: u32, scale_percent: u16) -> Display {
     Display {
         id: DisplayId(1),
         bounds: Rect::new(0, 0, width, height),
@@ -161,9 +164,12 @@ impl Rig {
         let addr = listener.local_addr().unwrap();
         let capture = MockCapture::new();
         let inject = MockInject::new();
+        let mac_displays = MockDisplays::new(vec![display(1000, 800, 100)]);
+        let pc_displays = MockDisplays::new(vec![display(1920, 1080, 150)]);
 
         let server = tokio::spawn({
             let capture = capture.clone();
+            let displays = mac_displays.clone();
             let clipboard = setup.mac_clipboard.clone();
             let confirm = setup.mac_confirm.clone();
             let config = ServerConfig {
@@ -181,7 +187,6 @@ impl Rig {
                 events: setup.mac_events.clone(),
             };
             async move {
-                let displays = MockDisplays(vec![display(1000, 800, 100)]);
                 match serve(listener, config, capture, displays, clipboard, confirm).await {
                     Ok(never) => match never {},
                     Err(e) => e,
@@ -189,7 +194,7 @@ impl Rig {
             }
         });
         let client = if setup.start_client {
-            Self::spawn_client(&setup, addr, inject.clone())
+            Self::spawn_client(&setup, addr, inject.clone(), pc_displays.clone())
         } else {
             tokio::spawn(std::future::pending())
         };
@@ -197,6 +202,8 @@ impl Rig {
             addr,
             capture,
             inject,
+            mac_displays,
+            pc_displays,
             mac: setup.mac,
             pc: setup.pc,
             mac_clipboard: setup.mac_clipboard,
@@ -208,7 +215,12 @@ impl Rig {
         }
     }
 
-    fn spawn_client(setup: &Setup, addr: SocketAddr, inject: MockInject) -> JoinHandle<Error> {
+    fn spawn_client(
+        setup: &Setup,
+        addr: SocketAddr,
+        inject: MockInject,
+        displays: MockDisplays,
+    ) -> JoinHandle<Error> {
         let clipboard = setup.pc_clipboard.clone();
         let confirm = setup.pc_confirm.clone();
         let config = ClientConfig {
@@ -223,7 +235,6 @@ impl Rig {
             events: setup.pc_events.clone(),
         };
         tokio::spawn(async move {
-            let displays = MockDisplays(vec![display(1920, 1080, 150)]);
             match connect(config, inject, displays, clipboard, confirm).await {
                 Ok(never) => match never {},
                 Err(e) => e,

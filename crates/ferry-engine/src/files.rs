@@ -21,7 +21,7 @@ use ferry_net::{ClientStream, Framed};
 use ferry_proto::{CancelReason, FileCancel, FileOffer, Message};
 use ferry_store::Store;
 use ferry_trust::Fingerprint;
-use ferry_types::TransferId;
+use ferry_types::{TransferId, mark};
 use ring::rand::{SecureRandom, SystemRandom};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
@@ -197,7 +197,7 @@ impl Files {
             );
         }
         info!(
-            name = %plan.name,
+            name = %mark::file(&plan.name),
             files = plan.files,
             bytes = plan.bytes,
             "准备发送文件"
@@ -249,7 +249,7 @@ impl Files {
             (generation, resumed)
         };
         for plan in resumed {
-            info!(name = %plan.name, "重新连上，接着发送");
+            info!(name = %mark::file(&plan.name), "重新连上，接着发送");
             let _ = tx.send(Message::FileOffer(plan.offer()));
             self.emit(JobKind::Send(plan).update(peer, 0, TransferState::Waiting));
         }
@@ -331,7 +331,7 @@ impl Files {
             );
             found
         };
-        info!(name = %offer.name, files = offer.files, bytes = offer.bytes, "对方发来文件，开始接收");
+        info!(name = %mark::file(&offer.name), files = offer.files, bytes = offer.bytes, "对方发来文件，开始接收");
         self.emit(JobKind::Receive(offer).update(peer, 0, TransferState::Waiting));
         let _ = tx.send(Message::FileAccept { id });
         if let Some(opener) = opener {
@@ -434,7 +434,7 @@ impl Files {
                     JobKind::Receive(offer) => offer.bytes,
                 };
                 match saved.first() {
-                    Some(first) => info!(at = %first.display(), "文件收好了"),
+                    Some(first) => info!(at = %mark::path(first), "文件收好了"),
                     None => info!("文件发送完成"),
                 }
                 self.emit(

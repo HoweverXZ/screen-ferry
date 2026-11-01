@@ -97,6 +97,10 @@ class DemoBackend implements Backend {
   final _found = <FoundDevice>[];
   final _hours = List.filled(24, 0);
   final _log = <LogEntry>[];
+
+  /// 详细记录从什么时候开着。
+  DateTime? _verboseSince;
+
   DaemonSettings _settings = const DaemonSettings(
     name: '',
     side: ScreenSide.right,
@@ -215,6 +219,33 @@ class DemoBackend implements Backend {
         emit(DialedNotice(address: address, invite: true, error: _demoDial(address)));
       case QuitRequest():
         emit(const QuitNotice());
+      // 演示：运行日志第一次给一段，之后没有新的。
+      case ReadRunLogRequest(:final since):
+        emit(
+          RunLogNotice(
+            lines: since == null ? _demoRunLog() : const [],
+            next: 2097152,
+            fresh: since == null,
+            bytes: 2097152,
+            linesTotal: 18241,
+          ),
+        );
+      case ExportDiagnosticsRequest():
+        emit(
+          DiagnosticsExportedNotice(
+            path: platform == 'macos'
+                ? '/Users/me/Downloads/ScreenFerry-诊断-20261102-0624.txt'
+                : r'C:\Users\me\Downloads\ScreenFerry-诊断-20261102-0624.txt',
+            bytes: 421888,
+          ),
+        );
+      case CopyDiagnosticsRequest():
+        emit(const DiagnosticsSummaryNotice('ScreenFerry 诊断摘要\n\n版本  0.1.0\n'));
+      case SetVerboseRequest(:final on):
+        _verboseSince = on ? DateTime.now() : null;
+        _emitState();
+      case RevealDiagnosticsRequest() || OpenLogsFolderRequest():
+        break;
       case OpenPeerSettingsRequest(:final fingerprint):
         emit(ToastNotice('已在 ${_nameOf(fingerprint)} 上打开设置，把光标移过去就能改'));
       case ForgetRequest(:final fingerprint):
@@ -364,6 +395,8 @@ class DemoBackend implements Backend {
         naturalScrolling: platform == 'macos' ? true : null,
         addresses: role == Role.server ? const ['192.168.2.12'] : const ['192.168.2.18'],
         invitePort: role == Role.server ? null : 24811,
+        system: platform == 'macos' ? 'macOS 15.6 · arm64' : 'Windows 11（10.0.26100.4652）· x64',
+        verboseSince: _verboseSince,
       ),
       sharing: _sharing,
       problem: _problem,
@@ -481,4 +514,21 @@ class DemoBackend implements Backend {
     ScreenSide.top => '上方',
     ScreenSide.bottom => '下方',
   };
+
+  static List<RunLogLine> _demoRunLog() => const [
+    RunLogLine(at: '06:12:03', level: RunLogLevel.info, text: 'ScreenFerry 0.1.0 已启动 · Mac Studio · 键鼠在本机'),
+    RunLogLine(at: '06:12:03', level: RunLogLevel.info, text: '等待客户端连接 addr=0.0.0.0:24810'),
+    RunLogLine(at: '06:12:04', level: RunLogLevel.info, text: '客户端已连接 peer=办公室 PC'),
+    RunLogLine(at: '06:12:04', level: RunLogLevel.info, text: '已连接 办公室 PC TLS 1.3 · 192.168.2.18'),
+    RunLogLine(at: '06:15:21', level: RunLogLevel.info, text: '光标切到 办公室 PC 从本机右侧边缘'),
+    RunLogLine(at: '06:15:40', level: RunLogLevel.info, text: '剪贴板同步到 办公室 PC 文本 · 31 字'),
+    RunLogLine(
+      at: '06:16:00',
+      level: RunLogLevel.info,
+      text: '往返延迟（过去 1 分钟 590 次）：最小 0.21 ms · 平均 0.32 ms · 最大 0.61 ms',
+    ),
+    RunLogLine(at: '06:20:02', level: RunLogLevel.warn, text: '连接中断：网络错误 · Connection reset by peer'),
+    RunLogLine(at: '06:20:04', level: RunLogLevel.error, text: '心跳超时：对方长时间没有响应'),
+    RunLogLine(at: '06:20:06', level: RunLogLevel.info, text: '已连接 办公室 PC TLS 1.3 · 192.168.2.18'),
+  ];
 }

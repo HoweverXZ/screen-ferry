@@ -7,4 +7,5 @@ mod config;
 mod device;
 mod geometry;
 mod key;
+mod mark;
 mod pointer;

@@ -45,6 +45,9 @@ void main() {
       ShowDeviceNotice,
       DialedNotice,
       QuitNotice,
+      RunLogNotice,
+      DiagnosticsExportedNotice,
+      DiagnosticsSummaryNotice,
     });
   });
 
@@ -63,6 +66,8 @@ void main() {
     expect(s.local.naturalScrolling, isTrue);
     expect(s.local.addresses, ['192.168.2.12', '10.8.0.3']);
     expect(s.local.invitePort, isNull, reason: '控制端不等邀请');
+    expect(s.local.system, 'macOS 15.6 · arm64');
+    expect(s.local.verboseSince, DateTime.fromMillisecondsSinceEpoch(1793480000000));
     expect(s.sharing, isTrue);
     expect(s.problem, isNull);
     expect(s.link.status, LinkStatus.connected);
@@ -141,6 +146,14 @@ void main() {
     expect(dialed.first.error, isNull);
     expect(dialed.last.invite, isTrue);
     expect(dialed.last.error, DialError.notScreenFerry);
+    final runLog = decoded.whereType<RunLogNotice>().single;
+    expect(runLog.fresh, isTrue);
+    expect(runLog.next, 204800);
+    expect(runLog.linesTotal, 18241);
+    expect(runLog.lines.first.at, '06:12:04');
+    expect(runLog.lines.last.level, RunLogLevel.warn);
+    expect(decoded.whereType<DiagnosticsExportedNotice>().single.bytes, 421888);
+    expect(decoded.whereType<DiagnosticsSummaryNotice>().single.text, startsWith('ScreenFerry 诊断摘要'));
   });
 
   test('Dart 编码的命令与样例一致', () {
@@ -190,6 +203,13 @@ void main() {
       const SendFilesRequest(['/Users/me/Desktop/证书.p12', '/Users/me/Desktop/设计稿']),
       const SendFilesRequest(['/Users/me/Desktop/证书.p12'], to: pc),
       const QuitRequest(),
+      const ReadRunLogRequest(),
+      const ReadRunLogRequest(since: 204800),
+      const ExportDiagnosticsRequest(),
+      const CopyDiagnosticsRequest(),
+      const RevealDiagnosticsRequest(),
+      const OpenLogsFolderRequest(),
+      const SetVerboseRequest(true),
     ];
     expect(ours, hasLength(requests.length));
     for (var i = 0; i < ours.length; i++) {

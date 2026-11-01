@@ -1,6 +1,7 @@
 //! 全项目共用的领域类型。
 //!
-//! 设备与屏幕 ID、HID 键码、输入事件、几何、配置结构（含每台设备的单独设置）、文件传输编号、浮层的绘制描述。
+//! 设备与屏幕 ID、HID 键码、输入事件、几何、配置结构（含每台设备的单独设置）、文件传输编号、浮层的绘制描述，
+//! 以及运行日志里敏感内容的标记（[`mark`]）。
 //!
 //! 层级：L0。不依赖任何其他 ferry crate。
 
@@ -13,6 +14,7 @@ mod display;
 mod geometry;
 mod input;
 mod key;
+pub mod mark;
 mod pointer;
 mod scene;
 mod transfer;

@@ -118,6 +118,8 @@ class Local {
     this.naturalScrolling,
     this.addresses = const [],
     this.invitePort,
+    this.system = '',
+    this.verboseSince,
   });
 
   factory Local.fromJson(Json j) => Local(
@@ -135,6 +137,8 @@ class Local {
         if (a is String) a,
     ],
     invitePort: j['invite_port'] is num ? _int(j['invite_port']) : null,
+    system: _str(j['system']),
+    verboseSince: j['verbose_since'] is num ? DateTime.fromMillisecondsSinceEpoch(_int(j['verbose_since'])) : null,
   );
 
   final String name;
@@ -158,6 +162,12 @@ class Local {
 
   /// 客户端：等待邀请的端口；服务端为 null。
   final int? invitePort;
+
+  /// 本机系统和版本，例如“macOS 15.6 · arm64”。旧版后台不报，为空。
+  final String system;
+
+  /// 详细记录从什么时候开着；关着时为 null。
+  final DateTime? verboseSince;
 }
 
 class Problem {
@@ -808,6 +818,15 @@ sealed class Notice {
       error: _enumOrNull(DialError.values, _camel(j['error'])),
     ),
     'quit' => const QuitNotice(),
+    'run_log' => RunLogNotice(
+      lines: [for (final l in _list(j['lines'])) RunLogLine.fromJson(l)],
+      next: _int(j['next']),
+      fresh: _bool(j['fresh']),
+      bytes: _int(j['bytes']),
+      linesTotal: _int(j['lines_total']),
+    ),
+    'diagnostics_exported' => DiagnosticsExportedNotice(path: _str(j['path']), bytes: _int(j['bytes'])),
+    'diagnostics_summary' => DiagnosticsSummaryNotice(_str(j['text'])),
     _ => null,
   };
 }
@@ -867,6 +886,54 @@ class DialedNotice extends Notice {
 /// 后台要退出了（托盘里的“退出”或 `quit` 命令），界面随之关闭。
 class QuitNotice extends Notice {
   const QuitNotice();
+}
+
+/// 运行日志的一段。[fresh] 为真时整个替换（第一次读，或者日志换了一卷），否则接在后面。
+/// [next] 是下次读的位置；[bytes]、[linesTotal] 是当前这卷的大小和行数。
+class RunLogNotice extends Notice {
+  const RunLogNotice({
+    required this.lines,
+    required this.next,
+    required this.fresh,
+    required this.bytes,
+    required this.linesTotal,
+  });
+  final List<RunLogLine> lines;
+  final int next;
+  final bool fresh;
+  final int bytes;
+  final int linesTotal;
+}
+
+/// 诊断文件存好了：完整路径和大小。
+class DiagnosticsExportedNotice extends Notice {
+  const DiagnosticsExportedNotice({required this.path, required this.bytes});
+  final String path;
+  final int bytes;
+}
+
+/// 诊断摘要，复制到剪贴板。
+class DiagnosticsSummaryNotice extends Notice {
+  const DiagnosticsSummaryNotice(this.text);
+  final String text;
+}
+
+enum RunLogLevel { debug, info, warn, error }
+
+/// 运行日志的一行。
+class RunLogLine {
+  const RunLogLine({required this.at, required this.level, required this.text});
+
+  factory RunLogLine.fromJson(Json j) => RunLogLine(
+    at: _str(j['at']),
+    level: _enum(RunLogLevel.values, j['level'], RunLogLevel.info),
+    text: _str(j['text']),
+  );
+
+  /// 本机时间 `HH:MM:SS`；旧格式的行没有时间，为空。
+  final String at;
+  final RunLogLevel level;
+  final String text;
 }
 
 // ── 界面 → 后台 ──────────────────────────────
@@ -1001,6 +1068,56 @@ class QuitRequest extends Request {
 
   @override
   Json toJson() => {'type': 'quit'};
+}
+
+/// 读运行日志：[since] 为空时取最近的一段，否则取上次 [RunLogNotice.next] 之后新写的。
+class ReadRunLogRequest extends Request {
+  const ReadRunLogRequest({this.since});
+  final int? since;
+
+  @override
+  Json toJson() => {'type': 'read_run_log', 'since': ?since};
+}
+
+/// 把诊断文件存到“下载”文件夹。
+class ExportDiagnosticsRequest extends Request {
+  const ExportDiagnosticsRequest();
+
+  @override
+  Json toJson() => {'type': 'export_diagnostics'};
+}
+
+/// 取诊断摘要（版本、系统和最近 200 行运行日志）。
+class CopyDiagnosticsRequest extends Request {
+  const CopyDiagnosticsRequest();
+
+  @override
+  Json toJson() => {'type': 'copy_diagnostics'};
+}
+
+/// 在访达或资源管理器里显示最近导出的诊断文件。
+class RevealDiagnosticsRequest extends Request {
+  const RevealDiagnosticsRequest();
+
+  @override
+  Json toJson() => {'type': 'reveal_diagnostics'};
+}
+
+/// 打开运行日志所在的文件夹。
+class OpenLogsFolderRequest extends Request {
+  const OpenLogsFolderRequest();
+
+  @override
+  Json toJson() => {'type': 'open_logs_folder'};
+}
+
+/// 打开或关闭详细记录。
+class SetVerboseRequest extends Request {
+  const SetVerboseRequest(this.on);
+  final bool on;
+
+  @override
+  Json toJson() => {'type': 'set_verbose', 'on': on};
 }
 
 /// 要修改的设置；为 null 的字段不变，也不会发出去。

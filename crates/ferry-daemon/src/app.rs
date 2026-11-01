@@ -1,7 +1,6 @@
 //! 应用主流程：按平台选择实现，启动引擎。
 
 use std::convert::Infallible;
-use std::io::IsTerminal;
 use std::net::SocketAddr;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -17,9 +16,6 @@ use crate::cli::{Mode, Options, Parsed};
 use crate::pairing::TerminalConfirm;
 
 type AppResult = Result<Infallible, Box<dyn std::error::Error>>;
-
-/// 日志文件超过这个大小时，启动时把它改名为 `.1` 重新开始。
-const LOG_LIMIT: u64 = 2 * 1024 * 1024;
 
 /// `serve`、`connect` 在自己开的控制台窗口里运行（Windows，见 [`init_output`]）。
 static OWN_CONSOLE: AtomicBool = AtomicBool::new(false);
@@ -48,58 +44,8 @@ pub(crate) fn init_output(parsed: &Result<Parsed, String>) {
         }
     }
     if let Ok(Parsed::Run(options)) = parsed {
-        init_logging(options);
+        crate::logging::init(options);
     }
-}
-
-/// 常驻运行时总是写日志文件（缓存目录的 `logs/`），从终端运行时同时写到终端
-/// （Windows 上常驻运行不接终端）；其他命令只写到终端。
-fn init_logging(options: &Options) {
-    use tracing_subscriber::fmt::writer::MakeWriterExt;
-
-    let level = if options.verbose {
-        tracing::Level::DEBUG
-    } else {
-        tracing::Level::INFO
-    };
-    let builder = tracing_subscriber::fmt()
-        .with_max_level(level)
-        .with_target(false)
-        .with_timer(tracing_subscriber::fmt::time::uptime());
-    let terminal = std::io::stderr().is_terminal();
-    // Windows 的控制台窗口不一定认颜色控制码，不加颜色。
-    let ansi = terminal && !cfg!(target_os = "windows");
-    let file = matches!(options.mode, Mode::Resident { .. })
-        .then(|| log_file(options))
-        .flatten()
-        .map(std::sync::Mutex::new);
-    match file {
-        Some(file) if terminal => builder
-            .with_ansi(false)
-            .with_writer(file.and(std::io::stderr))
-            .init(),
-        Some(file) => builder.with_ansi(false).with_writer(file).init(),
-        None => builder.with_ansi(ansi).with_writer(std::io::stderr).init(),
-    }
-}
-
-fn log_file(options: &Options) -> Option<std::fs::File> {
-    let store = match &options.data_dir {
-        Some(dir) => Store::open(dir),
-        None => Store::open_default(),
-    }
-    .ok()?;
-    let dir = store.logs_dir();
-    std::fs::create_dir_all(&dir).ok()?;
-    let path = dir.join("screenferry.log");
-    if std::fs::metadata(&path).is_ok_and(|m| m.len() > LOG_LIMIT) {
-        let _ = std::fs::rename(&path, dir.join("screenferry.log.1"));
-    }
-    std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .ok()
 }
 
 pub(crate) fn run(options: Options) -> ExitCode {

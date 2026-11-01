@@ -59,6 +59,17 @@ pub fn default_downloads_dir() -> Result<PathBuf> {
     }
 }
 
+/// 当前用户的主目录（macOS 的 `HOME`，Windows 的 `USERPROFILE`）。导出诊断文件时换成 `~`，
+/// 免得把用户名带出去。
+pub fn home_dir() -> Option<PathBuf> {
+    let name = if env::consts::OS == "windows" {
+        "USERPROFILE"
+    } else {
+        "HOME"
+    };
+    var_dir(name).ok()
+}
+
 fn var_dir(name: &'static str) -> Result<PathBuf> {
     env::var_os(name)
         .filter(|v| !v.is_empty())

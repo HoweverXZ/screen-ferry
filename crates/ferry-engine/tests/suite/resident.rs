@@ -1,7 +1,8 @@
 //! 常驻运行：用真实的本机通信当“设置界面”，平台换成 mock。
 
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use ferry_engine::resident::{self, Command, Host};
@@ -26,6 +27,9 @@ struct MockHost {
     autostart: Arc<AtomicBool>,
     settings_opened: Arc<AtomicU32>,
     capture: MockCapture,
+    verbose: Arc<AtomicBool>,
+    /// 在访达里显示过的文件、打开过的文件夹，按先后。
+    shown: Arc<Mutex<Vec<PathBuf>>>,
 }
 
 impl Host for MockHost {
@@ -82,6 +86,18 @@ impl Host for MockHost {
     }
     fn invite_port(&self) -> u16 {
         0
+    }
+    fn system(&self) -> String {
+        "测试系统 1.0".into()
+    }
+    fn set_verbose(&self, on: bool) {
+        self.verbose.store(on, Ordering::SeqCst);
+    }
+    fn reveal(&self, path: &Path) {
+        self.shown.lock().unwrap().push(path.to_owned());
+    }
+    fn open_folder(&self, path: &Path) {
+        self.shown.lock().unwrap().push(path.to_owned());
     }
 }
 
@@ -567,5 +583,168 @@ async fn switching_the_role_restarts_as_the_other_side() {
         s.local.role == Role::Server && s.local.port.is_some()
     })
     .await;
+    daemon.task.abort();
+}
+
+// ── 运行日志与诊断文件 ─────────────────────────
+
+/// 往运行日志里写几行：现在的格式，带标记的设备名、文件名和用户目录。
+fn write_log(daemon: &Daemon, lines: &[String]) {
+    let path = daemon.device.store.log_file();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let mut text = std::fs::read_to_string(&path).unwrap_or_default();
+    for line in lines {
+        text.push_str(line);
+        text.push('\n');
+    }
+    std::fs::write(&path, text).unwrap();
+}
+
+fn run_log(n: &Notice) -> Option<(Vec<ferry_ipc::RunLogLine>, u64, bool, u64)> {
+    match n {
+        Notice::RunLog {
+            lines,
+            next,
+            fresh,
+            lines_total,
+            ..
+        } => Some((lines.clone(), *next, *fresh, *lines_total)),
+        _ => None,
+    }
+}
+
+#[tokio::test]
+async fn the_run_log_is_read_from_the_end_then_only_what_is_new() {
+    use ferry_ipc::RunLogLevel;
+    use ferry_types::mark;
+
+    let daemon = Daemon::start(MockHost::default()).await;
+    let mut ui = daemon.ui().await;
+    ui.state_where("首次状态", |_| true).await;
+    write_log(
+        &daemon,
+        &[
+            "   0.096268792s  INFO 以前的格式，没有时间".to_owned(),
+            format!(
+                "2026-11-02 06:12:04.437  INFO 已连接 {} TLS 1.3 · 192.168.2.18",
+                mark::device("书房的电脑")
+            ),
+            "2026-11-02 06:20:02.775  WARN 连接中断：网络错误".to_owned(),
+        ],
+    );
+
+    ui.send(Request::ReadRunLog { since: None }).await;
+    let (lines, next, fresh, _) = ui.wait("运行日志", run_log).await;
+    assert!(fresh);
+    let ours: Vec<_> = lines.iter().rev().take(3).rev().collect();
+    assert_eq!(ours[0].at, "");
+    assert_eq!(ours[0].text, "以前的格式，没有时间");
+    assert_eq!(ours[1].at, "06:12:04");
+    assert_eq!(ours[1].level, RunLogLevel::Info);
+    assert_eq!(
+        ours[1].text, "已连接 书房的电脑 TLS 1.3 · 192.168.2.18",
+        "界面上不带标记"
+    );
+    assert_eq!(ours[2].level, RunLogLevel::Warn);
+
+    write_log(
+        &daemon,
+        &["2026-11-02 06:21:00.001 ERROR 心跳超时".to_owned()],
+    );
+    ui.send(Request::ReadRunLog { since: Some(next) }).await;
+    let (lines, _, fresh, _) = ui.wait("新写的运行日志", run_log).await;
+    assert!(!fresh, "接在后面");
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].level, RunLogLevel::Error);
+    assert_eq!(lines[0].text, "心跳超时");
+    daemon.task.abort();
+}
+
+#[tokio::test]
+async fn diagnostics_replace_names_files_and_the_home_folder_with_codes() {
+    use ferry_types::mark;
+
+    let daemon = Daemon::start(MockHost::default()).await;
+    let mut ui = daemon.ui().await;
+    let state = ui.state_where("首次状态", |_| true).await;
+    let local = state.local.name.clone();
+    let home = ferry_store::home_dir().unwrap();
+    let received = home.join("Downloads").join("证书.p12");
+    write_log(
+        &daemon,
+        &[
+            format!(
+                "2026-11-02 06:12:03.104  INFO ScreenFerry 已启动 {}",
+                mark::device(&local)
+            ),
+            format!(
+                "2026-11-02 06:18:31.240  INFO 文件收好了 at={}",
+                mark::path(&received)
+            ),
+            format!(
+                "2026-11-02 06:19:00.000  WARN 读不到 {}",
+                home.join("Desktop").display()
+            ),
+            format!("   0.096268792s  INFO 以前的版本写的 发送 私人.pdf 到 {local}"),
+        ],
+    );
+
+    ui.send(Request::ExportDiagnostics).await;
+    let path = ui
+        .wait("导出诊断文件", |n| match n {
+            Notice::DiagnosticsExported { path, .. } => Some(PathBuf::from(path)),
+            _ => None,
+        })
+        .await;
+    assert!(path.starts_with(daemon.device.store.downloads_dir()));
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.starts_with("ScreenFerry 诊断文件"));
+    assert!(text.contains("测试系统 1.0"));
+    assert!(text.contains("1 台：1000×800 @100%（主）"));
+    assert!(text.contains("ScreenFerry 已启动 本机"));
+    assert!(text.contains("文件 1.p12"));
+    let home_text = home.display().to_string();
+    assert!(text.contains("以前的版本写的 1 行没有带上"));
+    for secret in [local.as_str(), "证书", "私人", home_text.as_str()] {
+        assert!(!text.contains(secret), "诊断文件里不应出现 {secret}");
+    }
+
+    // 摘要只带最后 200 行。
+    ui.send(Request::CopyDiagnostics).await;
+    let summary = ui
+        .wait("诊断摘要", |n| match n {
+            Notice::DiagnosticsSummary { text } => Some(text.clone()),
+            _ => None,
+        })
+        .await;
+    assert!(summary.starts_with("ScreenFerry 诊断摘要"));
+    assert!(summary.contains("文件 1.p12"));
+
+    ui.send(Request::RevealDiagnostics).await;
+    ui.send(Request::OpenLogsFolder).await;
+    let shown = daemon.host.shown.clone();
+    crate::support::eventually("在访达里显示", || shown.lock().unwrap().len() == 2).await;
+    assert_eq!(shown.lock().unwrap()[0], path);
+    assert_eq!(shown.lock().unwrap()[1], daemon.device.store.logs_dir());
+    daemon.task.abort();
+}
+
+#[tokio::test]
+async fn verbose_logging_can_be_switched_on_and_off() {
+    let daemon = Daemon::start(MockHost::default()).await;
+    let mut ui = daemon.ui().await;
+    ui.state_where("首次状态", |s| s.local.verbose_since.is_none())
+        .await;
+    assert_eq!(ui.state.as_ref().unwrap().local.system, "测试系统 1.0");
+
+    ui.send(Request::SetVerbose { on: true }).await;
+    ui.state_where("详细记录打开", |s| s.local.verbose_since.is_some())
+        .await;
+    assert!(daemon.host.verbose.load(Ordering::SeqCst));
+
+    ui.send(Request::SetVerbose { on: false }).await;
+    ui.state_where("详细记录关闭", |s| s.local.verbose_since.is_none())
+        .await;
+    assert!(!daemon.host.verbose.load(Ordering::SeqCst));
     daemon.task.abort();
 }

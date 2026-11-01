@@ -26,7 +26,7 @@ use ferry_platform::{Clipboard, Displays, Error as PlatformError, InputInject};
 use ferry_proto::{Capabilities, Channel, Hello, Message, RejectReason};
 use ferry_store::Store;
 use ferry_trust::{Fingerprint, Peer};
-use ferry_types::{DeviceSettings, Display, InputEvent, LockKeys, Point, Side};
+use ferry_types::{DeviceSettings, Display, InputEvent, LockKeys, Point, Side, mark};
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, watch};
 use tokio::time::{MissedTickBehavior, interval, sleep, timeout};
@@ -360,7 +360,7 @@ async fn locate(
         match pick(&found, &peers) {
             Lookup::Trusted(server) | Lookup::Unpaired(server) => {
                 *searching = false;
-                info!(server = %server.name, addrs = ?server.addrs, "在局域网里找到服务端");
+                info!(server = %mark::device(&server.name), addrs = ?server.addrs, "在局域网里找到服务端");
                 return Ok(Some(Target {
                     addrs: server.addrs,
                     expected: Some(server.fingerprint),
@@ -573,7 +573,7 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
         }
         let mut screens = displays.displays()?;
         send(&mut framed, &Message::Displays(screens.clone())).await?;
-        info!(server = %welcome.name, fingerprint = %server, "已连接，等待光标进入");
+        info!(server = %mark::device(&welcome.name), fingerprint = %server, "已连接，等待光标进入");
         self.in_session = true;
         self.server = Some(server);
         *lock(&self.current) = Some(server);
@@ -751,7 +751,7 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                 }
                 Some(Message::DropHint(hint)) => self.edge.remote(server, Some(hint)),
                 Some(Message::Displays(_)) => {}
-                Some(other) => debug!(?other, "忽略消息"),
+                Some(other) => debug!(kind = format_args!("{:#06x}", other.type_id()), "忽略消息"),
             }
         }
     }
@@ -776,7 +776,7 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
             .await
             .map_err(|_| Error::Timeout("握手"))??;
         let name = welcome.name;
-        info!(server = %name, fingerprint = %server, "这台服务端尚未配对，开始配对");
+        info!(server = %mark::device(&name), fingerprint = %server, "这台服务端尚未配对，开始配对");
 
         let outcome =
             pairing::as_initiator(&mut framed, self.fingerprint, server, &name, &self.confirm)
@@ -790,7 +790,7 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                     addr: Some(addr),
                 });
                 config.store.save_peers(&peers)?;
-                info!(server = %name, "配对成功，已记住这台设备");
+                info!(server = %mark::device(&name), "配对成功，已记住这台设备");
                 self.events.emit(Event::Paired {
                     name,
                     fingerprint: server,
@@ -806,7 +806,7 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                 Err(Error::PairingRejected)
             }
             Outcome::RejectedByPeer => {
-                info!(server = %name, "对方拒绝了配对");
+                info!(server = %mark::device(&name), "对方拒绝了配对");
                 self.events.emit(Event::PairingRejected {
                     name,
                     by_peer: true,

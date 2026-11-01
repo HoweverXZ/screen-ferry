@@ -71,6 +71,9 @@ Windows 安装包：
 2. 在被控端的“设备”页选中控制端，两边核对 6 位配对码。局域网里找不到时，用“按地址连接”，或在控制端“邀请一台电脑”；地址在对方「设备」页顶部。
 3. 在控制端的“布局”页摆好各台的位置，把光标推出屏幕边缘即可切过去。
 
+出了问题时，在“日志 → 运行日志”里导出诊断文件，[提问题](https://github.com/icloudza/screen-ferry/issues/new?template=bug_report.yml)时附上它。
+设备名、用户名和文件名会换成代号。
+
 光标在对方屏幕上时，按 <kbd>Ctrl</kbd>+<kbd>Option</kbd>+<kbd>Esc</kbd>（Windows 控制时是 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Esc</kbd>）强制回到本机。
 使用前请退出其他键鼠共享软件，避免争抢键鼠。
 

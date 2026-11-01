@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use ferry_ipc::{
     ClipboardImage, ClipboardSync, DialError, FoundDevice, HourActivity, Link, LinkStatus, Local,
     LogEntry, LogIcon, LogKind, Notice, PairingPrompt, PeerInfo, PeerRef, Problem, ProblemKind,
-    Request, Settings, SettingsPatch, State, VERSION,
+    Request, RunLogLevel, RunLogLine, Settings, SettingsPatch, State, VERSION,
 };
 use ferry_types::{
     DeviceSettings, KeyMapping, ModifierPreset, ModifierTarget, Placement, Role, ScrollSpeed, Side,
@@ -128,6 +128,15 @@ fn requests() -> Vec<Request> {
             to: Some(FP_PC.into()),
         },
         Request::Quit,
+        Request::ReadRunLog { since: None },
+        Request::ReadRunLog {
+            since: Some(204_800),
+        },
+        Request::ExportDiagnostics,
+        Request::CopyDiagnostics,
+        Request::RevealDiagnostics,
+        Request::OpenLogsFolder,
+        Request::SetVerbose { on: true },
     ]
 }
 
@@ -145,6 +154,8 @@ fn state() -> State {
             natural_scrolling: Some(true),
             addresses: vec!["192.168.2.12".into(), "10.8.0.3".into()],
             invite_port: None,
+            system: "macOS 15.6 · arm64".into(),
+            verbose_since: Some(1_793_480_000_000),
         },
         sharing: true,
         problem: None,
@@ -285,6 +296,31 @@ fn notices() -> Vec<Notice> {
             error: Some(DialError::NotScreenFerry),
         },
         Notice::Quit,
+        Notice::RunLog {
+            lines: vec![
+                RunLogLine {
+                    at: "06:12:04".into(),
+                    level: RunLogLevel::Info,
+                    text: "已连接 Windows · TLS 1.3 · 192.168.2.18".into(),
+                },
+                RunLogLine {
+                    at: "06:20:02".into(),
+                    level: RunLogLevel::Warn,
+                    text: "连接中断：网络错误".into(),
+                },
+            ],
+            next: 204_800,
+            fresh: true,
+            bytes: 2_097_152,
+            lines_total: 18_241,
+        },
+        Notice::DiagnosticsExported {
+            path: "/Users/me/Downloads/ScreenFerry-诊断-20261102-0624.txt".into(),
+            bytes: 421_888,
+        },
+        Notice::DiagnosticsSummary {
+            text: "ScreenFerry 诊断摘要\n版本 0.1.0".into(),
+        },
     ]
 }
 

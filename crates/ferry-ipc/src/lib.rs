@@ -19,5 +19,5 @@ pub use error::{Error, Result};
 pub use message::{
     ClipboardImage, ClipboardSync, DialError, FoundDevice, HourActivity, Link, LinkStatus, Local,
     LogEntry, LogIcon, LogKind, MAX_LINE, Notice, PairingPrompt, PeerInfo, PeerRef, Problem,
-    ProblemKind, Request, Settings, SettingsPatch, State, VERSION,
+    ProblemKind, Request, RunLogLevel, RunLogLine, Settings, SettingsPatch, State, VERSION,
 };

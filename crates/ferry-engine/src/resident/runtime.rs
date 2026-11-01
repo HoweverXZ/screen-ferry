@@ -2,10 +2,13 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::convert::Infallible;
+use std::fs;
 use std::io::ErrorKind;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
+
+use ferry_core::Redactor;
 
 use ferry_ipc::{
     ClipboardImage, ClipboardSync, DialError as IpcDialError, FoundDevice, Link, LinkStatus, Local,
@@ -14,13 +17,14 @@ use ferry_ipc::{
 };
 use ferry_store::Store;
 use ferry_trust::{Fingerprint, PeerList};
-use ferry_types::{ClipboardFormat, Config, DeviceSettings, Role, Side, uses_command_key};
+use ferry_types::{ClipboardFormat, Config, DeviceSettings, Role, Side, mark, uses_command_key};
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
 
 use super::confirm::{PairAsk, UiConfirm};
+use super::diagnostics;
 use super::record::{Activity, Log, Rtt, now_ms};
 use super::ui::UiEvent;
 use super::{Command, Host, Summary};
@@ -126,6 +130,12 @@ pub(crate) struct Runtime<H> {
     show_device: Option<(String, Instant)>,
     /// 客户端：等邀请的端口。
     invite_port: Option<u16>,
+    /// 本机系统和版本，启动时问一次。
+    system: String,
+    /// 详细记录从什么时候开着（Unix 毫秒）。
+    verbose_since: Option<i64>,
+    /// 最近导出的诊断文件。
+    last_export: Option<PathBuf>,
 }
 
 impl<H: Host> Runtime<H> {
@@ -140,6 +150,7 @@ impl<H: Host> Runtime<H> {
         let fingerprint = store.identity(&name)?.fingerprint();
         let peers = store.peers()?;
         let autostart = host.autostart();
+        let system = host.system();
         let files = Files::new(&store, events.clone());
         let edge = EdgeDrop::spawn(host.overlay(), files.clone(), accent_color(config.accent));
         let clip_limit = ClipLimit::new(config.clipboard_limit_bytes());
@@ -188,6 +199,9 @@ impl<H: Host> Runtime<H> {
             platforms: HashMap::new(),
             show_device: None,
             invite_port: None,
+            system,
+            verbose_since: None,
+            last_export: None,
         };
         let role = match runtime.config.role {
             Role::Server => "键鼠在本机",
@@ -197,7 +211,7 @@ impl<H: Host> Runtime<H> {
             LogKind::Link,
             LogIcon::Power,
             "ScreenFerry 已启动",
-            format!("{} · {role}", runtime.name),
+            format!("{} · {role}", mark::device(&runtime.name)),
         );
         Ok(runtime)
     }
@@ -544,7 +558,7 @@ impl<H: Host> Runtime<H> {
                 self.log(
                     LogKind::Link,
                     LogIcon::Link,
-                    format!("已连接 {name}"),
+                    format!("已连接 {}", mark::device(&name)),
                     format!("TLS 1.3 · {}", addr.ip()),
                 );
             }
@@ -566,7 +580,7 @@ impl<H: Host> Runtime<H> {
                 self.log(
                     LogKind::Link,
                     LogIcon::Unlink,
-                    format!("与 {name} 断开"),
+                    format!("与 {} 断开", mark::device(&name)),
                     reason.unwrap_or_else(|| "对方已断开".into()),
                 );
             }
@@ -581,7 +595,7 @@ impl<H: Host> Runtime<H> {
                 self.log(
                     LogKind::Link,
                     LogIcon::Settings,
-                    format!("{name} 请本机打开设置"),
+                    format!("{} 请本机打开设置", mark::device(&name)),
                     "已翻到它的设置页",
                 );
                 // 已经开着的界面直接翻过去；没开的，打开后连上来时再翻。
@@ -610,7 +624,7 @@ impl<H: Host> Runtime<H> {
                     self.focus = Some(peer);
                 }
                 let side = self.side_of(&peer);
-                let peer = self.peer_name(&peer);
+                let peer = mark::device(&self.peer_name(&peer)).to_string();
                 let (text, detail) = match (self.config.role, here) {
                     (Role::Server, false) => {
                         self.activity.switched();
@@ -671,7 +685,7 @@ impl<H: Host> Runtime<H> {
                     at: now_ms(),
                 });
                 let text = if to_peer {
-                    format!("剪贴板同步到 {peer}")
+                    format!("剪贴板同步到 {}", mark::device(&peer))
                 } else {
                     "剪贴板同步到本机".to_owned()
                 };
@@ -691,9 +705,9 @@ impl<H: Host> Runtime<H> {
                     _ => "带格式的内容",
                 };
                 let text = if to_peer {
-                    format!("剪贴板里的{what}太大，没有同步到 {peer}")
+                    format!("剪贴板里的{what}太大，没有同步到 {}", mark::device(&peer))
                 } else {
-                    format!("{peer} 剪贴板里的{what}太大，没有同步过来")
+                    format!("{} 剪贴板里的{what}太大，没有同步过来", mark::device(&peer))
                 };
                 let detail = format!(
                     "{}，超过了 {} 的上限 · 可以在设置里调大",
@@ -707,16 +721,16 @@ impl<H: Host> Runtime<H> {
                 self.log(
                     LogKind::Link,
                     LogIcon::Lock,
-                    format!("已与 {name} 配对"),
+                    format!("已与 {} 配对", mark::device(&name)),
                     format!("指纹 {}", fingerprint.short()),
                 );
                 self.toast(format!("已与 {name} 配对"));
             }
             Event::PairingRejected { name, by_peer } => {
                 let text = if by_peer {
-                    format!("{name} 拒绝了配对")
+                    format!("{} 拒绝了配对", mark::device(&name))
                 } else {
-                    format!("已拒绝 {name} 的配对请求")
+                    format!("已拒绝 {} 的配对请求", mark::device(&name))
                 };
                 self.log(LogKind::Link, LogIcon::Warning, text, "");
             }
@@ -739,7 +753,7 @@ impl<H: Host> Runtime<H> {
         self.log(
             LogKind::Link,
             LogIcon::Lock,
-            format!("{} 请求配对", request.peer_name),
+            format!("{} 请求配对", mark::device(&request.peer_name)),
             format!("配对码 {}", request.code),
         );
         self.broadcast(Notice::Pairing {
@@ -802,14 +816,14 @@ impl<H: Host> Runtime<H> {
                     info!(ms, "设置界面从打开到连上后台用了 {ms} 毫秒");
                 }
             }
-            UiEvent::Request(request) => self.on_request(request).await,
+            UiEvent::Request { id, request } => self.on_request(id, request).await,
             UiEvent::Left { id } => {
                 self.clients.remove(&id);
             }
         }
     }
 
-    async fn on_request(&mut self, request: Request) {
+    async fn on_request(&mut self, from: u64, request: Request) {
         match request {
             Request::Hello { .. } => {}
             Request::SetSharing { on } => self.set_sharing(on).await,
@@ -834,6 +848,39 @@ impl<H: Host> Runtime<H> {
                 info!("收到退出请求");
                 self.quit_requested = true;
             }
+            Request::ReadRunLog { since } => {
+                let chunk = diagnostics::read(&self.store.log_file(), since);
+                self.reply(
+                    from,
+                    Notice::RunLog {
+                        lines: chunk.lines,
+                        next: chunk.next,
+                        fresh: chunk.fresh,
+                        bytes: chunk.bytes,
+                        lines_total: chunk.lines_total,
+                    },
+                );
+            }
+            Request::ExportDiagnostics => self.export_diagnostics(from),
+            Request::CopyDiagnostics => {
+                let text = self.diagnostics(true);
+                self.reply(from, Notice::DiagnosticsSummary { text });
+            }
+            Request::RevealDiagnostics => match &self.last_export {
+                Some(path) if path.exists() => self.host.reveal(path),
+                _ => self.reply(
+                    from,
+                    Notice::Toast {
+                        text: "诊断文件已经不在了，请重新导出".into(),
+                    },
+                ),
+            },
+            Request::OpenLogsFolder => {
+                let dir = self.store.logs_dir();
+                let _ = fs::create_dir_all(&dir);
+                self.host.open_folder(&dir);
+            }
+            Request::SetVerbose { on } => self.set_verbose(on),
         }
     }
 
@@ -881,11 +928,11 @@ impl<H: Host> Runtime<H> {
     /// 文件传输有了进展：开始、结束、中断都记进日志，过程中的进度不记。
     fn on_transfer(&mut self, update: TransferUpdate) {
         self.edge.transfer(update.clone());
-        let peer = self.peer_name(&update.peer);
+        let peer = mark::device(&self.peer_name(&update.peer)).to_string();
         let what = if update.items > 1 {
-            format!("{} 等 {} 项", update.name, update.items)
+            format!("{} 等 {} 项", mark::file(&update.name), update.items)
         } else {
-            update.name.clone()
+            mark::file(&update.name).to_string()
         };
         let size = size_text(update.bytes);
         let files = format!("{} 个文件 · {size}", update.files);
@@ -1026,7 +1073,7 @@ impl<H: Host> Runtime<H> {
             );
         } else if let Some(side) = moved {
             let peer = match self.links.as_slice() {
-                [only] => only.peer.name.clone(),
+                [only] => mark::device(&only.peer.name).to_string(),
                 _ => "其他设备".to_owned(),
             };
             self.log(
@@ -1148,7 +1195,7 @@ impl<H: Host> Runtime<H> {
         self.log(
             LogKind::Link,
             LogIcon::Unlink,
-            format!("已移除 {name}"),
+            format!("已移除 {}", mark::device(&name)),
             "下次连接需要重新配对",
         );
         self.toast(format!("已移除 {name}"));
@@ -1334,9 +1381,209 @@ impl<H: Host> Runtime<H> {
         text: impl Into<String>,
         detail: impl Into<String>,
     ) {
-        let entry = self.log.push(kind, icon, text, detail);
-        info!(target: "screenferry", "{} {}", entry.text, entry.detail);
+        // 设备名、文件名带着标记写进运行日志（导出时换成代号），界面上显示去掉标记的样子。
+        let (text, detail) = (text.into(), detail.into());
+        info!(target: "screenferry", "{text} {detail}");
+        let entry = self
+            .log
+            .push(kind, icon, mark::strip(&text), mark::strip(&detail));
         self.broadcast(Notice::Log { entry });
+    }
+
+    /// 只发给界面 `id` 的通知。
+    fn reply(&mut self, id: u64, notice: Notice) {
+        if let Some(outbox) = self.clients.get(&id)
+            && outbox.try_send(notice).is_err()
+        {
+            warn!(id, "设置界面没有及时接收，已断开");
+            self.clients.remove(&id);
+        }
+    }
+
+    // ── 运行日志与诊断文件 ───────────────────────
+
+    fn set_verbose(&mut self, on: bool) {
+        if on == self.verbose_since.is_some() {
+            return;
+        }
+        self.host.set_verbose(on);
+        self.verbose_since = on.then(now_ms);
+        info!("详细记录已{}", if on { "打开" } else { "关闭" });
+        self.dirty = true;
+    }
+
+    /// 把诊断文件存到“下载”文件夹，重名时加编号。
+    fn export_diagnostics(&mut self, from: u64) {
+        let text = self.diagnostics(false);
+        let (_, stamp) = diagnostics::local_time(now_ms(), self.host.utc_offset());
+        let dir = self.store.downloads_dir();
+        let name = ferry_core::file_name::unique(&format!("ScreenFerry-诊断-{stamp}.txt"), |n| {
+            dir.join(n).exists()
+        });
+        let path = dir.join(name);
+        let saved = fs::create_dir_all(&dir).and_then(|()| fs::write(&path, &text));
+        match saved {
+            Ok(()) => {
+                info!(path = %mark::path(&path), "诊断文件已导出");
+                self.last_export = Some(path.clone());
+                self.reply(
+                    from,
+                    Notice::DiagnosticsExported {
+                        path: path.display().to_string(),
+                        bytes: text.len() as u64,
+                    },
+                );
+            }
+            Err(e) => {
+                warn!("导出诊断文件失败：{e}");
+                self.reply(
+                    from,
+                    Notice::Toast {
+                        text: format!("导出诊断文件失败：{e}"),
+                    },
+                );
+            }
+        }
+    }
+
+    /// 诊断文件（`summary` 为真时是只带最后 200 行运行日志的摘要）。设备名、文件名、用户目录换成代号。
+    fn diagnostics(&self, summary: bool) -> String {
+        let state = self.snapshot();
+        let home = ferry_store::home_dir();
+        let mut redactor = Redactor::new(home.as_deref().and_then(Path::to_str));
+        redactor.local(&state.local.name);
+        let server = state.local.role == Role::Server;
+        let on = |b: bool| if b { "开" } else { "关" };
+
+        let (now, _) = diagnostics::local_time(now_ms(), self.host.utc_offset());
+        let version = match option_env!("SCREENFERRY_COMMIT") {
+            Some(commit) if !commit.is_empty() => {
+                format!("{}（提交 {commit}）", state.local.version)
+            }
+            _ => state.local.version.clone(),
+        };
+        let mut local = format!(
+            "本机 · {}",
+            if server {
+                "控制别的电脑"
+            } else {
+                "被控制"
+            }
+        );
+        if let Some(port) = state.local.port {
+            local.push_str(&format!(" · 监听 {port}"));
+        }
+        if server {
+            local.push_str(&format!(" · 局域网广播 {}", on(state.settings.announce)));
+        } else {
+            match state.settings.server.trim() {
+                "" => local.push_str(" · 自动寻找控制端"),
+                fixed => local.push_str(&format!(" · 固定连接 {fixed}")),
+            }
+            if let Some(port) = state.local.invite_port {
+                local.push_str(&format!(" · 等邀请 {port}"));
+            }
+        }
+        let displays = match ferry_platform::Displays::displays(&self.host.displays()) {
+            Ok(list) => {
+                let each: Vec<String> = list
+                    .iter()
+                    .map(|d| {
+                        format!(
+                            "{}×{} @{}%{}",
+                            d.bounds.width,
+                            d.bounds.height,
+                            d.scale_percent,
+                            if d.primary { "（主）" } else { "" }
+                        )
+                    })
+                    .collect();
+                format!("{} 台：{}", list.len(), each.join(" · "))
+            }
+            Err(e) => format!("读不到：{e}"),
+        };
+        let permission = match self.host.check_permissions(state.local.role) {
+            Ok(()) => "键鼠控制 已允许".to_owned(),
+            Err(e) => format!("键鼠控制 未允许：{e}"),
+        };
+        let mut devices = format!("{} 台已配对", state.peers.len());
+        for peer in &state.peers {
+            let code = redactor.device(&[&peer.name, &peer.alias]);
+            let platform = match peer.platform.as_str() {
+                "macos" => "macOS",
+                "windows" => "Windows",
+                "" => "系统未知",
+                other => other,
+            };
+            let mut row = format!(
+                "{code}  {platform} · {}",
+                if peer.online { "在线" } else { "离线" }
+            );
+            if !peer.addr.is_empty() {
+                row.push_str(&format!(" · {}", peer.addr));
+            }
+            if let Some(side) = peer.side {
+                row.push_str(&format!(" · 在本机{}", side_label(side)));
+            }
+            let preset = match self.config.device(&peer.fingerprint).modifiers {
+                ferry_types::ModifierPreset::Habit => "修饰键按本机习惯",
+                ferry_types::ModifierPreset::Plain => "修饰键原样",
+                ferry_types::ModifierPreset::Custom => "修饰键自定义",
+            };
+            row.push_str(&format!(" · {preset}"));
+            devices.push('\n');
+            devices.push_str(&row);
+        }
+        let settings = format!(
+            "共享 {} · 剪贴板 {}（上限 {} MB）· 开机自启 {}",
+            on(state.sharing),
+            on(state.settings.clipboard),
+            state.settings.clipboard_limit_mb,
+            on(state.settings.autostart)
+        );
+        let verbose = match self.verbose_since {
+            Some(since) => format!("开着，已有 {} 分钟", (now_ms() - since) / 60_000),
+            None => "关".to_owned(),
+        };
+        let mut header = vec![
+            ("生成于", now),
+            ("版本", version),
+            (
+                "系统",
+                if self.system.is_empty() {
+                    std::env::consts::OS.to_owned()
+                } else {
+                    self.system.clone()
+                },
+            ),
+            ("本机", local),
+            ("显示器", displays),
+            ("权限", permission),
+            ("设备", devices),
+            ("设置", settings),
+            ("详细记录", verbose),
+        ];
+        // 局域网里发现、还没配对的设备也可能出现在日志里。
+        for found in &state.found {
+            redactor.device(&[&found.name]);
+        }
+        if let Some(problem) = &state.problem {
+            header.push(("问题", redactor.line(&problem.message)));
+        }
+        let title = if summary {
+            "ScreenFerry 诊断摘要"
+        } else {
+            "ScreenFerry 诊断文件"
+        };
+        let previous = self.store.previous_log_file();
+        let current = self.store.log_file();
+        diagnostics::report(
+            title,
+            &header,
+            &[previous.as_path(), current.as_path()],
+            &mut redactor,
+            summary,
+        )
     }
 
     fn toast(&mut self, text: impl Into<String>) {
@@ -1388,6 +1635,8 @@ impl<H: Host> Runtime<H> {
                     .map(|ip| ip.to_string())
                     .collect(),
                 invite_port: self.invite_port,
+                system: self.system.clone(),
+                verbose_since: self.verbose_since,
             },
             sharing: !self.paused,
             problem: self.problem.clone(),

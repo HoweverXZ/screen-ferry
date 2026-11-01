@@ -25,6 +25,15 @@ fn exe_dir() -> Option<PathBuf> {
     exe_path()?.parent().map(PathBuf::from)
 }
 
+/// 处理器架构，写进诊断文件：`arm64`、`x64` 等。
+fn arch() -> &'static str {
+    match std::env::consts::ARCH {
+        "aarch64" => "arm64",
+        "x86_64" => "x64",
+        other => other,
+    }
+}
+
 /// 本程序的完整路径。
 fn exe_path() -> Option<PathBuf> {
     Some(plain_path(
@@ -52,6 +61,7 @@ pub(crate) use mac::NativeHost;
 
 #[cfg(target_os = "macos")]
 mod mac {
+    use std::path::Path;
     use std::process::Command;
     use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -182,6 +192,40 @@ mod mac {
         fn natural_scrolling(&self) -> Option<bool> {
             Some(ferry_platform_macos::natural_scrolling())
         }
+
+        fn system(&self) -> String {
+            let version = Command::new("sw_vers")
+                .arg("-productVersion")
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+                .unwrap_or_default();
+            match version.as_str() {
+                "" => format!("macOS · {}", super::arch()),
+                v => format!("macOS {v} · {}", super::arch()),
+            }
+        }
+
+        fn utc_offset(&self) -> i32 {
+            crate::logging::utc_offset()
+        }
+
+        fn set_verbose(&self, on: bool) {
+            crate::logging::set_verbose(on);
+        }
+
+        fn reveal(&self, path: &Path) {
+            if let Err(e) = Command::new("open").arg("-R").arg(path).spawn() {
+                warn!("在访达中显示失败：{e}");
+            }
+        }
+
+        fn open_folder(&self, path: &Path) {
+            if let Err(e) = Command::new("open").arg(path).spawn() {
+                warn!("打开文件夹失败：{e}");
+            }
+        }
     }
 }
 
@@ -192,6 +236,8 @@ pub(crate) use win::NativeHost;
 
 #[cfg(target_os = "windows")]
 mod win {
+    use std::os::windows::process::CommandExt;
+    use std::path::Path;
     use std::process::{Command, Stdio};
 
     use ferry_engine::resident::Host;
@@ -305,5 +351,58 @@ mod win {
         }
 
         fn open_permission_settings(&self) {}
+
+        fn system(&self) -> String {
+            // `ver` 输出“Microsoft Windows [版本 10.0.26100.4652]”：各种语言的系统里这串数字都一样。
+            // 不开控制台窗口，免得闪一下。
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            let output = Command::new("cmd")
+                .args(["/c", "ver"])
+                .creation_flags(CREATE_NO_WINDOW)
+                .output()
+                .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+                .unwrap_or_default();
+            let version = output
+                .split(|c: char| !(c.is_ascii_digit() || c == '.'))
+                .find(|t| t.matches('.').count() >= 2)
+                .unwrap_or("");
+            let build: u32 = version
+                .split('.')
+                .nth(2)
+                .and_then(|b| b.parse().ok())
+                .unwrap_or(0);
+            let name = match build {
+                0 => "Windows",
+                b if b >= 22000 => "Windows 11",
+                _ => "Windows 10",
+            };
+            match version {
+                "" => format!("{name} · {}", super::arch()),
+                v => format!("{name}（{v}）· {}", super::arch()),
+            }
+        }
+
+        fn utc_offset(&self) -> i32 {
+            crate::logging::utc_offset()
+        }
+
+        fn set_verbose(&self, on: bool) {
+            crate::logging::set_verbose(on);
+        }
+
+        fn reveal(&self, path: &Path) {
+            ferry_platform_windows::allow_foreground();
+            let select = format!("/select,\"{}\"", path.display());
+            if let Err(e) = Command::new("explorer").raw_arg(select).spawn() {
+                warn!("在资源管理器中显示失败：{e}");
+            }
+        }
+
+        fn open_folder(&self, path: &Path) {
+            ferry_platform_windows::allow_foreground();
+            if let Err(e) = Command::new("explorer").arg(path).spawn() {
+                warn!("打开文件夹失败：{e}");
+            }
+        }
     }
 }

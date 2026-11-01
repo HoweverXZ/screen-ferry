@@ -167,6 +167,17 @@
   - 协议：新增能力位 `REMOTE_SETTINGS` 和消息 `OpenSettings`。本机通信升到版本 2：`settings.mouse_dpi`、`settings.devices`、
     `set_device`、`open_peer_settings`、`show_device`、`peers[].alias`、`peers[].platform`、`local.natural_scrolling`，
     去掉 `settings.swap_cmd_ctrl`。
+- 运行日志与诊断导出（ADR 0012）：提问题时附上诊断文件，不用再去缓存目录里找日志。
+  - “日志”页加第 6 个分段“运行日志”：导出诊断文件（存到“下载”）、复制摘要（版本、系统和最近 200 行，能直接贴进问题描述）、
+    打开日志文件夹、去 GitHub 提问题（版本和系统预先填好），下面是实时的运行日志，可以只看警告和错误。
+  - “详细记录”开关：排查问题时临时打开 DEBUG 级别，重启后自动关闭。
+  - 诊断文件开头是版本（带提交号）、系统、本机的角色和端口、显示器、权限、已配对的设备和主要设置，后面是两卷运行日志。
+    设备名换成“本机 / 设备 A”，文件名换成“文件 1.p12”，用户目录换成 `~`；局域网地址保留，本机的日志文件保持原样。
+  - 运行日志的时间改为本机时间；往返延迟从每 5 秒一条改为每分钟汇总一条；运行中写满 2 MB 也换卷，只留上一卷。
+    设备名、文件名、路径写进日志时带上标记，导出时只换标记里的内容。
+  - 新增 GitHub 问题表单 `.github/ISSUE_TEMPLATE/bug_report.yml`。
+  - 本机通信新增 `read_run_log`、`export_diagnostics`、`copy_diagnostics`、`reveal_diagnostics`、`open_logs_folder`、
+    `set_verbose`，通知 `run_log`、`diagnostics_exported`、`diagnostics_summary`，字段 `local.system`、`local.verbose_since`。
 - Windows 安装包（ADR 0011）：原来发的是一个散着一堆文件的文件夹，现在是真正的安装程序 `ScreenFerry-<版本>-windows-x64-setup.exe`。
   - 用 Inno Setup 7.1（简体中文界面）打包，装进 Program Files；开始菜单有 ScreenFerry，桌面快捷方式可选；
     “设置 → 应用”里能卸载，显示图标、版本和发布者。

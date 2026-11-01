@@ -50,6 +50,9 @@
 | `show_device` | `fingerprint` | 翻到这台设备的设置页：它请本机打开了设置（本机是服务端、它被本机控制时） |
 | `dialed` | `address`、`invite`、`error` | 一次 `connect_address`（`invite` 为 false）或 `invite`（为 true）的结果。`error` 为 null 表示成了：按地址连接是已经连上（没配对时接着发 `pairing`），邀请是对方答应了、正在连过来。否则是 `bad_address`（地址不对）、`refused`（那里没有在等的 ScreenFerry）、`unreachable`（连不上）、`not_screen_ferry`、`incompatible`（版本不兼容）、`busy`（对方正连着别的电脑）、`wrong_role`（本机的角色做不了） |
 | `quit` | | 后台要退出了（托盘里的“退出”或 `quit` 命令），界面随之关闭。之后连接断开 |
+| `run_log` | `lines`、`next`、`fresh`、`bytes`、`lines_total` | 回应 `read_run_log`，只发给发出命令的界面。`lines[]` 是 `{ at（本机时间 HH:MM:SS，旧格式为空）, level(debug\|info\|warn\|error), text }`，设备名等照原样显示；`fresh` 为真时整个替换，否则接在后面；`next` 是下次读的位置；`bytes`、`lines_total` 是当前这卷的大小和行数 |
+| `diagnostics_exported` | `path`、`bytes` | 诊断文件存好了，只发给发出命令的界面 |
+| `diagnostics_summary` | `text` | 诊断摘要，只发给发出命令的界面，界面复制到剪贴板 |
 
 `state` 的结构（字段含义见 `crates/ferry-ipc/src/message.rs`）：
 
@@ -58,6 +61,7 @@ local     name · fingerprint · short · role(server|client) · data_dir · ver
           platform（本机系统，macos|windows…；旧版后台没有，为空）
           natural_scrolling（macOS：开着“自然滚动”；其他系统为 null）
           addresses[]（本机的局域网 IPv4 地址，常用的在前）· invite_port（客户端等邀请的端口，否则 null）
+          system（本机系统和版本，例如“macOS 15.6 · arm64”）· verbose_since（详细记录从什么时候开着，Unix 毫秒；关着为 null）
 sharing   用户没有暂停共享
 problem   null | { kind(permission|port_in_use|other), message }
 link      status(paused|starting|waiting|searching|connecting|connected|stopped)
@@ -103,10 +107,17 @@ activity[] { hour, switches, clips, connected_secs }         最近 48 小时，
 | `open_permission_settings` | | 打开系统中授予键鼠控制权限的页面 |
 | `clear_log` | | 清空日志 |
 | `open_settings` | | 请后台打开设置界面（另一份后台用） |
+| `read_run_log` | 可选 `since`：上次 `run_log` 给的 `next` | 读运行日志：不带 `since` 时取最近的一段（最多 500 行），否则取之后新写的，结果以 `run_log` 告知 |
+| `export_diagnostics` | | 把诊断文件存到“下载”文件夹（设备名、文件名、用户目录换成代号），结果以 `diagnostics_exported` 告知，出错时以 `toast` |
+| `copy_diagnostics` | | 取诊断摘要（版本、系统和最近 200 行运行日志），结果以 `diagnostics_summary` 告知 |
+| `reveal_diagnostics` | | 在访达或资源管理器里显示最近导出的诊断文件 |
+| `open_logs_folder` | | 打开运行日志所在的文件夹 |
+| `set_verbose` | `on` | 打开或关闭详细记录（DEBUG 级别）。重启后总是关着 |
 | `quit` | | 请后台退出：停下共享（归还键鼠、松开按键），给所有界面发 `quit` 后退出。`screenferry quit` 用，安装程序升级、卸载前靠它放开程序文件 |
 | `send_files` | `paths`：本机绝对路径的列表；可选 `to`：目标设备的证书指纹 | 把这些文件和文件夹发给 `to`，不填时发给光标最近去过的那台（只连着一台时就是它；`screenferry send` 用），结果以 `toast` 和日志告知 |
 
-除了 `connect_address` 和 `invite` 以 `dialed` 回复，命令没有逐条回执：结果体现在随后的 `state`、`log`、`toast` 里。
+除了 `connect_address`、`invite` 以 `dialed` 回复，`read_run_log`、`export_diagnostics`、`copy_diagnostics` 有各自的通知，
+命令没有逐条回执：结果体现在随后的 `state`、`log`、`toast` 里。
 
 ## 6. 修改协议
 

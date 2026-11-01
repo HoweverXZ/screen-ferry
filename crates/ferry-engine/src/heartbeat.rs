@@ -11,8 +11,8 @@ const ACTIVE_INTERVAL: Duration = Duration::from_millis(100);
 const IDLE_INTERVAL: Duration = Duration::from_millis(500);
 /// 超过这么久没有收到 Pong，视为断线。
 const TIMEOUT: Duration = Duration::from_millis(1500);
-/// 延迟统计的汇报周期。
-const REPORT_EVERY: Duration = Duration::from_secs(5);
+/// 延迟统计的汇报周期。每次写一行运行日志，太密了会把有用的内容挤掉。
+const REPORT_EVERY: Duration = Duration::from_secs(60);
 
 pub(crate) struct Heartbeat {
     epoch: Instant,
@@ -115,7 +115,7 @@ impl fmt::Display for Report {
         let ms = |d: Duration| d.as_secs_f64() * 1000.0;
         write!(
             f,
-            "往返延迟（{} 次）：最小 {:.2} ms · 平均 {:.2} ms · 最大 {:.2} ms，单程约 {:.2} ms",
+            "往返延迟（过去 1 分钟 {} 次）：最小 {:.2} ms · 平均 {:.2} ms · 最大 {:.2} ms，单程约 {:.2} ms",
             self.count,
             ms(self.min),
             ms(self.avg),

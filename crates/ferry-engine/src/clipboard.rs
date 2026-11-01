@@ -262,7 +262,10 @@ where
                     files.on_control(message);
                 }
             }
-            other => debug!(?other, "数据连接上忽略消息"),
+            other => debug!(
+                kind = format_args!("{:#06x}", other.type_id()),
+                "数据连接上忽略消息"
+            ),
         }
         Ok(())
     }

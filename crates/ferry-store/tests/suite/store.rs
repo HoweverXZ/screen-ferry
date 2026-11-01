@@ -187,6 +187,11 @@ fn a_custom_data_dir_keeps_its_runtime_files_inside() {
     let dir = TempDir::new();
     let store = Store::open(dir.path()).unwrap();
     assert_eq!(store.ipc_endpoint_path(), dir.path().join("ipc.json"));
+    assert_eq!(store.log_file(), dir.path().join("logs/screenferry.log"));
+    assert_eq!(
+        store.previous_log_file(),
+        dir.path().join("logs/screenferry.log.1")
+    );
 }
 
 #[test]

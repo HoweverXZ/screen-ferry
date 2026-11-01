@@ -122,6 +122,16 @@ impl Store {
         self.cache.join("logs")
     }
 
+    /// 后台的运行日志：日志目录下的 `screenferry.log`。
+    pub fn log_file(&self) -> PathBuf {
+        self.logs_dir().join("screenferry.log")
+    }
+
+    /// 上一卷运行日志：当前这卷写满时改名成它（`screenferry.log.1`），只留这一卷。
+    pub fn previous_log_file(&self) -> PathBuf {
+        self.logs_dir().join("screenferry.log.1")
+    }
+
     /// 正在接收的文件（缓存目录下的 `partial/`），每次传输一个子目录。可以随时清空。
     pub fn partial_dir(&self) -> PathBuf {
         self.cache.join("partial")

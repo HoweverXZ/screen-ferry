@@ -1,0 +1,46 @@
+name: 问题反馈
+description: 出错了、用着不对劲，或者和预期不一样
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        先在 ScreenFerry 的「日志 → 运行日志」里点“导出诊断文件”，再把文件拖到最下面的“诊断文件”里。
+        诊断文件里的设备名、用户名和文件名已经换成代号，不含剪贴板内容和密钥。
+  - type: textarea
+    id: what
+    attributes:
+      label: 出了什么问题
+      description: 看到了什么，和预期有什么不同
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 怎么复现
+      placeholder: |
+        1. 在 Mac 上……
+        2. 把光标推到……
+        3. 看到……
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: 这台电脑的系统
+      placeholder: macOS 15.6 · arm64
+  - type: input
+    id: other
+    attributes:
+      label: 另一台电脑
+      placeholder: Windows 11 · 被控制
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: 诊断文件
+      description: 把导出的诊断文件拖到这里；也可以贴上“复制摘要”复制的内容

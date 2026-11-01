@@ -54,6 +54,22 @@ pub enum Request {
     /// 请后台退出：停下共享（归还键鼠、松开按键），通知界面一起关闭，然后退出。
     /// 安装程序升级、卸载前用它让正在运行的 ScreenFerry 放开程序文件。
     Quit,
+    /// 读运行日志：`since` 为空时取最近的一段，否则取上次 `run_log` 给的位置之后新写的。
+    /// 结果以 `run_log` 告知。
+    ReadRunLog {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        since: Option<u64>,
+    },
+    /// 把诊断文件存到“下载”文件夹，结果以 `diagnostics_exported` 告知，出错时以 `toast`。
+    ExportDiagnostics,
+    /// 取诊断摘要（版本、系统和最近 200 行运行日志），结果以 `diagnostics_summary` 告知，界面复制到剪贴板。
+    CopyDiagnostics,
+    /// 在访达或资源管理器里显示最近导出的诊断文件。
+    RevealDiagnostics,
+    /// 打开运行日志所在的文件夹。
+    OpenLogsFolder,
+    /// 打开或关闭详细记录（运行日志多记调试信息）。重启后总是关着。
+    SetVerbose { on: bool },
 }
 
 /// 后台 → 界面。
@@ -85,6 +101,38 @@ pub enum Notice {
     },
     /// 后台要退出了（托盘里的“退出”或 `quit` 命令），界面随之关闭。之后连接断开。
     Quit,
+    /// 运行日志的一段，回应 `read_run_log`。`fresh` 为真时界面整个替换（第一次读，或者日志换了一卷），
+    /// 否则接在已有的后面。`next` 是下次读的位置；`bytes`、`lines_total` 是当前这卷的大小和行数。
+    RunLog {
+        lines: Vec<RunLogLine>,
+        next: u64,
+        fresh: bool,
+        bytes: u64,
+        lines_total: u64,
+    },
+    /// 诊断文件存好了：完整路径和大小。
+    DiagnosticsExported { path: String, bytes: u64 },
+    /// 诊断摘要，界面复制到剪贴板。
+    DiagnosticsSummary { text: String },
+}
+
+/// 运行日志的一行。设备名、文件名等照原样显示（导出时才换成代号）。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunLogLine {
+    /// 本机时间 `HH:MM:SS`；旧格式的行没有时间，为空。
+    pub at: String,
+    pub level: RunLogLevel,
+    pub text: String,
+}
+
+/// 运行日志一行的级别。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunLogLevel {
+    Debug,
+    Info,
+    Warn,
+    Error,
 }
 
 /// 按地址连接、邀请为什么没成。
@@ -155,6 +203,12 @@ pub struct Local {
     /// 客户端：等待邀请的端口；服务端为 `null`。
     #[serde(default)]
     pub invite_port: Option<u16>,
+    /// 本机系统和版本，例如“macOS 15.6 · arm64”。不知道时为空。
+    #[serde(default)]
+    pub system: String,
+    /// 详细记录从什么时候开着（Unix 毫秒）；关着时为 `null`。
+    #[serde(default)]
+    pub verbose_since: Option<i64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -119,6 +119,25 @@ const _pendingTimeout = Duration(seconds: 3);
 /// 按地址连接、邀请最多等这么久；后台一直没给结果时按连不上处理。
 const _dialTimeout = Duration(seconds: 20);
 
+/// 看运行日志时多久读一次新写的。
+const _runLogPoll = Duration(seconds: 2);
+
+/// 界面上最多留这么多行运行日志。
+const _runLogKeep = 1000;
+
+/// 提问题的地方：GitHub 的问题表单，版本和系统预先填好。
+const _issueUrl = 'https://github.com/icloudza/screen-ferry/issues/new';
+
+/// 已经导出的诊断文件。
+class ExportedDiagnostics {
+  const ExportedDiagnostics({required this.path, required this.bytes});
+  final String path;
+  final int bytes;
+
+  /// 文件名（不含目录）。
+  String get name => path.split(RegExp(r'[/\\]')).last;
+}
+
 class AppState extends ChangeNotifier {
   AppState({Backend? backend, LinkOpener? openLink, VoidCallback? onQuit})
     : backend = backend ?? DemoBackend(),
@@ -474,6 +493,61 @@ class AppState extends ChangeNotifier {
 
   void replyPairing(int id, {required bool accept}) => _send(PairReplyRequest(id, accept: accept));
 
+  // ── 运行日志与诊断文件 ──
+
+  /// 运行日志，旧的在前，最多 [_runLogKeep] 行。
+  final List<RunLogLine> runLog = [];
+
+  /// 当前这卷运行日志的大小和行数；还没读过时为 null。
+  int? runLogBytes;
+  int? runLogLines;
+  int? _runLogNext;
+  Timer? _runLogTimer;
+
+  /// 最近导出的诊断文件。
+  ExportedDiagnostics? lastExport;
+
+  /// 详细记录从什么时候开着；关着时为 null。
+  DateTime? get verboseSince => _daemon?.local.verboseSince;
+
+  /// 本机系统和版本，例如“macOS 15.6 · arm64”。
+  String get system => _daemon?.local.system ?? '';
+
+  /// 开始或停止跟着看运行日志：打开时先读最近的一段，之后每隔一会儿读新写的。
+  void watchRunLog(bool on) {
+    _runLogTimer?.cancel();
+    _runLogTimer = null;
+    if (!on) return;
+    _runLogNext = null;
+    _readRunLog();
+    _runLogTimer = Timer.periodic(_runLogPoll, (_) => _readRunLog());
+  }
+
+  void _readRunLog() => _send(ReadRunLogRequest(since: _runLogNext));
+
+  void exportDiagnostics() => _send(const ExportDiagnosticsRequest());
+
+  void copyDiagnostics() => _send(const CopyDiagnosticsRequest());
+
+  void revealDiagnostics() => _send(const RevealDiagnosticsRequest());
+
+  void openLogsFolder() => _send(const OpenLogsFolderRequest());
+
+  void setVerbose(bool on) => _send(SetVerboseRequest(on));
+
+  /// 在浏览器里打开 GitHub 的问题表单，版本和系统预先填好。
+  Future<void> openIssue() => openLink(
+    Uri.parse(_issueUrl)
+        .replace(
+          queryParameters: {
+            'template': 'bug_report.yml',
+            if (version.isNotEmpty) 'version': version,
+            if (system.isNotEmpty) 'system': system,
+          },
+        )
+        .toString(),
+  );
+
   void clearLog() {
     if (!_send(const ClearLogRequest())) return;
     log.clear();
@@ -486,6 +560,8 @@ class AppState extends ChangeNotifier {
 
   void _onLink() {
     _link = backend.link.value;
+    // 后台换了一份（重启过）：运行日志从头读。
+    _runLogNext = null;
     notifyListeners();
   }
 
@@ -524,6 +600,21 @@ class AppState extends ChangeNotifier {
         // 后台退出了（托盘里的“退出”或安装程序升级、卸载），设置界面跟着关闭。
         _onQuit();
         return;
+      case RunLogNotice(:final lines, :final next, :final fresh, :final bytes, :final linesTotal):
+        if (fresh) runLog.clear();
+        runLog.addAll(lines);
+        if (runLog.length > _runLogKeep) runLog.removeRange(0, runLog.length - _runLogKeep);
+        _runLogNext = next;
+        runLogBytes = bytes;
+        runLogLines = linesTotal;
+        // 没有新内容时不必重画。
+        if (!fresh && lines.isEmpty) return;
+      case DiagnosticsExportedNotice(:final path, :final bytes):
+        lastExport = ExportedDiagnostics(path: path, bytes: bytes);
+      case DiagnosticsSummaryNotice(:final text):
+        unawaited(Clipboard.setData(ClipboardData(text: text)));
+        showToast('已复制摘要：版本、系统和最近 200 行，可以直接贴进问题描述');
+        return;
       case WelcomeNotice():
         return;
     }
@@ -560,6 +651,7 @@ class AppState extends ChangeNotifier {
   @override
   void dispose() {
     _dialTimer?.cancel();
+    _runLogTimer?.cancel();
     unawaited(_subscription.cancel());
     backend.link.removeListener(_onLink);
     unawaited(backend.dispose());

@@ -1,4 +1,5 @@
 // 日志：光标切换、剪贴板同步、设备与连接的记录，可筛选、可清空，新记录实时插到最上面。
+// 最后一个分段“运行日志”是后台的运行日志和诊断文件导出（见 run_log_view.dart）。
 
 import 'package:flutter/material.dart';
 
@@ -8,8 +9,9 @@ import '../theme/tokens.dart';
 import '../widgets/controls.dart';
 import '../widgets/page_scaffold.dart';
 import '../widgets/surface.dart';
+import 'run_log_view.dart';
 
-enum _Filter { all, cursor, clip, file, link }
+enum _Filter { all, cursor, clip, file, link, run }
 
 class LogPage extends StatefulWidget {
   const LogPage({super.key});
@@ -24,23 +26,44 @@ class _LogPageState extends State<LogPage> {
   /// 打开页面时已有的记录不播放进场动画，之后新来的才播放。
   late final int _openedAt = AppScope.read(context).log.firstOrNull?.id ?? -1;
 
+  late final AppState _state = AppScope.read(context);
+
+  void _select(_Filter filter) {
+    if (filter == _filter) return;
+    if (filter == _Filter.run || _filter == _Filter.run) _state.watchRunLog(filter == _Filter.run);
+    setState(() => _filter = filter);
+  }
+
+  @override
+  void dispose() {
+    if (_filter == _Filter.run) _state.watchRunLog(false);
+    super.dispose();
+  }
+
   bool _match(LogEntry e) => switch (_filter) {
     _Filter.all => true,
     _Filter.cursor => e.kind == LogKind.cursor,
     _Filter.clip => e.kind == LogKind.clip,
     _Filter.file => e.kind == LogKind.file,
     _Filter.link => e.kind == LogKind.link,
+    _Filter.run => false,
   };
 
   @override
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
     final c = SfColors.of(context);
+    final run = _filter == _Filter.run;
     final items = state.log.where(_match).toList();
+    final bytes = state.runLogBytes;
+    final count = run
+        ? (bytes == null ? '' : '${sizeText(bytes)} · ${_thousands(state.runLogLines ?? 0)} 行')
+        : '共 ${items.length} 条';
     return PageScaffold(
       title: '日志',
       actions: [
-        PillButton(label: '清空', icon: Icons.delete_outline_rounded, onPressed: state.online ? state.clearLog : null),
+        if (!run)
+          PillButton(label: '清空', icon: Icons.delete_outline_rounded, onPressed: state.online ? state.clearLog : null),
       ],
       children: [
         Wrap(
@@ -57,34 +80,38 @@ class _LogPageState extends State<LogPage> {
                 (_Filter.clip, '剪贴板'),
                 (_Filter.file, '文件'),
                 (_Filter.link, '设备与连接'),
+                (_Filter.run, '运行日志'),
               ],
               value: _filter,
-              onChanged: (v) => setState(() => _filter = v),
+              onChanged: _select,
             ),
             Text(
-              '共 ${items.length} 条',
+              count,
               style: TextStyle(color: c.muted, fontFeatures: tabular),
             ),
           ],
         ),
-        SfCard(
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: items.isEmpty
-              ? Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 34),
-                  child: Center(
-                    child: Text('暂无记录', style: TextStyle(color: c.muted)),
-                  ),
-                )
-              : Column(
-                  children: [
-                    for (var i = 0; i < items.length; i++) ...[
-                      if (i > 0) Divider(height: 1, thickness: 1, indent: 20, endIndent: 20, color: c.line),
-                      _LogRow(key: ValueKey(items[i].id), entry: items[i], fresh: items[i].id > _openedAt),
+        if (run)
+          ...runLogSections()
+        else
+          SfCard(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: items.isEmpty
+                ? Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 34),
+                    child: Center(
+                      child: Text('暂无记录', style: TextStyle(color: c.muted)),
+                    ),
+                  )
+                : Column(
+                    children: [
+                      for (var i = 0; i < items.length; i++) ...[
+                        if (i > 0) Divider(height: 1, thickness: 1, indent: 20, endIndent: 20, color: c.line),
+                        _LogRow(key: ValueKey(items[i].id), entry: items[i], fresh: items[i].id > _openedAt),
+                      ],
                     ],
-                  ],
-                ),
-        ),
+                  ),
+          ),
       ],
     );
   }
@@ -146,3 +173,6 @@ class _LogRow extends StatelessWidget {
     return row;
   }
 }
+
+/// 千位分隔：18241 → 18,241。
+String _thousands(int n) => n.toString().replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (_) => ',');

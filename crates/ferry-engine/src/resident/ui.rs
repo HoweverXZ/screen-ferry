@@ -14,7 +14,11 @@ pub(crate) enum UiEvent {
         id: u64,
         outbox: mpsc::Sender<Notice>,
     },
-    Request(Request),
+    /// 界面 `id` 发来的命令。只回给它的通知（例如运行日志）按 `id` 发回去。
+    Request {
+        id: u64,
+        request: Request,
+    },
     Left {
         id: u64,
     },
@@ -47,7 +51,7 @@ pub(crate) fn accept(incoming: Incoming, id: u64, events: mpsc::UnboundedSender<
             loop {
                 match reader.recv::<Request>().await {
                     Ok(Some(request)) => {
-                        if events.send(UiEvent::Request(request)).is_err() {
+                        if events.send(UiEvent::Request { id, request }).is_err() {
                             break;
                         }
                     }

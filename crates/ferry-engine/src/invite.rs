@@ -12,6 +12,7 @@ use ferry_net::Tls;
 use ferry_proto::{Capabilities, Channel, Hello, RejectReason};
 use ferry_store::Store;
 use ferry_trust::Fingerprint;
+use ferry_types::mark;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio::time::timeout;
@@ -106,7 +107,7 @@ async fn answer(
         return Ok(());
     }
     let addr = SocketAddr::new(from.ip(), port);
-    info!(inviter = %hello.name, %addr, "收到邀请，去连它");
+    info!(inviter = %mark::device(&hello.name), %addr, "收到邀请，去连它");
     let _ = invitations.send(Invitation { addr, peer });
     Ok(())
 }

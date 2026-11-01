@@ -19,8 +19,9 @@ ferry-store.workspace = true
 ferry-trust.workspace = true
 ferry-types.workspace = true
 tokio = { workspace = true, features = ["io-std", "io-util", "macros", "net", "rt", "signal"] }
+time = { workspace = true, features = ["formatting", "local-offset", "macros"] }
 tracing.workspace = true
-tracing-subscriber.workspace = true
+tracing-subscriber = { workspace = true, features = ["time"] }
 
 # 把图标、版本信息和程序清单编进 Windows 程序，见 build.rs。
 [build-dependencies]

@@ -67,6 +67,8 @@
           "port": 24810,
           "role": "server",
           "short": "7AB0-5CB2-38FB-D603",
+          "system": "macOS 15.6 · arm64",
+          "verbose_since": 1793480000000,
           "version": "0.1.0"
         },
         "peers": [
@@ -178,6 +180,8 @@
           "port": 24810,
           "role": "server",
           "short": "7AB0-5CB2-38FB-D603",
+          "system": "macOS 15.6 · arm64",
+          "verbose_since": 1793480000000,
           "version": "0.1.0"
         },
         "peers": [
@@ -311,6 +315,34 @@
     },
     {
       "type": "quit"
+    },
+    {
+      "bytes": 2097152,
+      "fresh": true,
+      "lines": [
+        {
+          "at": "06:12:04",
+          "level": "info",
+          "text": "已连接 Windows · TLS 1.3 · 192.168.2.18"
+        },
+        {
+          "at": "06:20:02",
+          "level": "warn",
+          "text": "连接中断：网络错误"
+        }
+      ],
+      "lines_total": 18241,
+      "next": 204800,
+      "type": "run_log"
+    },
+    {
+      "bytes": 421888,
+      "path": "/Users/me/Downloads/ScreenFerry-诊断-20261102-0624.txt",
+      "type": "diagnostics_exported"
+    },
+    {
+      "text": "ScreenFerry 诊断摘要\n版本 0.1.0",
+      "type": "diagnostics_summary"
     }
   ],
   "requests": [
@@ -459,6 +491,29 @@
     },
     {
       "type": "quit"
+    },
+    {
+      "type": "read_run_log"
+    },
+    {
+      "since": 204800,
+      "type": "read_run_log"
+    },
+    {
+      "type": "export_diagnostics"
+    },
+    {
+      "type": "copy_diagnostics"
+    },
+    {
+      "type": "reveal_diagnostics"
+    },
+    {
+      "type": "open_logs_folder"
+    },
+    {
+      "on": true,
+      "type": "set_verbose"
     }
   ],
   "version": 2

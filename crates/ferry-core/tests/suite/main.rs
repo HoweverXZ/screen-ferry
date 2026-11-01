@@ -10,5 +10,6 @@ mod key_mapper;
 mod layout;
 mod neighbors;
 mod pressed;
+mod redact;
 mod warp_jump;
 mod wheel_scale;

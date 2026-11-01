@@ -1055,4 +1055,102 @@ void main() {
       expect(find.text('打不开浏览器，链接已复制'), findsOneWidget);
     });
   });
+
+  group('运行日志', () {
+    Future<(AppState, DemoBackend)> openRunLog(
+      WidgetTester tester, {
+      Size size = const Size(1160, 780),
+      List<String>? opened,
+    }) async {
+      final backend = DemoBackend(animate: false);
+      final state = await launch(tester, size, backend: backend, opened: opened);
+      state.go(SfPage.log);
+      await settle(tester);
+      await tapInView(tester, find.text('运行日志'));
+      return (state, backend);
+    }
+
+    /// 切回别的分段，停止定时读运行日志。
+    Future<void> leave(WidgetTester tester) async {
+      await tapInView(tester, find.text('全部').first);
+    }
+
+    testWidgets('打开时读最近的一段，之后只读新写的，切走就不再读', (tester) async {
+      final (state, backend) = await openRunLog(tester);
+      final reads = backend.sent.whereType<ReadRunLogRequest>().toList();
+      expect(reads.single.since, isNull);
+      expect(find.text('心跳超时：对方长时间没有响应'), findsOneWidget);
+      expect(find.text('2.0 MB · 18,241 行'), findsOneWidget);
+      expect(find.text('清空'), findsNothing, reason: '运行日志不能在这里清空');
+
+      await tester.pump(const Duration(seconds: 2));
+      expect(backend.sent.whereType<ReadRunLogRequest>().last.since, 2097152, reason: '接着上次的位置读');
+
+      await leave(tester);
+      final count = backend.sent.whereType<ReadRunLogRequest>().length;
+      await tester.pump(const Duration(seconds: 5));
+      expect(backend.sent.whereType<ReadRunLogRequest>().length, count);
+      expect(state.runLog, isNotEmpty);
+    });
+
+    testWidgets('可以只看警告和错误', (tester) async {
+      await openRunLog(tester);
+      expect(find.text('等待客户端连接 addr=0.0.0.0:24810'), findsOneWidget);
+      await tapInView(tester, find.text('警告和错误'));
+      expect(find.text('等待客户端连接 addr=0.0.0.0:24810'), findsNothing);
+      expect(find.text('连接中断：网络错误 · Connection reset by peer'), findsOneWidget);
+      expect(find.text('心跳超时：对方长时间没有响应'), findsOneWidget);
+      await leave(tester);
+    });
+
+    testWidgets('导出诊断文件后显示位置，可以在访达中显示；复制摘要到剪贴板', (tester) async {
+      final copied = <String>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'Clipboard.setData') copied.add((call.arguments as Map)['text'] as String);
+        return null;
+      });
+      addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
+      final (_, backend) = await openRunLog(tester);
+
+      await tapInView(tester, find.text('导出诊断文件'));
+      expect(backend.sent.whereType<ExportDiagnosticsRequest>(), hasLength(1));
+      expect(find.textContaining('ScreenFerry-诊断-20261102-0624.txt', findRichText: true), findsOneWidget);
+      await tapInView(tester, find.text('在访达中显示'));
+      expect(backend.sent.whereType<RevealDiagnosticsRequest>(), hasLength(1));
+
+      await tapInView(tester, find.text('复制摘要'));
+      expect(copied.single, startsWith('ScreenFerry 诊断摘要'));
+      expect(find.text('已复制摘要：版本、系统和最近 200 行，可以直接贴进问题描述'), findsOneWidget);
+
+      await tapInView(tester, find.text('打开日志文件夹'));
+      expect(backend.sent.whereType<OpenLogsFolderRequest>(), hasLength(1));
+      await leave(tester);
+    });
+
+    testWidgets('打开详细记录，提问题时带上版本和系统', (tester) async {
+      final opened = <String>[];
+      final (_, backend) = await openRunLog(tester, opened: opened);
+      expect(find.textContaining('重启 ScreenFerry 后自动关闭'), findsOneWidget);
+      await tapInView(tester, switchOf('详细记录'));
+      expect(backend.sent.whereType<SetVerboseRequest>().single.on, isTrue);
+      expect(find.textContaining('刚刚打开'), findsOneWidget);
+
+      await tapInView(tester, find.text('去 GitHub 提问题'));
+      final url = Uri.parse(opened.single);
+      expect(url.path, '/icloudza/screen-ferry/issues/new');
+      expect(url.queryParameters['template'], 'bug_report.yml');
+      expect(url.queryParameters['version'], '0.1.0');
+      expect(url.queryParameters['system'], 'macOS 15.6 · arm64');
+      await leave(tester);
+    });
+
+    testWidgets('手机大小下运行日志能正常显示', (tester) async {
+      await openRunLog(tester, size: const Size(375, 667));
+      expect(tester.takeException(), isNull);
+      await tester.scrollUntilVisible(find.text('最近的运行日志'), 200, scrollable: find.byType(Scrollable).first);
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      await leave(tester);
+    });
+  });
 }

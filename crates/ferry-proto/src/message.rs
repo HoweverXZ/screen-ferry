@@ -167,7 +167,8 @@ pub(crate) fn allowed(ty: u16, channel: Channel) -> Option<bool> {
 }
 
 impl Message {
-    pub(crate) fn type_id(&self) -> u16 {
+    /// 消息的类型号（见 docs/protocol.md 第 5 节）。日志里只记它，不记消息内容。
+    pub fn type_id(&self) -> u16 {
         match self {
             Self::Hello(_) => ty::HELLO,
             Self::Welcome(_) => ty::WELCOME,

@@ -5,11 +5,12 @@
 //! 没有界面连着时先打开它。见 ADR 0004。
 
 mod confirm;
+mod diagnostics;
 mod record;
 mod runtime;
 mod ui;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use ferry_ipc::{Endpoint, Listener};
@@ -69,6 +70,26 @@ pub trait Host: Send + Sync + 'static {
     /// 服务端监听的端口；0 表示由系统分配（测试用），实际端口见状态里的 `local.port`。
     fn listen_port(&self) -> u16 {
         crate::DEFAULT_PORT
+    }
+    /// 本机系统和版本，例如“macOS 15.6 · arm64”。启动时问一次；不知道时为空。
+    fn system(&self) -> String {
+        String::new()
+    }
+    /// 本机时区与 UTC 相差的秒数，诊断文件里的时间换成本机时间时用。
+    fn utc_offset(&self) -> i32 {
+        0
+    }
+    /// 打开或关闭详细记录：运行日志多记调试信息。
+    fn set_verbose(&self, on: bool) {
+        let _ = on;
+    }
+    /// 在访达或资源管理器里显示并选中这个文件。
+    fn reveal(&self, path: &Path) {
+        let _ = path;
+    }
+    /// 用访达或资源管理器打开这个文件夹。
+    fn open_folder(&self, path: &Path) {
+        let _ = path;
     }
 }
 

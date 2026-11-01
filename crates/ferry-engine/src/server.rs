@@ -30,7 +30,7 @@ use ferry_proto::{
 use ferry_store::Store;
 use ferry_trust::{Fingerprint, Peer};
 use ferry_types::{
-    DeviceSettings, Display, InputEvent, KeyAction, KeyCode, Placement, Point, Rect,
+    DeviceSettings, Display, InputEvent, KeyAction, KeyCode, Placement, Point, Rect, mark,
 };
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::{self, UnboundedReceiver};
@@ -411,11 +411,11 @@ where
             .map(|(id, _)| *id)
             .collect();
         for old in stale {
-            info!(peer = %hello.name, "这台设备重新连上了，结束它之前的会话");
+            info!(peer = %mark::device(&hello.name), "这台设备重新连上了，结束它之前的会话");
             self.end(old, None);
         }
         let Some(remote_rect) = bounds(&remote) else {
-            warn!(peer = %hello.name, "对方没有报告显示器，已断开");
+            warn!(peer = %mark::device(&hello.name), "对方没有报告显示器，已断开");
             return;
         };
         let (place, settings, mouse_dpi) = {
@@ -469,7 +469,7 @@ where
             self.send_to(id, Message::PeerSide { side });
         }
         info!(
-            peer = %hello.name,
+            peer = %mark::device(&hello.name),
             fingerprint = %peer,
             remote = ?remote_rect,
             scale,
@@ -489,7 +489,7 @@ where
         let Some(session) = self.sessions.get_mut(&id) else {
             return;
         };
-        info!(peer = %session.name, "数据连接已建立");
+        info!(peer = %mark::device(&session.name), "数据连接已建立");
         let keys = session.keys;
         let report = Reporter {
             peer: keys.peer,
@@ -521,17 +521,17 @@ where
                 if let Some(rect) = bounds(&session.remote) {
                     let scale = relative_scale(&self.local, &session.remote);
                     self.neighbors.set_remote(id, rect, scale);
-                    info!(peer = %session.name, remote = ?rect, "对方的显示器布局已更新");
+                    info!(peer = %mark::device(&session.name), remote = ?rect, "对方的显示器布局已更新");
                 }
             }
             Message::DropHint(hint) => self.config.edge.remote(session.peer, Some(hint)),
             Message::OpenSettings => {
-                info!(peer = %session.name, "对方请本机打开设置界面");
+                info!(peer = %mark::device(&session.name), "对方请本机打开设置界面");
                 self.config
                     .events
                     .emit(Event::OpenSettings { peer: session.peer });
             }
-            other => debug!(?other, "忽略消息"),
+            other => debug!(kind = format_args!("{:#06x}", other.type_id()), "忽略消息"),
         }
     }
 
@@ -550,8 +550,8 @@ where
             self.config.edge.pointer(|p| p.here = true);
         }
         match &reason {
-            None => info!(peer = %session.name, "客户端已断开"),
-            Some(reason) => warn!(peer = %session.name, "连接中断：{reason}"),
+            None => info!(peer = %mark::device(&session.name), "客户端已断开"),
+            Some(reason) => warn!(peer = %mark::device(&session.name), "连接中断：{reason}"),
         }
         if self.hint_target == Some(session.peer) {
             self.hint_target = None;
@@ -674,7 +674,7 @@ where
                 self.send_to(id, Message::Enter(enter));
                 if let Some(session) = self.sessions.get(&id) {
                     session.active.send_replace(false);
-                    info!(peer = %session.name, ?at, "光标进入对方屏幕");
+                    info!(peer = %mark::device(&session.name), ?at, "光标进入对方屏幕");
                 }
                 self.config.events.emit(Event::Cursor {
                     here: false,
@@ -731,7 +731,7 @@ where
             };
             let settings = live.device(&session.peer);
             if settings != session.settings {
-                info!(peer = %session.name, "这台设备的设置变了");
+                info!(peer = %mark::device(&session.name), "这台设备的设置变了");
                 // 改设置要点本机的设置界面，那时光标在本机、对方没有按着的键，直接换成新的。
                 // 万一还按着，光标离开时对方也会松开所有键。
                 session.mapper =
@@ -751,7 +751,7 @@ where
                 continue;
             };
             if session.side != place.side {
-                info!(peer = %session.name, side = ?place.side, "这台设备换了位置");
+                info!(peer = %mark::device(&session.name), side = ?place.side, "这台设备换了位置");
                 session.side = place.side;
                 if session.edge_drop {
                     let side = place.side.opposite();
@@ -958,7 +958,7 @@ async fn handshake<P: ConfirmPairing>(
             Ok(())
         }
         Channel::Input => {
-            info!(peer = %hello.name, fingerprint = %peer, "客户端已连接");
+            info!(peer = %mark::device(&hello.name), fingerprint = %peer, "客户端已连接");
             // 记下它的 IP：以后本机开始共享时邀请它。记不下来只是少一个兜底。
             if let Err(e) = remember_addr(&shared.store, peer, SocketAddr::new(addr.ip(), 0)) {
                 warn!("记下客户端的地址失败：{e}");
@@ -990,7 +990,7 @@ async fn pair<P: ConfirmPairing>(
     addr: SocketAddr,
     name: &str,
 ) -> Result<()> {
-    info!(peer = name, fingerprint = %peer, "收到配对请求");
+    info!(peer = %mark::device(name), fingerprint = %peer, "收到配对请求");
     let outcome =
         pairing::as_acceptor(framed, shared.fingerprint, peer, name, &shared.confirm).await?;
     match outcome {
@@ -1003,7 +1003,7 @@ async fn pair<P: ConfirmPairing>(
                 addr: Some(SocketAddr::new(addr.ip(), 0)),
             });
             shared.store.save_peers(&peers)?;
-            info!(peer = name, "配对成功，已记住这台设备");
+            info!(peer = %mark::device(name), "配对成功，已记住这台设备");
             shared.events.emit(Event::Paired {
                 name: name.to_owned(),
                 fingerprint: peer,
@@ -1012,9 +1012,9 @@ async fn pair<P: ConfirmPairing>(
         Outcome::RejectedHere | Outcome::RejectedByPeer => {
             let by_peer = outcome == Outcome::RejectedByPeer;
             if by_peer {
-                info!(peer = name, "对方拒绝了配对");
+                info!(peer = %mark::device(name), "对方拒绝了配对");
             } else {
-                info!(peer = name, "已拒绝配对");
+                info!(peer = %mark::device(name), "已拒绝配对");
             }
             shared.events.emit(Event::PairingRejected {
                 name: name.to_owned(),
@@ -1059,7 +1059,7 @@ async fn run_session(
                     Some(message @ (Message::Displays(_) | Message::DropHint(_) | Message::OpenSettings)) => {
                         let _ = arrivals.send(Arrival::Message { id, message }).await;
                     }
-                    Some(other) => debug!(?other, "忽略消息"),
+                    Some(other) => debug!(kind = format_args!("{:#06x}", other.type_id()), "忽略消息"),
                 },
                 _ = tick.tick() => {
                     if heartbeat.timed_out() {

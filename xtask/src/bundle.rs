@@ -365,9 +365,13 @@ fn step(what: &str) {
 
 fn cargo(root: &Path, args: &[&str]) -> Result {
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    let status = Command::new(cargo)
-        .args(args)
-        .current_dir(root)
+    let mut command = Command::new(cargo);
+    command.args(args).current_dir(root);
+    // 诊断文件里写上是哪次提交打的包。
+    if let Some(commit) = commit(root) {
+        command.env("SCREENFERRY_COMMIT", commit);
+    }
+    let status = command
         .status()
         .map_err(|e| format!("无法运行 cargo：{e}"))?;
     status
@@ -425,4 +429,15 @@ fn write(path: &Path, data: &[u8]) -> Result {
 
 fn io(path: &Path, e: std::io::Error) -> String {
     format!("{}：{e}", PathBuf::from(path).display())
+}
+
+/// 当前提交号的前 7 位；不在 git 仓库里时为 `None`。
+fn commit(root: &Path) -> Option<String> {
+    let output = Command::new("git")
+        .args(["rev-parse", "--short=7", "HEAD"])
+        .current_dir(root)
+        .output()
+        .ok()?;
+    let commit = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    (output.status.success() && !commit.is_empty()).then_some(commit)
 }

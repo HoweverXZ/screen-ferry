@@ -52,6 +52,9 @@ bitflags! {
         const FILES = 1 << 2;
         /// 边缘投递：告诉对方相邻的方向，拖动中提示对方提前滑出接收胶囊。
         const EDGE_DROP = 1 << 3;
+        /// 本机的快捷键以 Command 键为主（macOS）。这一位说的是本机是什么键盘，不是一项能力：
+        /// 服务端看客户端 `Hello` 里有没有它，决定要不要互换 Command 与 Ctrl，不看交集。
+        const COMMAND_KEY = 1 << 4;
     }
 }
 

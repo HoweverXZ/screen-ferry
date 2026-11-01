@@ -15,7 +15,7 @@ pub enum Role {
 }
 
 impl Role {
-    /// 本机系统缺省的角色。目前 macOS 只能当服务端，Windows 只能当客户端。
+    /// 本机系统缺省的角色：macOS 当服务端，Windows 当客户端。两边都可以在设置里改。
     pub fn native() -> Self {
         if std::env::consts::OS == "windows" {
             Self::Client
@@ -23,6 +23,13 @@ impl Role {
             Self::Server
         }
     }
+}
+
+/// 本机的快捷键是否以 Command 键为主（只有 macOS 是）。
+///
+/// 两台电脑一台是一台不是时，才需要互换 Command 与 Ctrl。
+pub fn uses_command_key() -> bool {
+    std::env::consts::OS == "macos"
 }
 
 /// 设置界面的配色。

@@ -52,6 +52,8 @@ pub struct ServerConfig {
     pub name: String,
     /// 是否同步剪贴板。
     pub clipboard: bool,
+    /// 本机的快捷键以 Command 键为主（macOS）。客户端与本机不同时，按键才按 `Live::remap` 重映射。
+    pub command_key: bool,
     /// 数据目录：本机身份和已信任的设备。
     pub store: Store,
     /// 是否在局域网里用 mDNS 广播本机，让客户端不填地址也能找到。
@@ -73,6 +75,7 @@ pub struct Live {
     /// 光标所在的设备换到另一侧时，先回到本机。
     pub layout: Vec<Placement>,
     /// 发送前对按键做的重映射，例如把 Command 当作对方的 Ctrl。
+    /// 只用在键盘习惯与本机不同的设备上（一台以 Command 为主、一台不是）。
     pub remap: KeyRemap,
 }
 
@@ -226,6 +229,8 @@ struct Session {
     keys: Keys,
     /// 对方懂边缘投递的消息（`PeerSide`、`DropHint`）。
     edge_drop: bool,
+    /// 对方的键盘习惯与本机不同（一台以 Command 为主、一台不是），按键要重映射。
+    remap: bool,
     /// 最近一次告诉它的“服务端在你的哪一侧”。
     side: Side,
     _io: Task,
@@ -279,7 +284,7 @@ where
         let rect = bounds(&local).ok_or(Error::NoDisplays("本机"))?;
         let (arrivals_tx, arrivals) = mpsc::channel(64);
         let shared = Arc::new(Shared {
-            capabilities: capabilities(config.clipboard),
+            capabilities: capabilities(config.clipboard, config.command_key),
             tls,
             fingerprint: identity.fingerprint(),
             name: config.name.clone(),
@@ -406,6 +411,9 @@ where
             self.config.events.clone(),
         ));
         let edge_drop = caps.contains(Capabilities::EDGE_DROP);
+        // 看对方自己声明的那一位，不看交集：交集里只有两边都是 Mac 时才有它。
+        let remap =
+            self.config.command_key != hello.capabilities.contains(Capabilities::COMMAND_KEY);
         let session = Session {
             peer,
             name: hello.name.clone(),
@@ -414,6 +422,7 @@ where
             remote,
             keys,
             edge_drop,
+            remap,
             side: place.side,
             _io: Task(io),
             sync: None,
@@ -578,12 +587,17 @@ where
                     && code == KeyCode::ESCAPE
                     && escape_hotkey(&self.pressed)
                 {
-                    info!("快捷键 Ctrl + Option + Esc：回到本机");
+                    info!("快捷键 Ctrl + Option（Alt）+ Esc：回到本机");
                     if let Some((id, t)) = self.neighbors.leave() {
                         self.perform(id, t, true);
                     }
                 } else {
-                    let code = self.config.live.borrow().remap.apply(code);
+                    let remap = self.sessions.get(&id).is_some_and(|s| s.remap);
+                    let code = if remap {
+                        self.config.live.borrow().remap.apply(code)
+                    } else {
+                        code
+                    };
                     self.send_to(id, Message::Input(InputEvent::Key { code, action }));
                 }
             }

@@ -2,36 +2,6 @@
 
 use std::path::PathBuf;
 
-use ferry_platform::{CaptureSink, Error, InputCapture, InputInject, Result};
-use ferry_types::{InputEvent, LockKeys, Point};
-
-/// 本机还做不到的那个方向：目前 macOS 只能控制别人，Windows 只能被控制。
-pub(crate) struct Unsupported(pub(crate) &'static str);
-
-impl InputCapture for Unsupported {
-    fn start(&mut self, _sink: CaptureSink) -> Result<()> {
-        Err(Error::Unsupported(self.0))
-    }
-    fn grab(&self) -> Result<()> {
-        Err(Error::Unsupported(self.0))
-    }
-    fn release(&self, _at: Point) -> Result<()> {
-        Err(Error::Unsupported(self.0))
-    }
-    fn lock_keys(&self) -> LockKeys {
-        LockKeys::empty()
-    }
-}
-
-impl InputInject for Unsupported {
-    fn inject(&mut self, _event: &InputEvent) -> Result<()> {
-        Err(Error::Unsupported(self.0))
-    }
-    fn sync_locks(&mut self, _wanted: LockKeys, _mask: LockKeys) -> Result<()> {
-        Err(Error::Unsupported(self.0))
-    }
-}
-
 /// 指定设置界面位置的环境变量，调试时用。
 const SETTINGS_ENV: &str = "SCREENFERRY_SETTINGS_APP";
 
@@ -73,14 +43,13 @@ mod mac {
     use ferry_engine::resident::Host;
     use ferry_platform::{Autostart, Error, Permissions, Result};
     use ferry_platform_macos::{
-        MacAutostart, MacCapture, MacClipboard, MacDisplays, MacOverlay, MacPermissions,
+        MacAutostart, MacCapture, MacClipboard, MacDisplays, MacInject, MacOverlay, MacPermissions,
     };
     use ferry_types::Role;
     use tracing::warn;
 
-    use super::{Unsupported, autostart_command, exe_dir, settings_app};
+    use super::{autostart_command, exe_dir, settings_app};
 
-    const NO_INJECT: &str = "这台 Mac 暂时只能控制别的电脑，还不能被控制";
     /// LaunchAgent 的标识，与安装包的 bundle id 一致。
     const BUNDLE_ID: &str = "io.github.icloudza.screenferry";
 
@@ -103,7 +72,7 @@ mod mac {
 
     impl Host for NativeHost {
         type Capture = MacCapture;
-        type Inject = Unsupported;
+        type Inject = MacInject;
         type Displays = MacDisplays;
         type Clipboard = MacClipboard;
         type Overlay = MacOverlay;
@@ -119,14 +88,13 @@ mod mac {
                 .unwrap_or_else(|| "Mac".into())
         }
 
-        fn check_permissions(&self, role: Role) -> Result<()> {
-            match role {
-                // 第一次发现缺权限时向系统申请一次：系统弹出提示，并把本程序加进授权列表。
-                Role::Server if !self.prompted.swap(true, Ordering::SeqCst) => {
-                    MacPermissions.request_input()
-                }
-                Role::Server => MacPermissions.check_input(),
-                Role::Client => Err(Error::Unsupported(NO_INJECT)),
+        fn check_permissions(&self, _role: Role) -> Result<()> {
+            // 控制别的电脑（读取键鼠）和被控制（发出键鼠）都要辅助功能权限。
+            // 第一次发现缺权限时向系统申请一次：系统弹出提示，并把本程序加进授权列表。
+            if self.prompted.swap(true, Ordering::SeqCst) {
+                MacPermissions.check_input()
+            } else {
+                MacPermissions.request_input()
             }
         }
 
@@ -134,8 +102,8 @@ mod mac {
             Ok(MacCapture::new())
         }
 
-        fn inject(&self) -> Result<Unsupported> {
-            Err(Error::Unsupported(NO_INJECT))
+        fn inject(&self) -> Result<MacInject> {
+            MacInject::new()
         }
 
         fn displays(&self) -> MacDisplays {
@@ -210,14 +178,12 @@ mod win {
     use ferry_engine::resident::Host;
     use ferry_platform::{Autostart, Error, Permissions, Result};
     use ferry_platform_windows::{
-        WinAutostart, WinClipboard, WinDisplays, WinInject, WinOverlay, WinPermissions,
+        WinAutostart, WinCapture, WinClipboard, WinDisplays, WinInject, WinOverlay, WinPermissions,
     };
     use ferry_types::Role;
     use tracing::warn;
 
-    use super::{Unsupported, autostart_command, exe_dir, settings_app};
-
-    const NO_CAPTURE: &str = "这台电脑暂时只能被控制，还不能控制别的电脑";
+    use super::{autostart_command, exe_dir, settings_app};
 
     pub(crate) struct NativeHost {
         autostart: Option<WinAutostart>,
@@ -235,7 +201,7 @@ mod win {
     }
 
     impl Host for NativeHost {
-        type Capture = Unsupported;
+        type Capture = WinCapture;
         type Inject = WinInject;
         type Displays = WinDisplays;
         type Clipboard = WinClipboard;
@@ -248,15 +214,12 @@ mod win {
                 .unwrap_or_else(|| "Windows".into())
         }
 
-        fn check_permissions(&self, role: Role) -> Result<()> {
-            match role {
-                Role::Client => WinPermissions.check_input(),
-                Role::Server => Err(Error::Unsupported(NO_CAPTURE)),
-            }
+        fn check_permissions(&self, _role: Role) -> Result<()> {
+            WinPermissions.check_input()
         }
 
-        fn capture(&self) -> Result<Unsupported> {
-            Err(Error::Unsupported(NO_CAPTURE))
+        fn capture(&self) -> Result<WinCapture> {
+            Ok(WinCapture::new())
         }
 
         fn inject(&self) -> Result<WinInject> {

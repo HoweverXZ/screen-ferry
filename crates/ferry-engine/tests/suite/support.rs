@@ -93,6 +93,9 @@ pub struct Setup {
     /// 客户端的边缘投递报告去处与文件传输；默认不需要、按 `pc` 的数据目录新建。
     pub pc_edge: EdgeFeed,
     pub pc_files: Option<Files>,
+    /// 两端的快捷键是否以 Command 为主；默认服务端是 Mac、客户端是 PC。
+    pub mac_command_key: bool,
+    pub pc_command_key: bool,
 }
 
 impl Default for Setup {
@@ -113,6 +116,8 @@ impl Default for Setup {
             mac_files: None,
             pc_edge: EdgeFeed::none(),
             pc_files: None,
+            mac_command_key: true,
+            pc_command_key: false,
         }
     }
 }
@@ -206,6 +211,7 @@ impl Rig {
                 }),
                 name: "mac".into(),
                 clipboard: true,
+                command_key: setup.mac_command_key,
                 store: setup.mac.store.clone(),
                 announce: setup.discover,
                 events: setup.mac_events.clone(),
@@ -267,6 +273,7 @@ impl Rig {
             },
             name: "pc".into(),
             clipboard: true,
+            command_key: setup.pc_command_key,
             store: setup.pc.store.clone(),
             events: setup.pc_events.clone(),
             files,
@@ -379,6 +386,7 @@ impl Rig {
             server: ServerAddr::Fixed(self.addr),
             name: name.into(),
             clipboard: true,
+            command_key: false,
             store: device.store.clone(),
             events,
             files,

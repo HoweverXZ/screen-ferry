@@ -21,10 +21,13 @@ cargo xtask lint
 - 默认把 Mac 的 Command 当作 Windows 的 Ctrl，⌘C、⌘V 即复制粘贴；不需要时加 `--no-cmd-ctrl-swap`。
 - 进入 Windows 时同步 Caps Lock 状态。
 - 媒体键（音量加减、静音、播放/暂停、上一首、下一首）也会转发；亮度、键盘背光仍作用在 Mac 上。
-- 光标在 Windows 上时，按 **Ctrl + Option + Esc** 可以强制回到 Mac。
+- 光标在 Windows 上时，按 **Ctrl + Option + Esc** 可以强制回到 Mac（键盘鼠标接在 Windows 上时是 Ctrl + Alt + Esc）。
 - 剪贴板在光标切过去时才同步：在 Mac 上复制，移到 Windows 即可粘贴，反之亦然。不需要时在任意一端加 `--no-clipboard`。目前只同步纯文本。
 - 两台电脑可以互传文件和文件夹：`screenferry send <文件或文件夹>...` 请正在运行的 ScreenFerry 发给它连着的电脑，对方收到后放在“下载”文件夹，重名时自动编号。断线后重新连上会接着传。也可以直接把文件拖到朝向对方的屏幕边缘：贴边滑出胶囊，放上去就发送；收到文件时胶囊变成卡片，可以打开、在访达（资源管理器）中显示，或者直接把文件从卡片拖到任意文件夹。Mac 和 Windows 上都可以，样子一样（见 ADR 0005）。
 - Mac 可以同时连着几台电脑：在设置界面的布局页把它们摆到本机的上下左右，同一侧的几台平分那条边，光标推出哪一段就去哪台。拖文件到哪一段就发给哪台；`screenferry send` 发给光标最近去过的那台（见 ADR 0006）。
+- 反过来也可以：键盘鼠标接在 Windows 上时，在设置界面的“设置 → 这台电脑”里把 Windows 改为“控制别的电脑”、Mac 改为“被控制”
+  （命令行：Windows 上运行 `serve`，Mac 上运行 `connect`）。Windows 控制 Mac 时 Ctrl 当作 ⌘；两台都是 Mac 或都是 Windows 时不互换。
+  Mac 被控制同样需要辅助功能权限；Windows 第一次当服务端时，防火墙可能询问是否允许 ScreenFerry 接受连接，请允许（见 ADR 0007）。
 - 测试时请先退出 Deskflow 等同类软件，两者会争抢同一套键鼠。
 
 两台电脑之间的连接全程 TLS 1.3 加密。第一次连接时两边终端都会显示同一个 6 位配对码，核对一致后分别输入 `y` 回车确认；之后两台电脑互相记住对方，不再询问。用 `screenferry peers` 查看已配对的设备，`screenferry forget <设备名或指纹>` 删除。

@@ -64,6 +64,8 @@ pub struct ClientConfig {
     pub name: String,
     /// 是否同步剪贴板。
     pub clipboard: bool,
+    /// 本机的快捷键以 Command 键为主（macOS）。告诉服务端，由它决定要不要互换 Command 与 Ctrl。
+    pub command_key: bool,
     /// 数据目录：本机身份和已信任的设备。
     pub store: Store,
     /// 对外报告的事件。
@@ -328,7 +330,7 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
             return Ok(Ended::Paired);
         }
 
-        let caps = capabilities(config.clipboard);
+        let caps = capabilities(config.clipboard, config.command_key);
         let hello = Hello::new(Channel::Input, caps, 0, config.name.clone());
         let welcome =
             match timeout(HANDSHAKE_TIMEOUT, ferry_net::initiate(&mut framed, hello)).await {

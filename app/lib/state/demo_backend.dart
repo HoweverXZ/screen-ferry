@@ -14,11 +14,12 @@ class DemoBackend implements Backend {
   /// [paired] 为假时没有任何已配对的设备。
   DemoBackend({
     this.role = Role.server,
+    String? platform,
     this.animate = true,
     this.startOnline = true,
     bool paired = true,
     this._problem,
-  }) {
+  }) : platform = platform ?? (role == Role.server ? 'macos' : 'windows') {
     final now = DateTime.now();
     _since = now.subtract(const Duration(hours: 1, minutes: 12, seconds: 14));
     _clip = ClipboardSync(
@@ -52,6 +53,9 @@ class DemoBackend implements Backend {
   }
 
   final Role role;
+
+  /// 本机系统。不给时按角色推断：服务端是 Mac，客户端是 Windows。
+  final String platform;
   final bool animate;
   final bool startOnline;
 
@@ -323,6 +327,7 @@ class DemoBackend implements Backend {
             ? '~/Library/Application Support/ScreenFerry'
             : r'C:\Users\me\AppData\Roaming\ScreenFerry',
         version: '0.1.0',
+        platform: platform,
       ),
       sharing: _sharing,
       problem: _problem,

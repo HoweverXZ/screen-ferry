@@ -25,6 +25,22 @@ class SettingsPage extends StatelessWidget {
     return PageScaffold(
       title: '设置',
       children: [
+        const SectionTitle('这台电脑'),
+        SfGroup(
+          children: [
+            SfRow(
+              icon: Icons.swap_horiz_rounded,
+              title: '角色',
+              subtitle: state.isServer ? '键盘鼠标接在这台上，用它控制别的电脑' : '由另一台电脑的键盘鼠标控制 · 切换后重新连接',
+              trailing: SfSegmented<Role>(
+                label: '角色',
+                segments: const [(Role.server, '控制别的电脑'), (Role.client, '被控制')],
+                value: state.role,
+                onChanged: state.online ? state.setRole : null,
+              ),
+            ),
+          ],
+        ),
         const SectionTitle('外观'),
         ListenableBuilder(
           listenable: state.appearance,
@@ -66,12 +82,12 @@ class SettingsPage extends StatelessWidget {
           children: [
             if (state.isServer)
               SfRow(
-                icon: Icons.keyboard_command_key_rounded,
-                title: '⌘ 当作 Ctrl',
-                subtitle: '在 Windows 上按 ⌘C、⌘V 就是复制、粘贴',
+                icon: state.localIsMac ? Icons.keyboard_command_key_rounded : Icons.keyboard_control_key_rounded,
+                title: state.localIsMac ? '⌘ 当作 Ctrl' : 'Ctrl 当作 ⌘',
+                subtitle: state.localIsMac ? '在 Windows 上按 ⌘C、⌘V 就是复制、粘贴' : '在 Mac 上按 Ctrl+C、Ctrl+V 就是复制、粘贴',
                 trailing: SfSwitch(
                   value: s.swapCmdCtrl,
-                  label: '⌘ 当作 Ctrl',
+                  label: state.localIsMac ? '⌘ 当作 Ctrl' : 'Ctrl 当作 ⌘',
                   onChanged: set((v) => SettingsPatch(swapCmdCtrl: v)),
                 ),
               ),

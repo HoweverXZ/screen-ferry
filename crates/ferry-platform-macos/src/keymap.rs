@@ -1,8 +1,14 @@
-//! 按键映射：macOS 虚拟键码（`kVK_*`）→ USB HID 键码。
+//! 按键映射：macOS 虚拟键码（`kVK_*`）与 USB HID 键码互相转换。
 //!
 //! 键码是物理位置，与键盘布局、输入法无关。对照表参考 Chromium 的 keycode_converter。
+//! 只维护一个方向的对照表（[`hid_code`]），反方向由它推出，两个方向不会对不上。
+
+use std::sync::OnceLock;
 
 use ferry_types::KeyCode;
+
+/// macOS 虚拟键码的取值范围是 0–0x7F。
+const MAC_KEYCODES: u16 = 0x80;
 
 /// macOS 虚拟键码对应的 HID 键码。Fn 等没有 HID 对应的键返回 `None`。
 pub fn hid_code(keycode: u16) -> Option<KeyCode> {
@@ -131,6 +137,29 @@ pub fn hid_code(keycode: u16) -> Option<KeyCode> {
     Some(KeyCode::keyboard(usage))
 }
 
+/// HID 键码对应的 macOS 虚拟键码。没有对应的键返回 `None`。
+///
+/// 几个 HID 键在 Mac 上对应同一个键时（小键盘 Clear 与 Num Lock、Help 与 Insert），
+/// 取对照表里的那一个。媒体键不是普通按键，见 [`nx_key`]。
+pub fn mac_keycode(code: KeyCode) -> Option<u16> {
+    static TABLE: OnceLock<Vec<Option<u16>>> = OnceLock::new();
+    if code.page() != KeyCode::KEYBOARD_PAGE {
+        return None;
+    }
+    let table = TABLE.get_or_init(|| {
+        let mut table = vec![None; 0x100];
+        for keycode in 0..MAC_KEYCODES {
+            if let Some(hid) = hid_code(keycode) {
+                let slot = &mut table[usize::from(hid.usage())];
+                // 按键码从小到大，先到先得。
+                slot.get_or_insert(keycode);
+            }
+        }
+        table
+    });
+    table.get(usize::from(code.usage())).copied().flatten()
+}
+
 /// 修饰键在 `CGEventFlags` 中对应的“设备相关”位，用来区分左右键各自的按下与松开。
 pub(crate) fn modifier_flag(keycode: u16) -> Option<u64> {
     Some(match keycode {
@@ -158,6 +187,25 @@ pub fn media_key(nx_key: u32) -> Option<KeyCode> {
         16 => KeyCode::PLAY_PAUSE,     // NX_KEYTYPE_PLAY
         17 => KeyCode::NEXT_TRACK,     // NX_KEYTYPE_NEXT
         18 => KeyCode::PREVIOUS_TRACK, // NX_KEYTYPE_PREVIOUS
+        _ => return None,
+    })
+}
+
+/// HID 键码对应的媒体键（`NX_KEYTYPE_*`），[`media_key`] 的反方向。
+///
+/// 键盘页上的音量键（Windows 键盘的音量键也会报成这几个）同样按媒体键处理：
+/// 在 Mac 上，音量键要以系统事件发出才会调节音量。
+pub fn nx_key(code: KeyCode) -> Option<u32> {
+    const KEYBOARD_MUTE: KeyCode = KeyCode::keyboard(0x7F);
+    const KEYBOARD_VOLUME_UP: KeyCode = KeyCode::keyboard(0x80);
+    const KEYBOARD_VOLUME_DOWN: KeyCode = KeyCode::keyboard(0x81);
+    Some(match code {
+        KeyCode::VOLUME_UP | KEYBOARD_VOLUME_UP => 0,
+        KeyCode::VOLUME_DOWN | KEYBOARD_VOLUME_DOWN => 1,
+        KeyCode::MUTE | KEYBOARD_MUTE => 7,
+        KeyCode::PLAY_PAUSE => 16,
+        KeyCode::NEXT_TRACK => 17,
+        KeyCode::PREVIOUS_TRACK => 18,
         _ => return None,
     })
 }

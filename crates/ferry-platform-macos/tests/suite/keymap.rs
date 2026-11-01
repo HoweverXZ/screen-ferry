@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use ferry_platform_macos::{hid_code, media_key};
+use ferry_platform_macos::{hid_code, mac_keycode, media_key, nx_key};
 use ferry_types::KeyCode;
 
 #[test]
@@ -87,4 +87,40 @@ fn keys_the_other_side_lacks_stay_on_the_mac() {
     for nx in [2, 3, 4, 21, 22, 23] {
         assert_eq!(media_key(nx), None, "NX_KEYTYPE {nx}");
     }
+}
+
+#[test]
+fn every_mapped_key_maps_back_to_the_same_mac_key() {
+    for mac in 0..=0x7F_u16 {
+        if let Some(hid) = hid_code(mac) {
+            assert_eq!(mac_keycode(hid), Some(mac), "{mac:#04x} → {hid:?}");
+        }
+    }
+}
+
+#[test]
+fn keys_a_mac_keyboard_lacks_have_no_mac_key() {
+    // Print Screen、Scroll Lock、Pause，以及消费者页的媒体键（它们走 nx_key）。
+    for hid in [
+        KeyCode::keyboard(0x46),
+        KeyCode::SCROLL_LOCK,
+        KeyCode::keyboard(0x48),
+        KeyCode::VOLUME_UP,
+    ] {
+        assert_eq!(mac_keycode(hid), None, "{hid:?}");
+    }
+}
+
+#[test]
+fn media_keys_map_back_to_their_nx_key_types() {
+    for nx in 0..32 {
+        if let Some(hid) = media_key(nx) {
+            assert_eq!(nx_key(hid), Some(nx), "NX_KEYTYPE {nx}");
+        }
+    }
+    // Windows 键盘的音量键报成键盘页上的键，在 Mac 上同样要当媒体键发出才调得了音量。
+    assert_eq!(nx_key(KeyCode::keyboard(0x80)), Some(0));
+    assert_eq!(nx_key(KeyCode::keyboard(0x81)), Some(1));
+    assert_eq!(nx_key(KeyCode::keyboard(0x7F)), Some(7));
+    assert_eq!(nx_key(KeyCode::STOP), None);
 }

@@ -97,6 +97,7 @@ class Local {
     required this.dataDir,
     required this.version,
     this.port,
+    this.platform = '',
   });
 
   factory Local.fromJson(Json j) => Local(
@@ -107,6 +108,7 @@ class Local {
     dataDir: _str(j['data_dir']),
     version: _str(j['version']),
     port: j['port'] is num ? _int(j['port']) : null,
+    platform: _str(j['platform']),
   );
 
   final String name;
@@ -118,6 +120,9 @@ class Local {
 
   /// 服务端正在监听的端口；客户端、或还没开始监听时为 null。
   final int? port;
+
+  /// 本机系统：`macos`、`windows` 等。旧版后台不报，为空。
+  final String platform;
 }
 
 class Problem {
@@ -572,6 +577,7 @@ class SendFilesRequest extends Request {
 class SettingsPatch {
   const SettingsPatch({
     this.name,
+    this.role,
     this.side,
     this.layout,
     this.swapCmdCtrl,
@@ -584,6 +590,9 @@ class SettingsPatch {
   });
 
   final String? name;
+
+  /// 改变本机的角色。后台会断开现有的连接、以新角色重新开始。
+  final Role? role;
   final ScreenSide? side;
 
   /// 给出时整份替换。
@@ -598,6 +607,7 @@ class SettingsPatch {
 
   Json toJson() => {
     'name': ?name,
+    'role': ?role?.name,
     'side': ?side?.name,
     'layout': ?layout?.map((p) => p.toJson()).toList(),
     'swap_cmd_ctrl': ?swapCmdCtrl,
@@ -612,6 +622,7 @@ class SettingsPatch {
   /// 后面的补丁覆盖前面的。
   SettingsPatch merge(SettingsPatch o) => SettingsPatch(
     name: o.name ?? name,
+    role: o.role ?? role,
     side: o.side ?? side,
     layout: o.layout ?? layout,
     swapCmdCtrl: o.swapCmdCtrl ?? swapCmdCtrl,
@@ -626,6 +637,8 @@ class SettingsPatch {
   /// 去掉已经与 `s` 一致的字段：后台确认过的改动不再需要覆盖。
   SettingsPatch without(DaemonSettings s) => SettingsPatch(
     name: name == s.name ? null : name,
+    // 角色不在设置里，界面直接看后台报告的 `local.role`，不需要先显示。
+    role: null,
     side: side == s.side ? null : side,
     layout: switch (layout) {
       final l? when !_sameList(l, s.layout) => l,

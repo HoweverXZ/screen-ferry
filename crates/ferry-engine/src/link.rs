@@ -13,14 +13,16 @@ use crate::error::{Error, Result};
 /// 默认端口。
 pub const DEFAULT_PORT: u16 = 24810;
 
-/// 本机声明的可选能力。
-pub(crate) fn capabilities(clipboard: bool) -> Capabilities {
-    let base = Capabilities::FILES | Capabilities::EDGE_DROP;
+/// 本机声明的可选能力。`command_key`：本机的快捷键以 Command 键为主。
+pub(crate) fn capabilities(clipboard: bool, command_key: bool) -> Capabilities {
+    let mut caps = Capabilities::FILES | Capabilities::EDGE_DROP;
     if clipboard {
-        base | Capabilities::CLIPBOARD
-    } else {
-        base
+        caps |= Capabilities::CLIPBOARD;
     }
+    if command_key {
+        caps |= Capabilities::COMMAND_KEY;
+    }
+    caps
 }
 
 pub(crate) const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);

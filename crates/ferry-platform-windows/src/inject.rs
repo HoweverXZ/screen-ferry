@@ -4,7 +4,7 @@
 //! 键盘用扫描码注入，不受键盘布局和输入法影响。
 //! 光标在对方屏幕上时，本机光标停到一个看不见的位置（见 [`hider`]）。
 
-mod hider;
+pub(crate) mod hider;
 
 use ferry_platform::{Error, InputInject, Result};
 use ferry_types::{InputEvent, KeyAction, KeyCode, LockKeys, MouseButton, Point};

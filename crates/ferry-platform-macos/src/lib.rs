@@ -19,6 +19,7 @@ pub use capture::MacCapture;
 pub use clipboard::MacClipboard;
 pub use display::MacDisplays;
 pub use event_loop::MacEventLoop;
-pub use keymap::{hid_code, media_key};
+pub use inject::MacInject;
+pub use keymap::{hid_code, mac_keycode, media_key, nx_key};
 pub use overlay::{MacOverlay, render_png};
 pub use permission::MacPermissions;

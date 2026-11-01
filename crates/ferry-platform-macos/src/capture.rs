@@ -91,7 +91,7 @@ unsafe extern "C" {
 
 /// 后台程序默认改不了光标的显示：窗口服务器只听前台应用的。给本进程的连接打开
 /// `SetsCursorInBackground` 之后，隐藏光标才对后台程序生效。整个进程只需做一次。
-fn allow_cursor_control_in_background() {
+pub(crate) fn allow_cursor_control_in_background() {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
         let key = NSString::from_str("SetsCursorInBackground");
@@ -127,7 +127,7 @@ fn disable_local_suppression() {
 }
 
 /// 此刻的光标位置。
-fn live_cursor() -> Option<Point> {
+pub(crate) fn live_cursor() -> Option<Point> {
     let probe = CGEvent::new(None)?;
     let p = CGEvent::location(Some(&probe));
     Some(Point::new(p.x.floor() as i32, p.y.floor() as i32))

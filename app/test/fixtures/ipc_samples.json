@@ -51,6 +51,7 @@
           "data_dir": "/Users/me/Library/Application Support/ScreenFerry",
           "fingerprint": "7ab05cb238fbd60311223344556677889900aabbccddeeff0011223344556677",
           "name": "Mac Studio",
+          "platform": "macos",
           "port": 24810,
           "role": "server",
           "short": "7AB0-5CB2-38FB-D603",
@@ -120,6 +121,7 @@
           "data_dir": "/Users/me/Library/Application Support/ScreenFerry",
           "fingerprint": "7ab05cb238fbd60311223344556677889900aabbccddeeff0011223344556677",
           "name": "Mac Studio",
+          "platform": "macos",
           "port": 24810,
           "role": "server",
           "short": "7AB0-5CB2-38FB-D603",
@@ -234,6 +236,12 @@
             "side": "right"
           }
         ]
+      },
+      "type": "update_settings"
+    },
+    {
+      "settings": {
+        "role": "client"
       },
       "type": "update_settings"
     },

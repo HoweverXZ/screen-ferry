@@ -1,7 +1,11 @@
-//! 按键映射：USB HID 键码 → Windows 扫描码（Set 1）。
+//! 按键映射：USB HID 键码与 Windows 扫描码（Set 1）互相转换。
 //!
 //! 注入时用扫描码而不是虚拟键码：扫描码对应物理位置，不受键盘布局和输入法影响，
-//! 中文、日文输入法都能正常处理。
+//! 中文、日文输入法都能正常处理。只维护一个方向的对照表（[`win_key`]），
+//! 反方向（[`hid_from_windows`]）由它推出，两个方向不会对不上。
+
+use std::collections::HashMap;
+use std::sync::OnceLock;
 
 use ferry_types::KeyCode;
 
@@ -163,4 +167,61 @@ pub fn win_key(code: KeyCode) -> Option<WinKey> {
         0xE7 => ext(0x5C),                        // 右 Win
         _ => None,
     }
+}
+
+/// 低级键盘钩子报告的一个键（虚拟键码、扫描码、是否扩展键）对应的 HID 键码。
+/// 认不出的键返回 `None`。
+///
+/// 先看虚拟键码：媒体键、Pause、Print Screen、左右修饰键靠它区分最可靠
+/// （Pause 和 Num Lock 的扫描码相同，按住 Alt 时 Print Screen 的扫描码会变，
+/// 右 Shift 有没有扩展位各台机器报得不一样）。其余按扫描码查 [`win_key`] 的反方向。
+///
+/// 扫描码高位不为 0 的是系统合成的键，例如 AltGr 附带的那个左 Ctrl，返回 `None`。
+pub fn hid_from_windows(vk: u16, scan: u16, extended: bool) -> Option<KeyCode> {
+    if scan > 0xFF {
+        return None;
+    }
+    let by_vk = match vk {
+        0xAD => KeyCode::MUTE,
+        0xAE => KeyCode::VOLUME_DOWN,
+        0xAF => KeyCode::VOLUME_UP,
+        0xB0 => KeyCode::NEXT_TRACK,
+        0xB1 => KeyCode::PREVIOUS_TRACK,
+        0xB2 => KeyCode::STOP,
+        0xB3 => KeyCode::PLAY_PAUSE,
+        VK_PAUSE => KeyCode::keyboard(0x48),
+        0x2C => KeyCode::keyboard(0x46), // VK_SNAPSHOT
+        0x90 => KeyCode::NUM_LOCK,
+        0xA0 => KeyCode::LEFT_SHIFT,
+        0xA1 => KeyCode::RIGHT_SHIFT,
+        0xA2 => KeyCode::LEFT_CTRL,
+        0xA3 => KeyCode::RIGHT_CTRL,
+        0xA4 => KeyCode::LEFT_ALT,
+        0xA5 => KeyCode::RIGHT_ALT,
+        0x5B => KeyCode::LEFT_GUI,
+        0x5C => KeyCode::RIGHT_GUI,
+        _ => return by_scan(scan, extended),
+    };
+    Some(by_vk)
+}
+
+/// 扫描码 → HID 键码，由 [`win_key`] 反推。几个 HID 键共用一个扫描码时取编号最小的那个
+/// （例如 `\` 与 ISO 键盘的 `#`）。
+fn by_scan(scan: u16, extended: bool) -> Option<KeyCode> {
+    static TABLE: OnceLock<HashMap<(u16, bool), KeyCode>> = OnceLock::new();
+    let table = TABLE.get_or_init(|| {
+        let mut table = HashMap::new();
+        for usage in 0..=0xFF {
+            let code = KeyCode::keyboard(usage);
+            if let Some(WinKey::Scan {
+                code: scan,
+                extended,
+            }) = win_key(code)
+            {
+                table.entry((scan, extended)).or_insert(code);
+            }
+        }
+        table
+    });
+    table.get(&(scan, extended)).copied()
 }

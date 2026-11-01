@@ -99,6 +99,9 @@ pub struct Local {
     /// 服务端正在监听的端口；客户端、或还没开始监听时为 `null`。
     #[serde(default)]
     pub port: Option<u16>,
+    /// 本机系统：`macos`、`windows` 等。旧版后台没有这个字段，为空字符串。
+    #[serde(default)]
+    pub platform: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -227,6 +230,9 @@ pub struct Settings {
 pub struct SettingsPatch {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// 改变本机的角色：控制别的电脑，还是被控制。会断开现有的连接、重新开始。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<Role>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub side: Option<Side>,
     /// 整份替换。

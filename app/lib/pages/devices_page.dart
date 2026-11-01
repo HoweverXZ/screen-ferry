@@ -28,11 +28,7 @@ class DevicesPage extends StatelessWidget {
               width: 64,
               height: 64,
               decoration: ShapeDecoration(color: c.accent, shape: continuous(22)),
-              child: Icon(
-                state.isServer ? Icons.desktop_mac_outlined : Icons.desktop_windows_outlined,
-                size: 32,
-                color: c.onAccent,
-              ),
+              child: Icon(state.localIcon, size: 32, color: c.onAccent),
             ),
             body: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -196,12 +192,7 @@ class _PairedCardState extends State<_PairedCard> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              IconTile(
-                state.isServer ? Icons.desktop_windows_outlined : Icons.desktop_mac_outlined,
-                size: 52,
-                radius: 18,
-                emphasized: d.online,
-              ),
+              IconTile(state.peerIcon, size: 52, radius: 18, emphasized: d.online),
               Pill(d.online ? '在线' : '离线', tone: d.online ? PillTone.good : PillTone.plain),
             ],
           ),
@@ -318,9 +309,9 @@ class _FoundCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Row(
+            Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [IconTile(Icons.desktop_mac_outlined, size: 52, radius: 18), Pill('未配对')],
+              children: [IconTile(state.peerIcon, size: 52, radius: 18), const Pill('未配对')],
             ),
             const SizedBox(height: 12),
             Text(

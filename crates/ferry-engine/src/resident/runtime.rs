@@ -14,7 +14,7 @@ use ferry_ipc::{
 };
 use ferry_store::Store;
 use ferry_trust::{Fingerprint, PeerList};
-use ferry_types::{Config, Role, Side};
+use ferry_types::{Config, Role, Side, uses_command_key};
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
@@ -202,6 +202,7 @@ impl<H: Host> Runtime<H> {
             live: live_rx,
             name: self.name.clone(),
             clipboard: self.config.clipboard,
+            command_key: uses_command_key(),
             store: self.store.clone(),
             announce: self.config.announce,
             events: self.events.clone(),
@@ -232,6 +233,7 @@ impl<H: Host> Runtime<H> {
             server,
             name: self.name.clone(),
             clipboard: self.config.clipboard,
+            command_key: uses_command_key(),
             store: self.store.clone(),
             events: self.events.clone(),
             files: self.files.clone(),
@@ -751,6 +753,11 @@ impl<H: Host> Runtime<H> {
             restart |= name != next.name;
             next.name = name;
         }
+        let role_changed = patch.role.filter(|&role| role != next.role);
+        if let Some(role) = role_changed {
+            restart = true;
+            next.role = role;
+        }
         if let Some(announce) = patch.announce {
             restart |= announce != next.announce;
             next.announce = announce;
@@ -815,6 +822,15 @@ impl<H: Host> Runtime<H> {
                 format!("{peer} 移到本机{}", side_label(side)),
                 "布局已保存",
             );
+        }
+        if let Some(role) = role_changed {
+            // 另一种角色用不上之前发现的服务端。
+            self.found.clear();
+            let (text, detail) = match role {
+                Role::Server => ("改为控制别的电脑", "键盘鼠标在本机，等另一台电脑来连接"),
+                Role::Client => ("改为由另一台电脑控制", "在局域网里寻找键盘鼠标所在的那台"),
+            };
+            self.log(LogKind::Link, LogIcon::Settings, text, detail);
         }
         if restart {
             self.name = resolve_name(&self.config, &self.host);
@@ -1003,6 +1019,7 @@ impl<H: Host> Runtime<H> {
                 data_dir: self.store.root().display().to_string(),
                 version: env!("CARGO_PKG_VERSION").to_owned(),
                 port: self.port,
+                platform: std::env::consts::OS.to_owned(),
             },
             sharing: !self.paused,
             problem: self.problem.clone(),

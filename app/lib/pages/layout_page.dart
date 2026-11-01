@@ -50,9 +50,9 @@ class LayoutPage extends StatelessWidget {
       title: '布局',
       children: [
         const _Stage(),
-        const SfGroup(
+        SfGroup(
           children: [
-            SfRow(
+            const SfRow(
               title: '切换方式',
               subtitle: '停留一下再切换，可以避免鼠标甩到边缘时误切 · 即将支持',
               trailing: SfSegmented<SwitchMode>(
@@ -62,12 +62,16 @@ class LayoutPage extends StatelessWidget {
                 onChanged: null,
               ),
             ),
-            SfRow(
+            const SfRow(
               title: '拖拽时不切换',
               subtitle: '按住鼠标键时，光标不会切到另一台电脑 · 目前始终开启',
               trailing: SfSwitch(value: true, label: '拖拽时不切换', onChanged: null),
             ),
-            SfRow(title: '回到本机', subtitle: '光标卡在对方屏幕上时，按它立即回来', trailing: KeyCombo(['Ctrl', 'Option', 'Esc'])),
+            SfRow(
+              title: '回到本机',
+              subtitle: '光标卡在对方屏幕上时，按它立即回来',
+              trailing: KeyCombo(['Ctrl', state.localIsMac ? 'Option' : 'Alt', 'Esc']),
+            ),
           ],
         ),
       ],

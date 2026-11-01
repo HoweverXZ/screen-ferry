@@ -112,13 +112,7 @@ class _HeroCard extends StatelessWidget {
         const SizedBox(height: 18),
         Row(
           children: [
-            IconTile(
-              state.isServer ? Icons.desktop_windows_outlined : Icons.desktop_mac_outlined,
-              size: 66,
-              radius: 22,
-              iconSize: 32,
-              emphasized: state.connected,
-            ),
+            IconTile(state.peerIcon, size: 66, radius: 22, iconSize: 32, emphasized: state.connected),
             const SizedBox(width: 16),
             Expanded(
               child: Column(
@@ -461,8 +455,8 @@ class _QuickTiles extends StatelessWidget {
       ),
       if (state.isServer) ...[
         _QuickTile(
-          icon: Icons.keyboard_command_key_rounded,
-          label: '⌘ 当作 Ctrl',
+          icon: state.localIsMac ? Icons.keyboard_command_key_rounded : Icons.keyboard_control_key_rounded,
+          label: state.localIsMac ? '⌘ 当作 Ctrl' : 'Ctrl 当作 ⌘',
           on: s.swapCmdCtrl,
           onTap: toggle(SettingsPatch(swapCmdCtrl: !s.swapCmdCtrl)),
         ),
@@ -583,10 +577,7 @@ class _DevicesCard extends StatelessWidget {
               padding: const EdgeInsets.symmetric(vertical: 10),
               child: Row(
                 children: [
-                  IconTile(
-                    state.isServer ? Icons.desktop_windows_outlined : Icons.desktop_mac_outlined,
-                    emphasized: peers[i].online,
-                  ),
+                  IconTile(state.peerIcon, emphasized: peers[i].online),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
@@ -638,10 +629,7 @@ class _DevicesCard extends StatelessWidget {
             decoration: ShapeDecoration(color: c.card2, shape: continuous(18)),
             child: Row(
               children: [
-                IconTile(
-                  state.isServer ? Icons.desktop_mac_outlined : Icons.desktop_windows_outlined,
-                  emphasized: true,
-                ),
+                IconTile(state.localIcon, emphasized: true),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(

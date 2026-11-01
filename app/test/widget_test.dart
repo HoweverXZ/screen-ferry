@@ -395,6 +395,29 @@ void main() {
     final patch = backend.sent.whereType<UpdateSettingsRequest>().last.settings;
     expect(patch.toJson(), {'clipboard': false});
   });
+  testWidgets('在设置里切换角色，把新角色发给后台', (tester) async {
+    final backend = DemoBackend(animate: false);
+    final state = await launch(tester, const Size(1160, 780), backend: backend);
+    state.go(SfPage.settings);
+    await settle(tester);
+    expect(find.text('⌘ 当作 Ctrl'), findsWidgets, reason: 'Mac 当服务端时说的是 ⌘');
+
+    await tester.tap(find.text('被控制'));
+    await settle(tester);
+    final patch = backend.sent.whereType<UpdateSettingsRequest>().last.settings;
+    expect(patch.toJson(), {'role': 'client'});
+  });
+
+  testWidgets('Windows 当服务端时按 Windows 的说法显示', (tester) async {
+    final backend = DemoBackend(animate: false, platform: 'windows');
+    final state = await launch(tester, const Size(1160, 780), backend: backend);
+    state.go(SfPage.settings);
+    await settle(tester);
+    expect(state.localIsMac, isFalse);
+    expect(find.text('Ctrl 当作 ⌘'), findsWidgets);
+    expect(find.text('在 Mac 上按 Ctrl+C、Ctrl+V 就是复制、粘贴'), findsOneWidget);
+  });
+
   for (final (name, size) in [
     ('默认窗口', const Size(1160, 780)),
     ('窄屏', const Size(600, 900)),

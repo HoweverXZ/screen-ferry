@@ -52,6 +52,7 @@
 
 ```text
 local     name · fingerprint · short · role(server|client) · data_dir · version · port（服务端监听的端口，否则 null）
+          platform（本机系统，macos|windows…；旧版后台没有，为空）
 sharing   用户没有暂停共享
 problem   null | { kind(permission|port_in_use|other), message }
 link      status(paused|starting|waiting|searching|connecting|connected|stopped)
@@ -74,7 +75,7 @@ activity[] { hour, switches, clips, connected_secs }         最近 48 小时，
 |---|---|---|
 | `hello` | `token`、`version` | 见第 3 节 |
 | `set_sharing` | `on` | 暂停或继续共享 |
-| `update_settings` | `settings`：`settings` 的任意子集 | 只改出现的字段；`layout` 整份替换 |
+| `update_settings` | `settings`：`settings` 的任意子集，另可带 `role`（server\|client） | 只改出现的字段；`layout` 整份替换；改 `role` 会断开现有的连接、以新角色重新开始 |
 | `forget` | `fingerprint` | 删除一台已配对设备 |
 | `pair_reply` | `id`、`accept` | 回答配对请求 |
 | `connect` | `fingerprint` | 客户端：连接 `found` 中的一台服务端，未配对时先配对 |

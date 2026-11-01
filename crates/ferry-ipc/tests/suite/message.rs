@@ -50,6 +50,12 @@ fn requests() -> Vec<Request> {
                 ..SettingsPatch::default()
             },
         },
+        Request::UpdateSettings {
+            settings: SettingsPatch {
+                role: Some(Role::Client),
+                ..SettingsPatch::default()
+            },
+        },
         Request::Forget {
             fingerprint: FP_PC.into(),
         },
@@ -87,6 +93,7 @@ fn state() -> State {
             data_dir: "/Users/me/Library/Application Support/ScreenFerry".into(),
             version: "0.1.0".into(),
             port: Some(24810),
+            platform: "macos".into(),
         },
         sharing: true,
         problem: None,

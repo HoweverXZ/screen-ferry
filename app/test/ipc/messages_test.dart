@@ -56,6 +56,7 @@ void main() {
     expect(s.local.short, '7AB0-5CB2-38FB-D603');
     expect(s.local.version, '0.1.0');
     expect(s.local.port, 24810);
+    expect(s.local.platform, 'macos');
     expect(s.sharing, isTrue);
     expect(s.problem, isNull);
     expect(s.link.status, LinkStatus.connected);
@@ -111,6 +112,7 @@ void main() {
       const UpdateSettingsRequest(
         SettingsPatch(layout: [Placement(pc, ScreenSide.left), Placement(mac, ScreenSide.right)]),
       ),
+      const UpdateSettingsRequest(SettingsPatch(role: Role.client)),
       const ForgetRequest(pc),
       const PairReplyRequest(3, accept: true),
       const ConnectRequest(mac),

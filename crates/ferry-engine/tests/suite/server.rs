@@ -1,7 +1,7 @@
 use ferry_platform::CaptureEvent;
 use ferry_types::{InputEvent, KeyAction, KeyCode, MouseButton, Point};
 
-use crate::support::{EDGE, ENTRY, RETURN, Rig, display, eventually};
+use crate::support::{EDGE, ENTRY, RETURN, Rig, Setup, display, eventually};
 
 fn motion(x: i32, y: i32) -> InputEvent {
     InputEvent::PointerMotion {
@@ -201,6 +201,52 @@ async fn keys_are_forwarded_with_command_as_control() {
             key(KeyCode::LEFT_CTRL, KeyAction::Up),
         ],
         "光标进入前的按键不转发；⌘ 换成 Ctrl",
+    );
+}
+
+#[tokio::test]
+async fn two_machines_with_the_same_kind_of_keyboard_keep_command_and_control() {
+    let rig = Rig::with(Setup {
+        pc_command_key: true,
+        ..Setup::default()
+    })
+    .await;
+    rig.enter().await;
+    rig.key(KeyCode::LEFT_GUI, KeyAction::Down);
+    rig.key(KeyCode::LEFT_CTRL, KeyAction::Down);
+
+    eventually("客户端收到按键", || rig.inject.events().len() >= 3).await;
+    assert_eq!(
+        rig.inject.events()[1..],
+        [
+            key(KeyCode::LEFT_GUI, KeyAction::Down),
+            key(KeyCode::LEFT_CTRL, KeyAction::Down),
+        ],
+        "两台都是 Mac：⌘ 还是 ⌘",
+    );
+}
+
+#[tokio::test]
+async fn a_pc_controlling_a_mac_sends_control_as_command() {
+    let rig = Rig::with(Setup {
+        mac_command_key: false,
+        pc_command_key: true,
+        ..Setup::default()
+    })
+    .await;
+    let letter_c = KeyCode::keyboard(0x06);
+    rig.enter().await;
+    rig.key(KeyCode::LEFT_CTRL, KeyAction::Down);
+    rig.key(letter_c, KeyAction::Down);
+
+    eventually("客户端收到按键", || rig.inject.events().len() >= 3).await;
+    assert_eq!(
+        rig.inject.events()[1..],
+        [
+            key(KeyCode::LEFT_GUI, KeyAction::Down),
+            key(letter_c, KeyAction::Down),
+        ],
+        "Windows 控制 Mac：Ctrl + C 到了 Mac 上是 ⌘C",
     );
 }
 

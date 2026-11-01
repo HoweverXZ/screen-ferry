@@ -147,6 +147,16 @@ class AppState extends ChangeNotifier {
 
   Role get role => _daemon?.local.role ?? Role.server;
   bool get isServer => role == Role.server;
+
+  /// 本机系统：`macos`、`windows` 等。
+  String get platform => _daemon?.local.platform ?? '';
+
+  /// 本机是不是 Mac。旧版后台不报系统，那时服务端一定是 Mac、客户端一定是 Windows。
+  bool get localIsMac => platform.isEmpty ? isServer : platform == 'macos';
+
+  /// 本机和对方的图标。对方是什么系统不知道，按“和本机不一样”画：Mac 与 Windows 互相控制最常见。
+  IconData get localIcon => localIsMac ? Icons.desktop_mac_outlined : Icons.desktop_windows_outlined;
+  IconData get peerIcon => localIsMac ? Icons.desktop_windows_outlined : Icons.desktop_mac_outlined;
   String get localName => _daemon?.local.name ?? '';
   String get localFingerprint => _daemon?.local.short ?? '';
   String get dataDir => _daemon?.local.dataDir ?? '';
@@ -295,6 +305,11 @@ class AppState extends ChangeNotifier {
   void setTheme(ThemeMode mode) => updateSettings(SettingsPatch(theme: UiTheme.values.byName(mode.name)));
 
   void setAccent(int accent) => updateSettings(SettingsPatch(accent: accent));
+
+  /// 改为控制别的电脑（服务端）或被控制（客户端）。
+  void setRole(Role to) {
+    if (to != role) updateSettings(SettingsPatch(role: to));
+  }
 
   /// 改变没有单独安排的设备放在哪一侧。
   void moveScreen(ScreenSide to) {

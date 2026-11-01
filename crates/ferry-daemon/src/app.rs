@@ -9,6 +9,7 @@ use ferry_core::KeyRemap;
 use ferry_engine::{ClientConfig, EdgeFeed, Events, Files, Live, ServerAddr, ServerConfig};
 use ferry_store::Store;
 use ferry_trust::Fingerprint;
+use ferry_types::uses_command_key;
 use tracing::{error, info};
 
 use crate::cli::{Mode, Options};
@@ -126,6 +127,7 @@ pub(crate) fn run(options: Options) -> ExitCode {
                         .fixed(),
                         name: options.name,
                         clipboard: options.clipboard,
+                        command_key: uses_command_key(),
                         store,
                         announce,
                         events: Events::none(),
@@ -139,6 +141,7 @@ pub(crate) fn run(options: Options) -> ExitCode {
                         server: server.map_or(ServerAddr::Discover, ServerAddr::Fixed),
                         name: options.name,
                         clipboard: options.clipboard,
+                        command_key: uses_command_key(),
                         store,
                         events: Events::none(),
                         files,
@@ -317,9 +320,42 @@ async fn serve(listen: SocketAddr, config: ServerConfig) -> AppResult {
     Ok(engine.await?)
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+async fn serve(listen: SocketAddr, config: ServerConfig) -> AppResult {
+    use ferry_platform_windows::{WinCapture, WinClipboard, WinDisplays};
+
+    let listener = tokio::net::TcpListener::bind(listen).await?;
+    let (capture, displays) = (WinCapture::new(), WinDisplays::new());
+    let engine = ferry_engine::serve(
+        listener,
+        config,
+        capture,
+        displays,
+        WinClipboard::new(),
+        TerminalConfirm,
+    );
+    Ok(engine.await?)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 async fn serve(_listen: SocketAddr, _config: ServerConfig) -> AppResult {
-    Err("原型阶段只能在 macOS 上运行 serve".into())
+    Err("目前只能在 macOS 和 Windows 上运行 serve".into())
+}
+
+#[cfg(target_os = "macos")]
+async fn connect(config: ClientConfig) -> AppResult {
+    use ferry_platform::Permissions;
+    use ferry_platform_macos::{MacClipboard, MacDisplays, MacInject, MacPermissions};
+
+    MacPermissions.check_input()?;
+    let engine = ferry_engine::connect(
+        config,
+        MacInject::new()?,
+        MacDisplays,
+        MacClipboard::new(),
+        TerminalConfirm,
+    );
+    Ok(engine.await?)
 }
 
 #[cfg(target_os = "windows")]
@@ -339,7 +375,7 @@ async fn connect(config: ClientConfig) -> AppResult {
     Ok(engine.await?)
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 async fn connect(_config: ClientConfig) -> AppResult {
-    Err("原型阶段只能在 Windows 上运行 connect".into())
+    Err("目前只能在 macOS 和 Windows 上运行 connect".into())
 }

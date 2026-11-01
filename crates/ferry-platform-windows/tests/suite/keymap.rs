@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use ferry_platform_windows::{WinKey, win_key};
+use ferry_platform_windows::{WinKey, hid_from_windows, win_key};
 use ferry_types::KeyCode;
 
 fn scan(code: u16, extended: bool) -> Option<WinKey> {
@@ -71,4 +71,54 @@ fn no_two_keys_share_a_windows_key() {
         }
     }
     assert!(seen.len() > 100, "实际映射了 {} 个键", seen.len());
+}
+
+#[test]
+fn scan_codes_map_back_to_a_hid_key_on_the_same_spot() {
+    for usage in 0..=0xFF {
+        let Some(WinKey::Scan { code, extended }) = win_key(KeyCode::keyboard(usage)) else {
+            continue;
+        };
+        let back = hid_from_windows(0, code, extended).expect("扫描码认得出来");
+        // 共用一个扫描码的键（\ 与 ISO 的 #）取编号小的那个，注入时还是同一个位置。
+        assert_eq!(
+            win_key(back),
+            Some(WinKey::Scan { code, extended }),
+            "HID {usage:#04x}"
+        );
+    }
+}
+
+#[test]
+fn virtual_keys_tell_apart_keys_that_scan_codes_cannot() {
+    let cases = [
+        // Pause 和 Num Lock 的扫描码都是 0x45。
+        ((0x13, 0x45, false), KeyCode::keyboard(0x48)),
+        ((0x90, 0x45, true), KeyCode::NUM_LOCK),
+        // 按着 Alt 时 Print Screen 的扫描码变成 0x54。
+        ((0x2C, 0x54, false), KeyCode::keyboard(0x46)),
+        // 右 Shift 有没有扩展位都一样。
+        ((0xA1, 0x36, false), KeyCode::RIGHT_SHIFT),
+        ((0xA1, 0x36, true), KeyCode::RIGHT_SHIFT),
+        ((0x5B, 0x5B, true), KeyCode::LEFT_GUI),
+        ((0xA5, 0x38, true), KeyCode::RIGHT_ALT),
+        // 媒体键报成消费者页，和 Mac 的媒体键一致。
+        ((0xAF, 0x30, true), KeyCode::VOLUME_UP),
+        ((0xB3, 0x22, true), KeyCode::PLAY_PAUSE),
+    ];
+    for ((vk, scan, extended), expected) in cases {
+        assert_eq!(
+            hid_from_windows(vk, scan, extended),
+            Some(expected),
+            "vk {vk:#04x} scan {scan:#04x}"
+        );
+    }
+}
+
+#[test]
+fn synthesized_keys_are_not_recognized() {
+    // AltGr 附带的那个左 Ctrl：扫描码 0x21D。
+    assert_eq!(hid_from_windows(0xA2, 0x21D, false), None);
+    // 输入法直接送进来的字符（VK_PACKET），没有扫描码。
+    assert_eq!(hid_from_windows(0xE7, 0, false), None);
 }

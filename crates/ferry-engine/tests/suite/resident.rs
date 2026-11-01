@@ -251,6 +251,7 @@ async fn first_pairing_is_confirmed_in_the_ui() {
             server: ServerAddr::Fixed(([127, 0, 0, 1], port).into()),
             name: "pc".into(),
             clipboard: true,
+            command_key: false,
             store: pc.store.clone(),
             events: Events::none(),
             files: Files::new(&pc.store, Events::none()),
@@ -383,6 +384,7 @@ async fn pairing_with_no_ui_open_opens_the_settings() {
             server: ServerAddr::Fixed(([127, 0, 0, 1], port).into()),
             name: "pc".into(),
             clipboard: false,
+            command_key: false,
             store: pc.store.clone(),
             events: Events::none(),
             files: Files::new(&pc.store, Events::none()),
@@ -427,5 +429,44 @@ async fn the_listening_port_is_reported_and_cleared_when_paused() {
     ui.send(Request::SetSharing { on: false }).await;
     ui.state_where("暂停后不再监听", |s| s.local.port.is_none())
         .await;
+    daemon.task.abort();
+}
+
+#[tokio::test]
+async fn switching_the_role_restarts_as_the_other_side() {
+    let daemon = Daemon::start(MockHost::default()).await;
+    let mut ui = daemon.ui().await;
+    ui.state_where("先以服务端等待连接", |s| {
+        s.link.status == LinkStatus::Waiting && s.local.port.is_some()
+    })
+    .await;
+
+    ui.send(Request::UpdateSettings {
+        settings: SettingsPatch {
+            role: Some(Role::Client),
+            ..SettingsPatch::default()
+        },
+    })
+    .await;
+    let state = ui
+        .state_where("改为客户端，不再监听", |s| {
+            s.local.role == Role::Client && s.local.port.is_none()
+        })
+        .await;
+    assert_ne!(state.link.status, LinkStatus::Waiting, "不再等别人来连");
+    assert_eq!(state.local.platform, std::env::consts::OS);
+    assert_eq!(daemon.device.store.config().unwrap().role, Role::Client);
+
+    ui.send(Request::UpdateSettings {
+        settings: SettingsPatch {
+            role: Some(Role::Server),
+            ..SettingsPatch::default()
+        },
+    })
+    .await;
+    ui.state_where("改回服务端后重新监听", |s| {
+        s.local.role == Role::Server && s.local.port.is_some()
+    })
+    .await;
     daemon.task.abort();
 }

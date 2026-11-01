@@ -92,6 +92,7 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = [
     "NSObject",
     "NSString",
     "NSURL",
+    "NSUserDefaults",
     "NSValue",
 ] }
 objc2-core-graphics = { version = "0.3.2", default-features = false, features = [

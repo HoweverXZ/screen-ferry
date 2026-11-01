@@ -10,7 +10,10 @@ use ferry_ipc::{
     LogIcon, LogKind, Notice, PairingPrompt, PeerInfo, PeerRef, Problem, ProblemKind, Request,
     Settings, SettingsPatch, State, VERSION,
 };
-use ferry_types::{Placement, Role, Side, Theme};
+use ferry_types::{
+    DeviceSettings, KeyMapping, ModifierPreset, ModifierTarget, Placement, Role, ScrollSpeed, Side,
+    Theme,
+};
 use serde_json::{Value, json};
 
 const FP_PC: &str = "3f9a12c477e0b1d2aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55";
@@ -18,6 +21,35 @@ const FP_MAC: &str = "7ab05cb238fbd60311223344556677889900aabbccddeeff0011223344
 
 fn samples_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../app/test/fixtures/ipc_samples.json")
+}
+
+/// 一台单独设置过的设备：每个字段都不是缺省值，两边的解码都要覆盖到。
+fn device() -> DeviceSettings {
+    let mut d = DeviceSettings::new(FP_PC);
+    d.alias = "书房的电脑".into();
+    d.pointer_dpi = 2000;
+    d.reverse_vertical = true;
+    d.reverse_horizontal = true;
+    d.scroll_speed = ScrollSpeed::Fast;
+    d.modifiers = ModifierPreset::Custom;
+    d.text_shortcuts = true;
+    d.edge_delay_ms = 200;
+    d.clipboard = false;
+    d.files = false;
+    d.custom_modifiers.caps_lock = ModifierTarget::Ctrl;
+    d.custom_modifiers.alt = ModifierTarget::None;
+    d.keys = vec![
+        // F13 → Print Screen；Caps Lock 不发送。
+        KeyMapping {
+            from: 0x0007_0068,
+            to: 0x0007_0046,
+        },
+        KeyMapping {
+            from: 0x0007_0039,
+            to: 0,
+        },
+    ];
+    d
 }
 
 fn requests() -> Vec<Request> {
@@ -33,6 +65,7 @@ fn requests() -> Vec<Request> {
                 autostart: Some(true),
                 theme: Some(Theme::Light),
                 clipboard_limit_mb: Some(16),
+                mouse_dpi: Some(800),
                 ..SettingsPatch::default()
             },
         },
@@ -57,6 +90,10 @@ fn requests() -> Vec<Request> {
                 ..SettingsPatch::default()
             },
         },
+        Request::SetDevice { device: device() },
+        Request::SetDevice {
+            device: DeviceSettings::new(FP_MAC),
+        },
         Request::Forget {
             fingerprint: FP_PC.into(),
         },
@@ -70,6 +107,9 @@ fn requests() -> Vec<Request> {
         Request::OpenPermissionSettings,
         Request::ClearLog,
         Request::OpenSettings,
+        Request::OpenPeerSettings {
+            fingerprint: FP_PC.into(),
+        },
         Request::SendFiles {
             paths: vec![
                 "/Users/me/Desktop/证书.p12".into(),
@@ -95,6 +135,7 @@ fn state() -> State {
             version: "0.1.0".into(),
             port: Some(24810),
             platform: "macos".into(),
+            natural_scrolling: Some(true),
         },
         sharing: true,
         problem: None,
@@ -134,6 +175,8 @@ fn state() -> State {
             last_seen: None,
             side: Some(Side::Left),
             cursor: true,
+            alias: "书房的电脑".into(),
+            platform: "windows".into(),
         }],
         found: vec![FoundDevice {
             name: "会议室 Mac".into(),
@@ -149,14 +192,15 @@ fn state() -> State {
                 fingerprint: FP_PC.into(),
                 side: Side::Left,
             }],
-            swap_cmd_ctrl: true,
             announce: true,
             clipboard: true,
             clipboard_limit_mb: 32,
+            mouse_dpi: 1600,
             server: String::new(),
             autostart: false,
             theme: Theme::Dark,
             accent: 2,
+            devices: vec![device()],
         },
         activity: vec![HourActivity {
             hour: 1_793_476_800,
@@ -216,6 +260,9 @@ fn notices() -> Vec<Notice> {
         Notice::PairingClosed { id: 3 },
         Notice::Toast {
             text: "已暂停共享".into(),
+        },
+        Notice::ShowDevice {
+            fingerprint: FP_PC.into(),
         },
     ]
 }

@@ -15,7 +15,7 @@ mod overlay;
 mod permission;
 
 pub use autostart::MacAutostart;
-pub use capture::MacCapture;
+pub use capture::{MacCapture, natural_scrolling};
 pub use clipboard::MacClipboard;
 pub use display::MacDisplays;
 pub use event_loop::MacEventLoop;

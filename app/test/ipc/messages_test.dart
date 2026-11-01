@@ -42,6 +42,7 @@ void main() {
       PairingNotice,
       PairingClosedNotice,
       ToastNotice,
+      ShowDeviceNotice,
     });
   });
 
@@ -57,6 +58,7 @@ void main() {
     expect(s.local.version, '0.1.0');
     expect(s.local.port, 24810);
     expect(s.local.platform, 'macos');
+    expect(s.local.naturalScrolling, isTrue);
     expect(s.sharing, isTrue);
     expect(s.problem, isNull);
     expect(s.link.status, LinkStatus.connected);
@@ -78,6 +80,26 @@ void main() {
     expect(s.peers.single.lastSeen, isNull);
     expect(s.peers.single.side, ScreenSide.left);
     expect(s.peers.single.cursor, isTrue);
+    expect(s.peers.single.alias, '书房的电脑');
+    expect(s.peers.single.platform, 'windows');
+    expect(s.peers.single.displayName, '书房的电脑', reason: '起过名字就显示起的名字');
+    expect(s.settings.mouseDpi, 1600);
+    final d = s.settings.devices.single;
+    expect(d.fingerprint, pc);
+    expect(d.alias, '书房的电脑');
+    expect(d.pointerDpi, 2000);
+    expect(d.reverseVertical && d.reverseHorizontal, isTrue);
+    expect(d.scrollSpeed, ScrollSpeed.fast);
+    expect(d.modifiers, ModifierPreset.custom);
+    expect(d.textShortcuts, isTrue);
+    expect(d.edgeDelayMs, 200);
+    expect(d.clipboard || d.files, isFalse);
+    expect(d.customModifiers.capsLock, ModifierTarget.ctrl);
+    expect(d.customModifiers.alt, ModifierTarget.none);
+    expect(d.customModifiers.gui, ModifierTarget.gui);
+    expect(d.keys, const [KeyMapping(0x00070068, 0x00070046), KeyMapping(0x00070039, 0)]);
+    expect(s.settings.device(pc), d);
+    expect(s.settings.device(mac), const DeviceSettings(fingerprint: mac), reason: '没单独设置过的用缺省设置');
     expect(s.found.single.paired, isFalse);
     expect(s.settings.side, ScreenSide.right);
     expect(s.settings.layout, [const Placement(pc, ScreenSide.left)]);
@@ -107,6 +129,7 @@ void main() {
     expect(prompt.digits, '482913');
     expect(decoded.whereType<PairingClosedNotice>().single.id, 3);
     expect(decoded.whereType<ToastNotice>().single.text, '已暂停共享');
+    expect(decoded.whereType<ShowDeviceNotice>().single.fingerprint, pc);
   });
 
   test('Dart 编码的命令与样例一致', () {
@@ -114,18 +137,43 @@ void main() {
       HelloRequest('ab' * 32),
       const SetSharingRequest(false),
       const UpdateSettingsRequest(
-        SettingsPatch(side: ScreenSide.left, autostart: true, theme: UiTheme.light, clipboardLimitMb: 16),
+        SettingsPatch(
+          side: ScreenSide.left,
+          autostart: true,
+          theme: UiTheme.light,
+          clipboardLimitMb: 16,
+          mouseDpi: 800,
+        ),
       ),
       const UpdateSettingsRequest(
         SettingsPatch(layout: [Placement(pc, ScreenSide.left), Placement(mac, ScreenSide.right)]),
       ),
       const UpdateSettingsRequest(SettingsPatch(role: Role.client)),
+      const SetDeviceRequest(
+        DeviceSettings(
+          fingerprint: pc,
+          alias: '书房的电脑',
+          pointerDpi: 2000,
+          reverseVertical: true,
+          reverseHorizontal: true,
+          scrollSpeed: ScrollSpeed.fast,
+          modifiers: ModifierPreset.custom,
+          textShortcuts: true,
+          edgeDelayMs: 200,
+          clipboard: false,
+          files: false,
+          customModifiers: ModifierMap(capsLock: ModifierTarget.ctrl, alt: ModifierTarget.none),
+          keys: [KeyMapping(0x00070068, 0x00070046), KeyMapping(0x00070039, 0)],
+        ),
+      ),
+      const SetDeviceRequest(DeviceSettings(fingerprint: mac)),
       const ForgetRequest(pc),
       const PairReplyRequest(3, accept: true),
       const ConnectRequest(mac),
       const OpenPermissionSettingsRequest(),
       const ClearLogRequest(),
       const OpenSettingsRequest(),
+      const OpenPeerSettingsRequest(pc),
       const SendFilesRequest(['/Users/me/Desktop/证书.p12', '/Users/me/Desktop/设计稿']),
       const SendFilesRequest(['/Users/me/Desktop/证书.p12'], to: pc),
     ];
@@ -173,5 +221,43 @@ void main() {
     final other = DaemonSettings.fromJson({'side': 'right'});
     expect(const SettingsPatch(layout: layout).without(other).layout, layout);
     expect(other.apply(const SettingsPatch(layout: layout)).layout, layout);
+  });
+
+  test('设备设置：缺省值、恢复默认、修饰键方案', () {
+    const d = DeviceSettings(fingerprint: pc);
+    expect(d.isDefault, isTrue);
+    expect(d.modifierMap(differ: true), ModifierMap.swapGuiCtrl, reason: '本机习惯：两种键盘不同时互换');
+    expect(d.modifierMap(differ: false), ModifierMap.plain);
+    final changed = d.copyWith(alias: '书房', reverseVertical: true, keys: const [KeyMapping(1, 2)]);
+    expect(changed.isDefault, isFalse);
+    expect(
+      changed.reset(),
+      const DeviceSettings(fingerprint: pc, alias: '书房'),
+      reason: '恢复默认保留名字',
+    );
+    expect(ModifierMap.plain.replaced(ModifierKey.capsLock, ModifierTarget.ctrl).toJson(), {
+      'gui': 'gui',
+      'ctrl': 'ctrl',
+      'alt': 'alt',
+      'caps_lock': 'ctrl',
+    });
+  });
+
+  test('先按改了的设备设置显示，改回缺省时去掉这一条', () {
+    final s = DaemonSettings.fromJson({'side': 'right'});
+    final mine = s.withDevice(const DeviceSettings(fingerprint: pc, reverseVertical: true));
+    expect(mine.device(pc).reverseVertical, isTrue);
+    expect(mine.devices, hasLength(1));
+    expect(mine.withDevice(const DeviceSettings(fingerprint: pc)).devices, isEmpty);
+  });
+
+  test('旧版后台没有设备设置和鼠标 DPI 时取缺省值', () {
+    final settings = DaemonSettings.fromJson({'name': '', 'side': 'left'});
+    expect(settings.mouseDpi, 1600);
+    expect(settings.devices, isEmpty);
+    final peer = PeerInfo.fromJson({'name': '办公室 PC', 'fingerprint': pc});
+    expect(peer.alias, isEmpty);
+    expect(peer.displayName, '办公室 PC');
+    expect(Local.fromJson({}).naturalScrolling, isNull);
   });
 }

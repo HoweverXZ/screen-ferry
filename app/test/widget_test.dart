@@ -1,12 +1,16 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:screenferry_settings/app.dart';
 import 'package:screenferry_settings/shell/bottom_nav.dart';
 import 'package:screenferry_settings/shell/sidebar.dart';
 import 'package:screenferry_settings/state/app_state.dart';
 import 'package:screenferry_settings/theme/tokens.dart';
+import 'package:screenferry_settings/widgets/controls.dart';
 import 'package:screenferry_settings/widgets/glyph.dart';
+import 'package:screenferry_settings/widgets/group.dart';
+import 'package:screenferry_settings/widgets/key_map_dialog.dart';
 import 'package:screenferry_settings/widgets/page_scaffold.dart';
 import 'package:screenferry_settings/widgets/surface.dart';
 
@@ -35,7 +39,29 @@ Future<void> visitAll(WidgetTester tester, AppState state) async {
     state.go(page);
     await settle(tester);
   }
+  // 设备的设置页。
+  state.openDevice(state.peers.first.fingerprint);
+  await settle(tester);
+  state.go(SfPage.overview);
+  await settle(tester);
 }
+
+/// 把 [finder] 滚进视野，并让它离开顶部固定的标题栏（标题栏会挡住点击），再点它。
+Future<void> tapInView(WidgetTester tester, Finder finder) async {
+  await tester.ensureVisible(finder);
+  await settle(tester, steps: 2);
+  final top = tester.getRect(finder.first).top;
+  if (top < 160) {
+    await tester.drag(find.byType(Scrollable).first, Offset(0, 160 - top));
+    await settle(tester, steps: 2);
+  }
+  await tester.tap(finder);
+  await settle(tester);
+}
+
+/// 设置行 [title] 上的开关。
+Finder switchOf(String title) =>
+    find.descendant(of: find.widgetWithText(SfRow, title), matching: find.byType(SfSwitch));
 
 Finder navItem(String label) => find.descendant(of: find.byType(Sidebar), matching: find.text(label));
 
@@ -90,6 +116,8 @@ void main() {
     state.go(SfPage.devices);
     await settle(tester);
 
+    await tester.ensureVisible(find.text('配对'));
+    await settle(tester);
     await tester.tap(find.text('配对'));
     await settle(tester);
     expect(backend.sent.whereType<ConnectRequest>(), hasLength(1));
@@ -112,20 +140,22 @@ void main() {
     expect(find.text('配对'), findsNothing);
   });
 
-  testWidgets('移除设备前要在卡片上确认', (tester) async {
+  testWidgets('在设备的设置页移除设备，要先确认', (tester) async {
     final state = await launch(tester, const Size(1160, 780));
     state.go(SfPage.devices);
     await settle(tester);
-
-    await tester.tap(find.text('移除').first);
+    await tester.tap(find.text('办公室 PC'));
     await settle(tester);
-    expect(find.text('移除后需重新配对'), findsOneWidget);
+    expect(state.openedDevice, fingerprintOf(state, '办公室 PC'));
+
+    await tapInView(tester, find.text('移除'));
+    expect(find.textContaining('确定吗？'), findsOneWidget);
     expect(state.peers, hasLength(3), reason: '确认前不能移除');
 
-    // 第一张卡片底部现在是“取消 / 移除”，它的“移除”仍是第一个。
-    await tester.tap(find.text('移除').first);
+    await tester.tap(find.text('移除'));
     await settle(tester);
     expect(state.peers.map((d) => d.name), isNot(contains('办公室 PC')));
+    expect(state.openedDevice, isNull, reason: '移除后回到设备列表');
   });
 
   testWidgets('日志可以筛选和清空', (tester) async {
@@ -447,7 +477,7 @@ void main() {
     final state = await launch(tester, const Size(1160, 780), backend: backend);
     state.go(SfPage.settings);
     await settle(tester);
-    expect(find.text('⌘ 当作 Ctrl'), findsWidgets, reason: 'Mac 当服务端时说的是 ⌘');
+    expect(find.text('本机鼠标的 DPI'), findsOneWidget, reason: '服务端可以填本机鼠标的 DPI');
 
     await tester.tap(find.text('被控制'));
     await settle(tester);
@@ -458,11 +488,14 @@ void main() {
   testWidgets('Windows 当服务端时按 Windows 的说法显示', (tester) async {
     final backend = DemoBackend(animate: false, platform: 'windows');
     final state = await launch(tester, const Size(1160, 780), backend: backend);
-    state.go(SfPage.settings);
-    await settle(tester);
     expect(state.localIsMac, isFalse);
-    expect(find.text('Ctrl 当作 ⌘'), findsWidgets);
-    expect(find.text('在 Mac 上按 Ctrl+C、Ctrl+V 就是复制、粘贴'), findsOneWidget);
+    state.openDevice(fingerprintOf(state, '书房 PC'));
+    await settle(tester);
+    expect(find.text('Windows 习惯'), findsOneWidget);
+    expect(find.text('在 书房 PC 上按 Ctrl+C、Ctrl+V 就是复制、粘贴'), findsOneWidget);
+    expect(find.text('Win'), findsOneWidget, reason: '本机的键按 Windows 的叫法');
+    expect(find.text('⌘ Command'), findsOneWidget, reason: '对方是 Mac：Ctrl 到了那边是 ⌘');
+    expect(find.text('文本编辑快捷键按 Windows 习惯'), findsOneWidget);
   });
 
   for (final (name, size) in [
@@ -641,5 +674,169 @@ void main() {
     await tester.tap(find.text('去配对'));
     await settle(tester);
     expect(state.page, SfPage.devices);
+  });
+
+  // ── 每台设备单独设置（ADR 0009） ────────────────
+
+  group('设备设置', () {
+    Future<(AppState, DemoBackend)> openOffice(WidgetTester tester, {Size size = const Size(1160, 780)}) async {
+      final backend = DemoBackend(animate: false);
+      final state = await launch(tester, size, backend: backend);
+      state.openDevice(fingerprintOf(state, '办公室 PC'));
+      await settle(tester);
+      return (state, backend);
+    }
+
+    DeviceSettings lastSent(DemoBackend backend) => backend.sent.whereType<SetDeviceRequest>().last.device;
+
+    testWidgets('设备卡片显示设置摘要，点开是这台的设置页，返回回到列表', (tester) async {
+      final state = await launch(tester, const Size(1160, 780));
+      state.go(SfPage.devices);
+      await settle(tester);
+      expect(find.text('垂直滚动反向'), findsOneWidget, reason: '办公室 PC 单独设置过');
+      expect(find.text('1 个按键映射'), findsOneWidget);
+      expect(find.text('默认设置'), findsNWidgets(2), reason: '另外两台都是默认设置');
+
+      await tester.tap(find.text('办公室 PC'));
+      await settle(tester);
+      expect(find.text('光标速度'), findsOneWidget);
+      expect(find.text('修饰键'), findsOneWidget);
+      expect(find.text('F13'), findsOneWidget, reason: '已有的按键映射');
+
+      await tester.tap(find.byTooltip('返回设备列表'));
+      await settle(tester);
+      expect(state.openedDevice, isNull);
+      expect(find.text('垂直滚动反向'), findsOneWidget);
+    });
+
+    testWidgets('改一项发出这台设备的整份设置，其他项保持不变', (tester) async {
+      final (state, backend) = await openOffice(tester);
+      await tapInView(tester, switchOf('水平滚动反向'));
+      final d = lastSent(backend);
+      expect(d.fingerprint, fingerprintOf(state, '办公室 PC'));
+      expect(d.reverseHorizontal, isTrue);
+      expect(d.reverseVertical, isTrue, reason: '原来打开的不受影响');
+      expect(d.keys, hasLength(1));
+      expect(state.deviceSettings(d.fingerprint).reverseHorizontal, isTrue, reason: '先按新值显示');
+    });
+
+    testWidgets('改对照表里的一个修饰键，方案变成自定义', (tester) async {
+      final (_, backend) = await openOffice(tester);
+      // Mac 控制 Windows：⌘ 本来变成 Ctrl。
+      await tapInView(tester, find.byTooltip('⌘ Command 在 办公室 PC 上变成'));
+      await tester.tap(find.text('Alt').last);
+      await settle(tester);
+      final d = lastSent(backend);
+      expect(d.modifiers, ModifierPreset.custom);
+      expect(d.customModifiers.gui, ModifierTarget.alt);
+      expect(d.customModifiers.ctrl, ModifierTarget.gui, reason: '其余的从原来的对应关系开始');
+    });
+
+    testWidgets('光标速度可以直接填 DPI，“还原”回到和本机一样', (tester) async {
+      final (state, backend) = await openOffice(tester);
+      await tester.enterText(find.bySemanticsLabel('光标速度').last, '2000');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await settle(tester);
+      expect(lastSent(backend).pointerDpi, 2000);
+      expect(find.text('1.25×'), findsOneWidget, reason: '本机 1600 DPI');
+
+      await tapInView(tester, find.text('还原'));
+      expect(lastSent(backend).pointerDpi, 0);
+    });
+
+    testWidgets('添加按键映射：录一个键，选对方收到的键', (tester) async {
+      final (_, backend) = await openOffice(tester);
+      await tapInView(tester, find.text('添加'));
+      expect(find.text('请在键盘上按一个键…'), findsOneWidget);
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.f12, physicalKey: PhysicalKeyboardKey.f12);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.f12, physicalKey: PhysicalKeyboardKey.f12);
+      await settle(tester);
+      expect(find.text('已录下'), findsOneWidget);
+
+      // 对话框比窗口高时可以滚动。
+      await tester.ensureVisible(find.text('Insert'));
+      await tester.tap(find.text('Insert'));
+      await settle(tester);
+      expect(
+        find.descendant(of: find.byType(KeyMapDialog), matching: find.text('办公室 PC 收到')),
+        findsOneWidget,
+        reason: '预览这条映射',
+      );
+      await tester.ensureVisible(find.widgetWithText(PillButton, '添加'));
+      await tester.tap(find.widgetWithText(PillButton, '添加'));
+      await settle(tester);
+      final keys = lastSent(backend).keys;
+      expect(keys, contains(const KeyMapping(0x00070045, 0x00070049)), reason: 'F12 → Insert');
+      expect(keys, hasLength(2), reason: '原来的 F13 → Print Screen 还在');
+    });
+
+    testWidgets('给设备改名只改本机上显示的名字', (tester) async {
+      final (state, backend) = await openOffice(tester);
+      await tester.tap(find.byTooltip('改名字'));
+      await settle(tester);
+      await tester.enterText(find.byType(TextField).first, '会议室的电脑');
+      await tester.tap(find.text('保存'));
+      await settle(tester);
+      expect(lastSent(backend).alias, '会议室的电脑');
+      expect(find.text('原名 办公室 PC'), findsOneWidget);
+      expect(state.peers.first.displayName, '会议室的电脑');
+    });
+
+    testWidgets('在设备页给本机改名', (tester) async {
+      final backend = DemoBackend(animate: false);
+      final state = await launch(tester, const Size(1160, 780), backend: backend);
+      state.go(SfPage.devices);
+      await settle(tester);
+      await tester.tap(find.byTooltip('改名字').first);
+      await settle(tester);
+      await tester.enterText(find.byType(TextField).first, '书房 Mac');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await settle(tester);
+      expect(backend.sent.whereType<UpdateSettingsRequest>().last.settings.toJson(), {'name': '书房 Mac'});
+    });
+
+    testWidgets('本机被控制时说明设置在哪里生效，并可以请对方打开设置', (tester) async {
+      final backend = DemoBackend(role: Role.client, animate: false);
+      final state = await launch(tester, const Size(1160, 780), backend: backend);
+      state.openDevice(state.peers.first.fingerprint);
+      await settle(tester);
+      expect(find.text('本机现在是被控制的一方'), findsOneWidget);
+      expect(find.text('本机控制它时生效'), findsNWidgets(2), reason: '鼠标、按键两节');
+
+      await tester.tap(find.text('在 Mac Studio 上打开'));
+      await settle(tester);
+      expect(backend.sent.whereType<OpenPeerSettingsRequest>().single.fingerprint, state.peers.first.fingerprint);
+    });
+
+    testWidgets('另一台设备请本机打开设置时翻到它的设置页', (tester) async {
+      final backend = DemoBackend(animate: false);
+      final state = await launch(tester, const Size(1160, 780), backend: backend);
+      final study = fingerprintOf(state, '书房 PC');
+      backend.emit(ShowDeviceNotice(study));
+      await settle(tester);
+      expect(state.page, SfPage.devices);
+      expect(state.openedDevice, study);
+      expect(find.text('书房 PC'), findsWidgets);
+    });
+
+    testWidgets('设置页填本机鼠标的 DPI', (tester) async {
+      final backend = DemoBackend(animate: false);
+      final state = await launch(tester, const Size(1160, 780), backend: backend);
+      state.go(SfPage.settings);
+      await settle(tester);
+      await tester.enterText(find.bySemanticsLabel('本机鼠标的 DPI').last, '800');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await settle(tester);
+      expect(backend.sent.whereType<UpdateSettingsRequest>().last.settings.toJson(), {'mouse_dpi': 800});
+    });
+
+    testWidgets('手机大小下设备设置页能正常显示', (tester) async {
+      await openOffice(tester, size: const Size(375, 667));
+      expect(tester.takeException(), isNull);
+      await tester.scrollUntilVisible(find.text('移除这台设备'), 200, scrollable: find.byType(Scrollable).first);
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+    });
   });
 }

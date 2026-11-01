@@ -5,11 +5,10 @@ use std::io::IsTerminal;
 use std::net::SocketAddr;
 use std::process::ExitCode;
 
-use ferry_core::KeyRemap;
 use ferry_engine::{ClientConfig, EdgeFeed, Events, Files, Live, ServerAddr, ServerConfig};
 use ferry_store::Store;
 use ferry_trust::Fingerprint;
-use ferry_types::uses_command_key;
+use ferry_types::{Config, DeviceSettings, ModifierPreset, uses_command_key};
 use tracing::{error, info};
 
 use crate::cli::{Mode, Options};
@@ -113,16 +112,21 @@ pub(crate) fn run(options: Options) -> ExitCode {
                     swap_cmd_ctrl,
                     announce,
                 } => {
-                    let remap = if swap_cmd_ctrl {
-                        KeyRemap::swap_command_control()
-                    } else {
-                        KeyRemap::none()
+                    let fallback = DeviceSettings {
+                        modifiers: if swap_cmd_ctrl {
+                            ModifierPreset::Habit
+                        } else {
+                            ModifierPreset::Plain
+                        },
+                        ..DeviceSettings::default()
                     };
                     let config = ServerConfig {
                         live: Live {
                             side,
                             layout: Vec::new(),
-                            remap,
+                            devices: Vec::new(),
+                            fallback,
+                            mouse_dpi: Config::default().mouse_dpi,
                         }
                         .fixed(),
                         name: options.name,
@@ -150,6 +154,8 @@ pub(crate) fn run(options: Options) -> ExitCode {
                         events: Events::none(),
                         files,
                         edge: EdgeFeed::none(),
+                        devices: Vec::new(),
+                        commands: None,
                     };
                     connect(config).await
                 }

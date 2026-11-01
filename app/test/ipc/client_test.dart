@@ -96,7 +96,6 @@ const stateJson = {
     'settings': {
       'name': '',
       'side': 'right',
-      'swap_cmd_ctrl': true,
       'announce': true,
       'clipboard': true,
       'server': '',

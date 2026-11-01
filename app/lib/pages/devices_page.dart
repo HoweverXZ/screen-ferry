@@ -1,4 +1,5 @@
-// 设备：本机横幅、已配对设备的卡片墙、局域网里发现但还没配对的设备（虚线框）。
+// 设备：本机横幅（可以改名）、已配对设备的卡片墙（点开是那台设备的设置页）、
+// 局域网里发现但还没配对的设备（虚线框）。
 
 import 'dart:math';
 
@@ -6,9 +7,13 @@ import 'package:flutter/material.dart';
 
 import '../state/app_scope.dart';
 import '../state/app_state.dart';
+import '../state/device_summary.dart';
 import '../theme/tokens.dart';
+import '../widgets/name_editor.dart';
 import '../widgets/page_scaffold.dart';
+import '../widgets/pressable.dart';
 import '../widgets/surface.dart';
+import 'device_page.dart';
 
 class DevicesPage extends StatelessWidget {
   const DevicesPage({super.key});
@@ -17,6 +22,9 @@ class DevicesPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
     final c = SfColors.of(context);
+    final opened = state.openedDevice;
+    final peer = opened == null ? null : state.peerOf(opened);
+    if (peer != null) return DevicePage(key: ValueKey('d-${peer.fingerprint}'), peer: peer);
     return PageScaffold(
       title: '设备',
       children: [
@@ -34,11 +42,13 @@ class DevicesPage extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  state.localName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
+                NameEditor(
+                  name: state.localName,
+                  label: '本机的名字',
+                  placeholder: '电脑名',
+                  hint: '别的电脑上看到的就是这个名字。留空就用电脑名。',
+                  enabled: state.online,
+                  onSave: (v) => state.updateSettings(SettingsPatch(name: v)),
                 ),
                 Text.rich(
                   TextSpan(
@@ -63,8 +73,8 @@ class DevicesPage extends StatelessWidget {
         ),
         SectionTitle('已配对', note: '${state.peers.length} 台'),
         _CardWall(
-          // 服务端的卡片多一行“在本机哪一侧”。
-          height: state.isServer ? 240 : 220,
+          // 服务端的卡片多一行“在本机哪一侧”；设置摘要最多占两行。
+          height: state.isServer ? 300 : 278,
           empty: const _Empty(
             icon: Icons.link_rounded,
             title: '还没有配对的设备',
@@ -87,7 +97,7 @@ class DevicesPage extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 6),
           child: Text(
-            '连接全程 TLS 1.3 加密。首次连接时两台电脑会显示同一个 6 位配对码，核对一致后才会互相信任；移除后需要重新配对。',
+            '连接全程 TLS 1.3 加密。首次连接时两台电脑会显示同一个 6 位配对码，核对一致后才会互相信任。点设备卡片可以单独设置它。',
             style: TextStyle(fontSize: 13, color: c.muted, height: 1.6),
           ),
         ),
@@ -165,15 +175,10 @@ class _PairedCard extends StatefulWidget {
 }
 
 class _PairedCardState extends State<_PairedCard> {
-  bool _confirming = false;
-  bool _leaving = false;
   late final bool _fresh = AppScope.read(context).isFresh(widget.device.fingerprint);
 
-  void _remove() {
-    setState(() => _leaving = true);
-    final state = AppScope.read(context);
-    Future<void>.delayed(const Duration(milliseconds: 320), () => state.forget(widget.device));
-  }
+  /// 摘要最多显示几项，多出来的合成“+N”。
+  static const _maxChips = 3;
 
   @override
   Widget build(BuildContext context) {
@@ -184,99 +189,98 @@ class _PairedCardState extends State<_PairedCard> {
     final seen = d.online && addr.isNotEmpty ? '在线 · $addr' : seenText(d);
     // 服务端：这台设备贴在本机哪一侧（布局页里改）。
     final place = state.isServer ? state.placeOf(d.fingerprint) : null;
-    Widget card = SfCard(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              IconTile(state.peerIcon, size: 52, radius: 18, emphasized: d.online),
-              Pill(d.online ? '在线' : '离线', tone: d.online ? PillTone.good : PillTone.plain),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Text(
-            d.name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 2),
-          Text.rich(
-            TextSpan(
-              text: '指纹 ',
+    final summary = deviceSummary(state.deviceSettings(d.fingerprint));
+    final chips = summary.length > _maxChips
+        ? [...summary.take(_maxChips - 1), '+${summary.length - _maxChips + 1}']
+        : summary;
+    void open() => state.openDevice(d.fingerprint);
+    Widget card = Pressable(
+      onTap: open,
+      radius: 26,
+      pressScale: 0.985,
+      semanticLabel: '${d.displayName} 的设置',
+      child: SfCard(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                TextSpan(
-                  text: d.short,
-                  style: const TextStyle(fontFamily: monoFont, fontFamilyFallback: monoFallback),
-                ),
+                IconTile(state.peerIconOf(d), size: 52, radius: 18, emphasized: d.online),
+                Pill(d.online ? '在线' : '离线', tone: d.online ? PillTone.good : PillTone.plain),
               ],
             ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 14, color: c.muted),
-          ),
-          if (place != null) ...[
-            const SizedBox(height: 4),
-            Row(
-              children: [
-                Icon(Icons.splitscreen_rounded, size: 14, color: c.muted),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    '在本机${place.side.label}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 13, color: c.muted),
+            const SizedBox(height: 12),
+            Text(
+              d.displayName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 2),
+            Text.rich(
+              TextSpan(
+                text: '指纹 ',
+                children: [
+                  TextSpan(
+                    text: d.short,
+                    style: const TextStyle(fontFamily: monoFont, fontFamilyFallback: monoFallback),
                   ),
+                ],
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 14, color: c.muted),
+            ),
+            if (place != null) ...[
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  Icon(Icons.splitscreen_rounded, size: 14, color: c.muted),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      '在本机${place.side.label}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 13, color: c.muted),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+            const SizedBox(height: 10),
+            Semantics(
+              label: '这台的设置：${summary.join('、')}',
+              child: ExcludeSemantics(
+                child: ClipRect(
+                  child: Wrap(spacing: 6, runSpacing: 6, children: [for (final text in chips) _Chip(text)]),
                 ),
-              ],
+              ),
+            ),
+            const Spacer(),
+            Divider(height: 1, thickness: 1, color: c.line),
+            const SizedBox(height: 10),
+            SizedBox(
+              height: 34,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      seen,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 13, color: c.muted),
+                    ),
+                  ),
+                  TextLink(label: '设置', chevron: true, onPressed: open),
+                ],
+              ),
             ),
           ],
-          const Spacer(),
-          Divider(height: 1, thickness: 1, color: c.line),
-          const SizedBox(height: 10),
-          SizedBox(
-            height: 34,
-            child: AnimatedSwitcher(
-              duration: Motion.fast,
-              child: _confirming
-                  ? Row(
-                      key: const ValueKey('confirm'),
-                      children: [
-                        Expanded(
-                          child: Text('移除后需重新配对', style: TextStyle(fontSize: 13, color: c.muted)),
-                        ),
-                        SmallButton(label: '取消', onPressed: () => setState(() => _confirming = false)),
-                        const SizedBox(width: 6),
-                        SmallButton(label: '移除', danger: true, onPressed: state.online ? _remove : null),
-                      ],
-                    )
-                  : Row(
-                      key: const ValueKey('normal'),
-                      children: [
-                        Expanded(
-                          child: Text(seen, style: TextStyle(fontSize: 13, color: c.muted)),
-                        ),
-                        TextLink(
-                          label: '移除',
-                          danger: true,
-                          onPressed: state.online ? () => setState(() => _confirming = true) : null,
-                        ),
-                      ],
-                    ),
-            ),
-          ),
-        ],
+        ),
       ),
-    );
-    card = AnimatedScale(
-      scale: _leaving ? 0.9 : 1,
-      duration: Motion.medium,
-      curve: Motion.ease,
-      child: AnimatedOpacity(opacity: _leaving ? 0 : 1, duration: Motion.fast, child: card),
     );
     if (_fresh) {
       card = TweenAnimationBuilder<double>(
@@ -291,6 +295,25 @@ class _PairedCardState extends State<_PairedCard> {
       );
     }
     return card;
+  }
+}
+
+/// 设置摘要里的一项。
+class _Chip extends StatelessWidget {
+  const _Chip(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = SfColors.of(context);
+    return Container(
+      height: 24,
+      padding: const EdgeInsets.symmetric(horizontal: 9),
+      alignment: Alignment.center,
+      decoration: ShapeDecoration(color: c.card2, shape: const StadiumBorder()),
+      child: Text(text, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+    );
   }
 }
 

@@ -10,7 +10,6 @@ DaemonSettings settings(ScreenSide side, [List<Placement> layout = const []]) =>
   name: '',
   side: side,
   layout: layout,
-  swapCmdCtrl: false,
   announce: true,
   clipboard: true,
   server: '',

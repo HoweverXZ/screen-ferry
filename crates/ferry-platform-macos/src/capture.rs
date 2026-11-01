@@ -139,6 +139,21 @@ pub(crate) fn live_cursor() -> Option<Point> {
     Some(Point::new(p.x.floor() as i32, p.y.floor() as i32))
 }
 
+/// 系统设置里开着“自然滚动”（触控板和鼠标共用这一项）。从没改过时是开着的。
+///
+/// 开着时本机捕获到的滚动已经按自然方向反过来了，发到 Windows 上也按自然方向滚；
+/// 设置界面据此提示用户可以在那台设备上打开“垂直滚动反向”。
+pub fn natural_scrolling() -> bool {
+    use objc2_foundation::NSUserDefaults;
+
+    let defaults = NSUserDefaults::standardUserDefaults();
+    let key = NSString::from_str("com.apple.swipescrolldirection");
+    if defaults.objectForKey(&key).is_none() {
+        return true;
+    }
+    defaults.boolForKey(&key)
+}
+
 pub struct MacCapture {
     grabbed: Arc<AtomicBool>,
     cursor: CursorHider,

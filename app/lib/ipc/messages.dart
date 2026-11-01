@@ -3,7 +3,7 @@
 // 不认识的字段忽略，不认识的取值退回到合理的缺省值。
 
 /// 协议版本。
-const ipcVersion = 1;
+const ipcVersion = 2;
 
 typedef Json = Map<String, Object?>;
 
@@ -30,6 +30,9 @@ String _camel(Object? v) {
   return parts.first + parts.skip(1).map((p) => p.isEmpty ? p : p[0].toUpperCase() + p.substring(1)).join();
 }
 
+/// Dart 枚举名转成 snake_case 的取值（`capsLock` → `caps_lock`）。
+String _snake(Enum v) => v.name.replaceAllMapped(RegExp('[A-Z]'), (m) => '_${m[0]!.toLowerCase()}');
+
 // ── 枚举 ─────────────────────────────────────
 
 enum Role { server, client }
@@ -46,6 +49,17 @@ enum ProblemKind { permission, portInUse, other }
 enum LogKind { cursor, clip, link, file }
 
 enum LogIcon { power, link, unlink, lock, cursor, clipboard, pause, play, layout, radar, warning, settings, file }
+
+/// 修饰键方案：本机习惯（两台键盘不同时互换 ⌘ 与 Ctrl）、原样、自定义。
+enum ModifierPreset { habit, plain, custom }
+
+/// 修饰键要变成的键。`gui` 是 Mac 的 ⌘、Windows 的 Windows 键；`none` 是不发送。
+enum ModifierTarget { ctrl, shift, alt, gui, capsLock, none }
+
+/// 四个修饰键，按 USB HID 区分。
+enum ModifierKey { gui, ctrl, alt, capsLock }
+
+enum ScrollSpeed { slow, normal, fast }
 
 // ── 状态 ─────────────────────────────────────
 
@@ -98,6 +112,7 @@ class Local {
     required this.version,
     this.port,
     this.platform = '',
+    this.naturalScrolling,
   });
 
   factory Local.fromJson(Json j) => Local(
@@ -109,6 +124,7 @@ class Local {
     version: _str(j['version']),
     port: j['port'] is num ? _int(j['port']) : null,
     platform: _str(j['platform']),
+    naturalScrolling: j['natural_scrolling'] is bool ? j['natural_scrolling'] as bool : null,
   );
 
   final String name;
@@ -123,6 +139,9 @@ class Local {
 
   /// 本机系统：`macos`、`windows` 等。旧版后台不报，为空。
   final String platform;
+
+  /// macOS：系统设置里开着“自然滚动”。其他系统为 null。
+  final bool? naturalScrolling;
 }
 
 class Problem {
@@ -246,6 +265,8 @@ class PeerInfo {
     required this.lastSeen,
     this.side,
     this.cursor = false,
+    this.alias = '',
+    this.platform = '',
   });
 
   factory PeerInfo.fromJson(Json j) => PeerInfo(
@@ -256,8 +277,11 @@ class PeerInfo {
     lastSeen: _time(j['last_seen']),
     side: _enumOrNull(ScreenSide.values, j['side']),
     cursor: _bool(j['cursor']),
+    alias: _str(j['alias']),
+    platform: _str(j['platform']),
   );
 
+  /// 它自己报的名字。
   final String name;
   final String fingerprint;
   final String short;
@@ -271,6 +295,15 @@ class PeerInfo {
 
   /// 光标正在这台设备上。
   final bool cursor;
+
+  /// 本机给它起的名字；空为没起。
+  final String alias;
+
+  /// 它是什么系统：`macos`、`windows`；本次运行还没连上过、不知道时为空。
+  final String platform;
+
+  /// 显示给用户的名字：起过名字就用起的。
+  String get displayName => alias.trim().isEmpty ? name : alias.trim();
 }
 
 /// 单独安排过位置的一台设备：放在本机哪一侧。
@@ -327,31 +360,36 @@ class DaemonSettings {
     required this.name,
     required this.side,
     this.layout = const [],
-    required this.swapCmdCtrl,
     required this.announce,
     required this.clipboard,
     this.clipboardLimitMb = 32,
+    this.mouseDpi = 1600,
     required this.server,
     required this.autostart,
     required this.theme,
     required this.accent,
+    this.devices = const [],
   });
 
   /// 剪贴板单项大小上限的取值范围（MB）。
   static const clipboardLimitRange = (min: 1, max: 64);
 
+  /// 本机鼠标 DPI 的取值范围，与每台设备的光标速度相同。
+  static const mouseDpiRange = DeviceSettings.pointerDpiRange;
+
   factory DaemonSettings.fromJson(Json j) => DaemonSettings(
     name: _str(j['name']),
     side: _enum(ScreenSide.values, j['side'], ScreenSide.right),
     layout: [for (final p in _list(j['layout'])) Placement.fromJson(p)],
-    swapCmdCtrl: _bool(j['swap_cmd_ctrl']),
     announce: _bool(j['announce']),
     clipboard: _bool(j['clipboard']),
     clipboardLimitMb: j['clipboard_limit_mb'] is num ? _int(j['clipboard_limit_mb']) : 32,
+    mouseDpi: j['mouse_dpi'] is num ? _int(j['mouse_dpi']) : 1600,
     server: _str(j['server']),
     autostart: _bool(j['autostart']),
     theme: _enum(UiTheme.values, j['theme'], UiTheme.system),
     accent: _int(j['accent']),
+    devices: [for (final d in _list(j['devices'])) DeviceSettings.fromJson(d)],
   );
 
   final String name;
@@ -362,30 +400,294 @@ class DaemonSettings {
   /// 单独安排过位置的设备，按先后排列：同一侧的几台按这个先后平分那条边
   /// （左右两侧从上到下，上下两侧从左到右）。
   final List<Placement> layout;
-  final bool swapCmdCtrl;
   final bool announce;
   final bool clipboard;
 
   /// 剪贴板单项（一种格式）的大小上限，单位 MB。
   final int clipboardLimitMb;
+
+  /// 本机鼠标的 DPI。每台设备的光标速度以它为准。
+  final int mouseDpi;
   final String server;
   final bool autostart;
   final UiTheme theme;
   final int accent;
+
+  /// 单独设置过的设备；没列出的用缺省设置。
+  final List<DeviceSettings> devices;
+
+  /// 一台设备的设置；没有单独设置过的用缺省设置。
+  DeviceSettings device(String fingerprint) =>
+      devices.where((d) => d.fingerprint == fingerprint).firstOrNull ?? DeviceSettings(fingerprint: fingerprint);
 
   /// 叠加一份补丁，界面在后台确认之前先按它显示。
   DaemonSettings apply(SettingsPatch p) => DaemonSettings(
     name: p.name ?? name,
     side: p.side ?? side,
     layout: p.layout ?? layout,
-    swapCmdCtrl: p.swapCmdCtrl ?? swapCmdCtrl,
     announce: p.announce ?? announce,
     clipboard: p.clipboard ?? clipboard,
     clipboardLimitMb: p.clipboardLimitMb ?? clipboardLimitMb,
+    mouseDpi: p.mouseDpi ?? mouseDpi,
     server: p.server ?? server,
     autostart: p.autostart ?? autostart,
     theme: p.theme ?? theme,
     accent: p.accent ?? accent,
+    devices: devices,
+  );
+
+  /// 换上一台设备的设置（界面在后台确认之前先按它显示）。全是缺省值时去掉这一条。
+  DaemonSettings withDevice(DeviceSettings d) {
+    final rest = [for (final x in devices) x.fingerprint == d.fingerprint ? d : x];
+    final next = rest.any((x) => x.fingerprint == d.fingerprint) ? rest : [...rest, d];
+    return DaemonSettings(
+      name: name,
+      side: side,
+      layout: layout,
+      announce: announce,
+      clipboard: clipboard,
+      clipboardLimitMb: clipboardLimitMb,
+      mouseDpi: mouseDpi,
+      server: server,
+      autostart: autostart,
+      theme: theme,
+      accent: accent,
+      devices: [
+        for (final x in next)
+          if (!x.isDefault) x,
+      ],
+    );
+  }
+}
+
+/// 把一个键换成另一个键。键码是 USB HID 扩展用法码：高 16 位用法页，低 16 位用法 ID。
+class KeyMapping {
+  const KeyMapping(this.from, this.to);
+
+  factory KeyMapping.fromJson(Json j) => KeyMapping(_int(j['from']), _int(j['to']));
+
+  final int from;
+
+  /// 0 表示不发送。
+  final int to;
+
+  Json toJson() => {'from': from, 'to': to};
+
+  @override
+  bool operator ==(Object other) => other is KeyMapping && other.from == from && other.to == to;
+
+  @override
+  int get hashCode => Object.hash(from, to);
+}
+
+/// 四个修饰键各自变成什么。
+class ModifierMap {
+  const ModifierMap({
+    this.gui = ModifierTarget.gui,
+    this.ctrl = ModifierTarget.ctrl,
+    this.alt = ModifierTarget.alt,
+    this.capsLock = ModifierTarget.capsLock,
+  });
+
+  factory ModifierMap.fromJson(Json j) => ModifierMap(
+    gui: _enum(ModifierTarget.values, _camel(j['gui']), ModifierTarget.gui),
+    ctrl: _enum(ModifierTarget.values, _camel(j['ctrl']), ModifierTarget.ctrl),
+    alt: _enum(ModifierTarget.values, _camel(j['alt']), ModifierTarget.alt),
+    capsLock: _enum(ModifierTarget.values, _camel(j['caps_lock']), ModifierTarget.capsLock),
+  );
+
+  /// 原样：每个键还是它自己。
+  static const plain = ModifierMap();
+
+  /// 互换 ⌘（Windows 键）与 Ctrl。
+  static const swapGuiCtrl = ModifierMap(gui: ModifierTarget.ctrl, ctrl: ModifierTarget.gui);
+
+  final ModifierTarget gui;
+  final ModifierTarget ctrl;
+  final ModifierTarget alt;
+  final ModifierTarget capsLock;
+
+  ModifierTarget operator [](ModifierKey key) => switch (key) {
+    ModifierKey.gui => gui,
+    ModifierKey.ctrl => ctrl,
+    ModifierKey.alt => alt,
+    ModifierKey.capsLock => capsLock,
+  };
+
+  /// 把 [key] 换成 [to]，其余不变。
+  ModifierMap replaced(ModifierKey key, ModifierTarget to) => ModifierMap(
+    gui: key == ModifierKey.gui ? to : gui,
+    ctrl: key == ModifierKey.ctrl ? to : ctrl,
+    alt: key == ModifierKey.alt ? to : alt,
+    capsLock: key == ModifierKey.capsLock ? to : capsLock,
+  );
+
+  Json toJson() => {'gui': _snake(gui), 'ctrl': _snake(ctrl), 'alt': _snake(alt), 'caps_lock': _snake(capsLock)};
+
+  @override
+  bool operator ==(Object other) =>
+      other is ModifierMap && other.gui == gui && other.ctrl == ctrl && other.alt == alt && other.capsLock == capsLock;
+
+  @override
+  int get hashCode => Object.hash(gui, ctrl, alt, capsLock);
+}
+
+/// 一台设备的单独设置，与 `crates/ferry-types/src/device.rs` 一致。
+class DeviceSettings {
+  const DeviceSettings({
+    required this.fingerprint,
+    this.alias = '',
+    this.pointerDpi = 0,
+    this.reverseVertical = false,
+    this.reverseHorizontal = false,
+    this.scrollSpeed = ScrollSpeed.normal,
+    this.modifiers = ModifierPreset.habit,
+    this.textShortcuts = false,
+    this.edgeDelayMs = 0,
+    this.clipboard = true,
+    this.files = true,
+    this.customModifiers = ModifierMap.plain,
+    this.keys = const [],
+  });
+
+  factory DeviceSettings.fromJson(Json j) => DeviceSettings(
+    fingerprint: _str(j['fingerprint']),
+    alias: _str(j['alias']),
+    pointerDpi: _int(j['pointer_dpi']),
+    reverseVertical: _bool(j['reverse_vertical']),
+    reverseHorizontal: _bool(j['reverse_horizontal']),
+    scrollSpeed: _enum(ScrollSpeed.values, j['scroll_speed'], ScrollSpeed.normal),
+    modifiers: _enum(ModifierPreset.values, j['modifiers'], ModifierPreset.habit),
+    textShortcuts: _bool(j['text_shortcuts']),
+    edgeDelayMs: _int(j['edge_delay_ms']),
+    clipboard: j['clipboard'] is bool ? j['clipboard'] as bool : true,
+    files: j['files'] is bool ? j['files'] as bool : true,
+    customModifiers: j['custom_modifiers'] is Json
+        ? ModifierMap.fromJson(j['custom_modifiers'] as Json)
+        : ModifierMap.plain,
+    keys: [for (final k in _list(j['keys'])) KeyMapping.fromJson(k)],
+  );
+
+  /// 光标速度的取值范围（DPI）。
+  static const pointerDpiRange = (min: 100, max: 12800);
+
+  /// 设备的证书指纹，64 位十六进制。
+  final String fingerprint;
+
+  /// 本机给它起的名字，只在本机显示；空为它自己报的名字。
+  final String alias;
+
+  /// 光标在它上面时就像接着一个多少 DPI 的鼠标；0 表示和本机一样。
+  final int pointerDpi;
+  final bool reverseVertical;
+  final bool reverseHorizontal;
+  final ScrollSpeed scrollSpeed;
+  final ModifierPreset modifiers;
+
+  /// 两台不是同一种键盘时，文本编辑快捷键按本机的习惯转换。
+  final bool textShortcuts;
+
+  /// 光标要在边上停这么久（毫秒）才切过去。
+  final int edgeDelayMs;
+  final bool clipboard;
+  final bool files;
+
+  /// [modifiers] 为自定义时四个修饰键各自变成什么。
+  final ModifierMap customModifiers;
+
+  /// 其他按键映射。
+  final List<KeyMapping> keys;
+
+  /// 除了指纹都是缺省值。
+  bool get isDefault => this == DeviceSettings(fingerprint: fingerprint);
+
+  /// 实际的修饰键对应关系。[differ]：两台不是同一种键盘（一台 Mac、一台不是）。
+  ModifierMap modifierMap({required bool differ}) => switch (modifiers) {
+    ModifierPreset.habit => differ ? ModifierMap.swapGuiCtrl : ModifierMap.plain,
+    ModifierPreset.plain => ModifierMap.plain,
+    ModifierPreset.custom => customModifiers,
+  };
+
+  /// 恢复默认：只留下名字。
+  DeviceSettings reset() => DeviceSettings(fingerprint: fingerprint, alias: alias);
+
+  DeviceSettings copyWith({
+    String? alias,
+    int? pointerDpi,
+    bool? reverseVertical,
+    bool? reverseHorizontal,
+    ScrollSpeed? scrollSpeed,
+    ModifierPreset? modifiers,
+    bool? textShortcuts,
+    int? edgeDelayMs,
+    bool? clipboard,
+    bool? files,
+    ModifierMap? customModifiers,
+    List<KeyMapping>? keys,
+  }) => DeviceSettings(
+    fingerprint: fingerprint,
+    alias: alias ?? this.alias,
+    pointerDpi: pointerDpi ?? this.pointerDpi,
+    reverseVertical: reverseVertical ?? this.reverseVertical,
+    reverseHorizontal: reverseHorizontal ?? this.reverseHorizontal,
+    scrollSpeed: scrollSpeed ?? this.scrollSpeed,
+    modifiers: modifiers ?? this.modifiers,
+    textShortcuts: textShortcuts ?? this.textShortcuts,
+    edgeDelayMs: edgeDelayMs ?? this.edgeDelayMs,
+    clipboard: clipboard ?? this.clipboard,
+    files: files ?? this.files,
+    customModifiers: customModifiers ?? this.customModifiers,
+    keys: keys ?? this.keys,
+  );
+
+  Json toJson() => {
+    'fingerprint': fingerprint,
+    'alias': alias,
+    'pointer_dpi': pointerDpi,
+    'reverse_vertical': reverseVertical,
+    'reverse_horizontal': reverseHorizontal,
+    'scroll_speed': scrollSpeed.name,
+    'modifiers': modifiers.name,
+    'text_shortcuts': textShortcuts,
+    'edge_delay_ms': edgeDelayMs,
+    'clipboard': clipboard,
+    'files': files,
+    'custom_modifiers': customModifiers.toJson(),
+    'keys': [for (final k in keys) k.toJson()],
+  };
+
+  @override
+  bool operator ==(Object other) =>
+      other is DeviceSettings &&
+      other.fingerprint == fingerprint &&
+      other.alias == alias &&
+      other.pointerDpi == pointerDpi &&
+      other.reverseVertical == reverseVertical &&
+      other.reverseHorizontal == reverseHorizontal &&
+      other.scrollSpeed == scrollSpeed &&
+      other.modifiers == modifiers &&
+      other.textShortcuts == textShortcuts &&
+      other.edgeDelayMs == edgeDelayMs &&
+      other.clipboard == clipboard &&
+      other.files == files &&
+      other.customModifiers == customModifiers &&
+      _sameList(other.keys, keys);
+
+  @override
+  int get hashCode => Object.hash(
+    fingerprint,
+    alias,
+    pointerDpi,
+    reverseVertical,
+    reverseHorizontal,
+    scrollSpeed,
+    modifiers,
+    textShortcuts,
+    edgeDelayMs,
+    clipboard,
+    files,
+    customModifiers,
+    Object.hashAll(keys),
   );
 }
 
@@ -478,6 +780,7 @@ sealed class Notice {
     'pairing' => PairingNotice(PairingPrompt.fromJson(j['prompt'] as Json? ?? const {})),
     'pairing_closed' => PairingClosedNotice(_int(j['id'])),
     'toast' => ToastNotice(_str(j['text'])),
+    'show_device' => ShowDeviceNotice(_str(j['fingerprint'])),
     _ => null,
   };
 }
@@ -519,6 +822,12 @@ class ToastNotice extends Notice {
   final String text;
 }
 
+/// 翻到这台设备的设置页：它请本机打开了设置。
+class ShowDeviceNotice extends Notice {
+  const ShowDeviceNotice(this.fingerprint);
+  final String fingerprint;
+}
+
 // ── 界面 → 后台 ──────────────────────────────
 
 sealed class Request {
@@ -550,6 +859,24 @@ class UpdateSettingsRequest extends Request {
 
   @override
   Json toJson() => {'type': 'update_settings', 'settings': settings.toJson()};
+}
+
+/// 换上一台设备的单独设置，整份替换。
+class SetDeviceRequest extends Request {
+  const SetDeviceRequest(this.device);
+  final DeviceSettings device;
+
+  @override
+  Json toJson() => {'type': 'set_device', 'device': device.toJson()};
+}
+
+/// 客户端：请连着的服务端 [fingerprint] 打开它的设置界面，翻到本机的设置页。
+class OpenPeerSettingsRequest extends Request {
+  const OpenPeerSettingsRequest(this.fingerprint);
+  final String fingerprint;
+
+  @override
+  Json toJson() => {'type': 'open_peer_settings', 'fingerprint': fingerprint};
 }
 
 class ForgetRequest extends Request {
@@ -616,10 +943,10 @@ class SettingsPatch {
     this.role,
     this.side,
     this.layout,
-    this.swapCmdCtrl,
     this.announce,
     this.clipboard,
     this.clipboardLimitMb,
+    this.mouseDpi,
     this.server,
     this.autostart,
     this.theme,
@@ -634,10 +961,10 @@ class SettingsPatch {
 
   /// 给出时整份替换。
   final List<Placement>? layout;
-  final bool? swapCmdCtrl;
   final bool? announce;
   final bool? clipboard;
   final int? clipboardLimitMb;
+  final int? mouseDpi;
   final String? server;
   final bool? autostart;
   final UiTheme? theme;
@@ -648,10 +975,10 @@ class SettingsPatch {
     'role': ?role?.name,
     'side': ?side?.name,
     'layout': ?layout?.map((p) => p.toJson()).toList(),
-    'swap_cmd_ctrl': ?swapCmdCtrl,
     'announce': ?announce,
     'clipboard': ?clipboard,
     'clipboard_limit_mb': ?clipboardLimitMb,
+    'mouse_dpi': ?mouseDpi,
     'server': ?server,
     'autostart': ?autostart,
     'theme': ?theme?.name,
@@ -664,10 +991,10 @@ class SettingsPatch {
     role: o.role ?? role,
     side: o.side ?? side,
     layout: o.layout ?? layout,
-    swapCmdCtrl: o.swapCmdCtrl ?? swapCmdCtrl,
     announce: o.announce ?? announce,
     clipboard: o.clipboard ?? clipboard,
     clipboardLimitMb: o.clipboardLimitMb ?? clipboardLimitMb,
+    mouseDpi: o.mouseDpi ?? mouseDpi,
     server: o.server ?? server,
     autostart: o.autostart ?? autostart,
     theme: o.theme ?? theme,
@@ -684,10 +1011,10 @@ class SettingsPatch {
       final l? when !_sameList(l, s.layout) => l,
       _ => null,
     },
-    swapCmdCtrl: swapCmdCtrl == s.swapCmdCtrl ? null : swapCmdCtrl,
     announce: announce == s.announce ? null : announce,
     clipboard: clipboard == s.clipboard ? null : clipboard,
     clipboardLimitMb: clipboardLimitMb == s.clipboardLimitMb ? null : clipboardLimitMb,
+    mouseDpi: mouseDpi == s.mouseDpi ? null : mouseDpi,
     server: server == s.server ? null : server,
     autostart: autostart == s.autostart ? null : autostart,
     theme: theme == s.theme ? null : theme,

@@ -112,7 +112,7 @@ fn config_defaults_until_saved_then_round_trips() {
     store.save_config(&config).unwrap();
     let text = fs::read_to_string(dir.path().join("config.toml")).unwrap();
     assert!(
-        text.starts_with("schema_version = 3\n"),
+        text.starts_with("schema_version = 4\n"),
         "第一行必须是 schema_version：{text}"
     );
     assert_eq!(store.config().unwrap(), config);
@@ -136,10 +136,10 @@ fn config_tolerates_missing_and_unknown_fields() {
 fn config_from_a_newer_version_is_refused() {
     let dir = TempDir::new();
     let store = Store::open(dir.path()).unwrap();
-    fs::write(dir.path().join("config.toml"), "schema_version = 4\n").unwrap();
+    fs::write(dir.path().join("config.toml"), "schema_version = 5\n").unwrap();
     assert!(matches!(
         store.config(),
-        Err(Error::TooNew { found: 4, .. })
+        Err(Error::TooNew { found: 5, .. })
     ));
 }
 
@@ -180,7 +180,7 @@ fn a_version_1_config_reads_as_version_2_with_an_empty_layout() {
     };
     store.save_config(&config).unwrap();
     let text = fs::read_to_string(dir.path().join("config.toml")).unwrap();
-    assert!(text.starts_with("schema_version = 3\n"), "{text}");
+    assert!(text.starts_with("schema_version = 4\n"), "{text}");
     assert!(text.contains("[[layout]]"), "{text}");
     assert_eq!(store.config().unwrap(), config);
 }
@@ -201,7 +201,7 @@ fn a_custom_data_dir_keeps_received_files_inside_it() {
 }
 
 #[test]
-fn a_version_2_config_reads_as_version_3_with_the_old_clipboard_limit() {
+fn a_version_2_config_reads_with_the_old_clipboard_limit() {
     use ferry_types::Config;
 
     let dir = TempDir::new();
@@ -212,7 +212,7 @@ fn a_version_2_config_reads_as_version_3_with_the_old_clipboard_limit() {
     )
     .unwrap();
     let config = store.config().unwrap();
-    assert_eq!(config.schema_version, 3);
+    assert_eq!(config.schema_version, Config::SCHEMA_VERSION);
     assert_eq!(config.clipboard_limit_mb, 32, "与之前固定的上限相同");
     assert_eq!(config.clipboard_limit_bytes(), 32 * 1024 * 1024);
 
@@ -248,4 +248,84 @@ fn blobs_are_stored_by_content_and_can_be_removed() {
     store.clear_blobs().unwrap();
     assert!(!b.exists());
     store.clear_blobs().unwrap();
+}
+
+#[test]
+fn a_version_3_config_with_the_swap_off_makes_every_paired_device_plain() {
+    use ferry_types::{Config, ModifierPreset};
+
+    let dir = TempDir::new();
+    let store = Store::open(dir.path()).unwrap();
+    let mut peers = PeerList::new();
+    peers.add(peer("PC", 1));
+    peers.add(peer("另一台", 2));
+    store.save_peers(&peers).unwrap();
+    fs::write(
+        dir.path().join("config.toml"),
+        "schema_version = 3\nswap_cmd_ctrl = false\n",
+    )
+    .unwrap();
+
+    let config = store.config().unwrap();
+    assert_eq!(config.schema_version, Config::SCHEMA_VERSION);
+    assert_eq!(config.mouse_dpi, 1600);
+    assert_eq!(config.devices.len(), 2);
+    for p in peers.iter() {
+        let device = config.device(&p.fingerprint.to_hex());
+        assert_eq!(device.modifiers, ModifierPreset::Plain, "{}", p.name);
+    }
+
+    // 写回之后是版本 4，旧字段不再出现，读回来一样。
+    store.save_config(&config).unwrap();
+    let text = fs::read_to_string(dir.path().join("config.toml")).unwrap();
+    assert!(text.starts_with("schema_version = 4\n"), "{text}");
+    assert!(!text.contains("swap_cmd_ctrl"), "{text}");
+    assert!(text.contains("[[devices]]"), "{text}");
+    assert_eq!(store.config().unwrap(), config);
+}
+
+#[test]
+fn a_version_3_config_with_the_swap_on_keeps_the_default_habit() {
+    let dir = TempDir::new();
+    let store = Store::open(dir.path()).unwrap();
+    let mut peers = PeerList::new();
+    peers.add(peer("PC", 1));
+    store.save_peers(&peers).unwrap();
+    fs::write(
+        dir.path().join("config.toml"),
+        "schema_version = 3\nswap_cmd_ctrl = true\n",
+    )
+    .unwrap();
+    assert!(store.config().unwrap().devices.is_empty());
+}
+
+#[test]
+fn device_settings_round_trip_through_the_file() {
+    use ferry_types::{
+        Config, DeviceSettings, KeyMapping, ModifierPreset, ModifierTarget, ScrollSpeed,
+    };
+
+    let dir = TempDir::new();
+    let store = Store::open(dir.path()).unwrap();
+    let mut device = DeviceSettings::new("ab".repeat(32));
+    device.alias = "书房的电脑".into();
+    device.pointer_dpi = 2000;
+    device.reverse_vertical = true;
+    device.scroll_speed = ScrollSpeed::Fast;
+    device.modifiers = ModifierPreset::Custom;
+    device.custom_modifiers.caps_lock = ModifierTarget::Ctrl;
+    device.keys = vec![KeyMapping {
+        from: 0x0007_0068,
+        to: 0,
+    }];
+    let mut config = Config {
+        layout: vec![ferry_types::Placement {
+            fingerprint: "ab".repeat(32),
+            side: ferry_types::Side::Left,
+        }],
+        ..Config::default()
+    };
+    config.set_device(device);
+    store.save_config(&config).unwrap();
+    assert_eq!(store.config().unwrap(), config);
 }

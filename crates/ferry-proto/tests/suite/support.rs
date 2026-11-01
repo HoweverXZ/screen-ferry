@@ -90,6 +90,7 @@ pub fn samples() -> Vec<(Channel, Message)> {
         ),
         (Channel::Input, Message::Leave { seq: 42 }),
         (Channel::Input, Message::PeerSide { side: Side::Right }),
+        (Channel::Input, Message::OpenSettings),
         (
             Channel::Input,
             Message::DropHint(DropHint {

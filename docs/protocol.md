@@ -60,6 +60,7 @@
   - 剪贴板消息需要 `CLIPBOARD`
   - 文件消息和文件连接需要 `FILES`
   - `PeerSide`、`DropHint` 需要 `EDGE_DROP`
+  - `OpenSettings` 需要 `REMOTE_SETTINGS`
 - `COMMAND_KEY` 说明发送方的快捷键以 Command 键为主（macOS），不是一项能力。服务端看客户端 `Hello` 里的这一位：
   两边一个是一个不是时，才按设置互换 Command 与 Ctrl。不认识这一位的旧版客户端都是 Windows，结果不变。
 - `Hello`、`Welcome`、`Reject` 的消息体格式在所有版本中永久不变，版本不同的双方也总能完成协商。
@@ -109,6 +110,7 @@
 | `0x0102` | Leave | 输入 | `seq u32` |
 | `0x0103` | PeerSide | 输入 | `side u8` |
 | `0x0104` | DropHint | 输入 | `state u8` · `along u16` · `closeness u8` · `name str` · `items u32` · `bytes u64` |
+| `0x0105` | OpenSettings | 输入 | 空 |
 | `0x0110` | Key | 输入 | `code u32` · `action u8` |
 | `0x0120` | PointerMotion | 输入 | `position Point` |
 | `0x0121` | PointerDelta | 输入 | `dx i32` · `dy i32` |
@@ -145,7 +147,7 @@
 | 字段 | 取值 |
 |---|---|
 | `channel` | 1 输入，2 数据，3 配对，4 文件 |
-| `capabilities` | 位 0 `RELATIVE_POINTER`，位 1 `CLIPBOARD`，位 2 `FILES`，位 3 `EDGE_DROP`，位 4 `COMMAND_KEY`；未知位保留，协商时自然被交集去掉 |
+| `capabilities` | 位 0 `RELATIVE_POINTER`，位 1 `CLIPBOARD`，位 2 `FILES`，位 3 `EDGE_DROP`，位 4 `COMMAND_KEY`，位 5 `REMOTE_SETTINGS`；未知位保留，协商时自然被交集去掉 |
 | `side` | 1 左，2 右，3 上，4 下 |
 | DropHint `state` | 0 收起，1 靠近，2 在胶囊上 |
 | `along` | 沿相邻那条边的位置，0–10000（左右边从上往下，上下边从左往右） |

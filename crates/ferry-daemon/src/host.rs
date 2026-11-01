@@ -178,6 +178,10 @@ mod mac {
                 warn!("打开系统设置失败：{e}");
             }
         }
+
+        fn natural_scrolling(&self) -> Option<bool> {
+            Some(ferry_platform_macos::natural_scrolling())
+        }
     }
 }
 

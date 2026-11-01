@@ -114,6 +114,9 @@ class AppState extends ChangeNotifier {
   SfPage page = SfPage.overview;
   bool sidebarCollapsed = false;
 
+  /// 设备页上打开着设置页的那台设备（指纹）；在设备列表时为 null。
+  String? openedDevice;
+
   // ── 与后台的连接 ──
   late DaemonLink _link;
   DaemonState? _daemon;
@@ -132,6 +135,9 @@ class AppState extends ChangeNotifier {
   // ── 乐观更新 ──
   SettingsPatch _pending = const SettingsPatch();
   DateTime _pendingAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// 改了还没等到后台确认的设备设置，按指纹。
+  final _pendingDevices = <String, (DeviceSettings, DateTime)>{};
   bool? _pendingSharing;
   DateTime _pendingSharingAt = DateTime.fromMillisecondsSinceEpoch(0);
   final _forgotten = <String>{};
@@ -160,6 +166,9 @@ class AppState extends ChangeNotifier {
   String get localName => _daemon?.local.name ?? '';
   String get localFingerprint => _daemon?.local.short ?? '';
   String get dataDir => _daemon?.local.dataDir ?? '';
+
+  /// macOS：本机开着“自然滚动”。
+  bool get naturalScrolling => _daemon?.local.naturalScrolling ?? false;
   String get version => _daemon?.local.version ?? '';
 
   // ── 连接 ──
@@ -179,8 +188,15 @@ class AppState extends ChangeNotifier {
   Problem? get problem => _daemon?.problem;
 
   /// 对方的名字；没连上时取第一台已配对的设备，再没有就叫“对方”。
-  /// 连着几台时 [peer] 是光标所在（否则最近连上）的那台。
-  String get peerName => peer?.name ?? peers.firstOrNull?.name ?? '对方';
+  /// 连着几台时 [peer] 是光标所在（否则最近连上）的那台。本机给它起过名字就用起的。
+  String get peerName {
+    final ref = peer;
+    if (ref != null) return displayNameOf(ref.fingerprint, ref.name);
+    return peers.firstOrNull?.displayName ?? '对方';
+  }
+
+  /// 一台设备显示给用户的名字；不是已配对的设备时用 [fallback]。
+  String displayNameOf(String fingerprint, String fallback) => peerOf(fingerprint)?.displayName ?? fallback;
 
   /// 光标所在的那台设备；光标在本机或没在共享时为 null。
   PeerInfo? get cursorPeer => connected ? peers.where((p) => p.cursor).firstOrNull : null;
@@ -207,6 +223,18 @@ class AppState extends ChangeNotifier {
       if (!f.paired) f,
   ];
 
+  /// 一台已配对的设备；不在列表里时为 null。
+  PeerInfo? peerOf(String fingerprint) => peers.where((p) => p.fingerprint == fingerprint).firstOrNull;
+
+  /// 对方是不是 Mac。后台还不知道时按“和本机不一样”推断：Mac 与 Windows 互相控制最常见。
+  bool peerIsMac(PeerInfo p) => p.platform.isEmpty ? !localIsMac : p.platform == 'macos';
+
+  /// 对方的图标。
+  IconData peerIconOf(PeerInfo p) => peerIsMac(p) ? Icons.desktop_mac_outlined : Icons.desktop_windows_outlined;
+
+  /// 两台不是同一种键盘（一台 Mac、一台不是）。
+  bool keyboardsDiffer(PeerInfo p) => localIsMac != peerIsMac(p);
+
   /// 刚配对上的设备，用来播放卡片进场动画。
   bool isFresh(String fingerprint) {
     final at = _freshPeers[fingerprint];
@@ -215,20 +243,28 @@ class AppState extends ChangeNotifier {
 
   // ── 设置 ──
 
-  DaemonSettings get settings =>
-      (_daemon?.settings ??
-              const DaemonSettings(
-                name: '',
-                side: ScreenSide.right,
-                swapCmdCtrl: true,
-                announce: true,
-                clipboard: true,
-                server: '',
-                autostart: false,
-                theme: UiTheme.system,
-                accent: 0,
-              ))
-          .apply(_pending);
+  DaemonSettings get settings {
+    var s =
+        (_daemon?.settings ??
+                const DaemonSettings(
+                  name: '',
+                  side: ScreenSide.right,
+                  announce: true,
+                  clipboard: true,
+                  server: '',
+                  autostart: false,
+                  theme: UiTheme.system,
+                  accent: 0,
+                ))
+            .apply(_pending);
+    for (final (device, _) in _pendingDevices.values) {
+      s = s.withDevice(device);
+    }
+    return s;
+  }
+
+  /// 一台设备的单独设置（含还没确认的改动）；没有单独设置过的是缺省设置。
+  DeviceSettings deviceSettings(String fingerprint) => settings.device(fingerprint);
 
   /// 没有单独安排过位置的设备放在本机哪一侧；只有一台设备时就是它所在的那一侧。
   ScreenSide get side => settings.side;
@@ -271,8 +307,23 @@ class AppState extends ChangeNotifier {
   }
 
   void go(SfPage target) {
-    if (page == target) return;
+    if (page == target && openedDevice == null) return;
     page = target;
+    openedDevice = null;
+    notifyListeners();
+  }
+
+  /// 打开一台设备的设置页。
+  void openDevice(String fingerprint) {
+    page = SfPage.devices;
+    openedDevice = fingerprint;
+    notifyListeners();
+  }
+
+  /// 从设备的设置页回到设备列表。
+  void closeDevice() {
+    if (openedDevice == null) return;
+    openedDevice = null;
     notifyListeners();
   }
 
@@ -328,8 +379,22 @@ class AppState extends ChangeNotifier {
   void forget(PeerInfo peer) {
     if (!_send(ForgetRequest(peer.fingerprint))) return;
     _forgotten.add(peer.fingerprint);
+    if (openedDevice == peer.fingerprint) openedDevice = null;
     notifyListeners();
   }
+
+  /// 换上一台设备的设置：先按新值显示，等后台的状态确认。
+  void setDevice(DeviceSettings device) {
+    if (!_send(SetDeviceRequest(device))) return;
+    _pendingDevices[device.fingerprint] = (device, DateTime.now());
+    notifyListeners();
+  }
+
+  /// 恢复默认设置，保留名字。
+  void resetDevice(String fingerprint) => setDevice(deviceSettings(fingerprint).reset());
+
+  /// 本机被控制时：请对方打开它的设置界面，翻到本机的设置页。
+  void openPeerSettings(PeerInfo peer) => _send(OpenPeerSettingsRequest(peer.fingerprint));
 
   void connectTo(FoundDevice device) {
     if (_send(ConnectRequest(device.fingerprint))) showToast('正在连接 ${device.name}…');
@@ -371,6 +436,9 @@ class AppState extends ChangeNotifier {
         _prompts.removeWhere((p) => p.id == id);
       case ToastNotice(:final text):
         showToast(text);
+      case ShowDeviceNotice(:final fingerprint):
+        openDevice(fingerprint);
+        return;
       case WelcomeNotice():
         return;
     }
@@ -392,6 +460,9 @@ class AppState extends ChangeNotifier {
     if (_pendingSharing == state.sharing || now.difference(_pendingSharingAt) > _pendingTimeout) {
       _pendingSharing = null;
     }
+    _pendingDevices.removeWhere(
+      (fp, pending) => now.difference(pending.$2) > _pendingTimeout || state.settings.device(fp) == pending.$1,
+    );
     _forgotten.retainWhere((fp) => state.peers.any((p) => p.fingerprint == fp));
     _applyAppearance();
   }

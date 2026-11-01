@@ -41,9 +41,18 @@ class DemoBackend implements Backend {
           _peer('书房 PC', 'study', online: true),
           _peer('家里的笔记本', 'nb', lastSeen: now.subtract(const Duration(days: 3))),
         ]);
-        _settings = _settings.apply(
-          SettingsPatch(layout: [Placement(_fp('pc'), ScreenSide.right), Placement(_fp('nb'), ScreenSide.left)]),
-        );
+        _settings = _settings
+            .apply(
+              SettingsPatch(layout: [Placement(_fp('pc'), ScreenSide.right), Placement(_fp('nb'), ScreenSide.left)]),
+            )
+            // 办公室 PC 单独设置过：滚动反向、F13 当 Print Screen。
+            .withDevice(
+              DeviceSettings(
+                fingerprint: _fp('pc'),
+                reverseVertical: true,
+                keys: const [KeyMapping(0x00070068, 0x00070046)],
+              ),
+            );
       }
     } else {
       if (paired) _peers.add(_peer('Mac Studio', 'mac', online: true));
@@ -91,7 +100,6 @@ class DemoBackend implements Backend {
   DaemonSettings _settings = const DaemonSettings(
     name: '',
     side: ScreenSide.right,
-    swapCmdCtrl: true,
     announce: true,
     clipboard: true,
     server: '',
@@ -191,10 +199,16 @@ class DemoBackend implements Backend {
         final before = Arrangement.of(_peers, _settings);
         _settings = _settings.apply(settings);
         _logLayout(before, Arrangement.of(_peers, _settings));
+      case SetDeviceRequest(:final device):
+        _settings = _settings.withDevice(device);
+      case OpenPeerSettingsRequest(:final fingerprint):
+        emit(ToastNotice('已在 ${_nameOf(fingerprint)} 上打开设置，把光标移过去就能改'));
       case ForgetRequest(:final fingerprint):
         final gone = _peers.where((p) => p.fingerprint == fingerprint).toList();
         _peers.removeWhere((p) => p.fingerprint == fingerprint);
         if (_cursor == fingerprint) _cursor = null;
+        // 它的单独设置也不再需要。
+        _settings = _settings.withDevice(DeviceSettings(fingerprint: fingerprint));
         // 它的位置安排也不再需要。
         if (_settings.layout.any((p) => p.fingerprint == fingerprint)) {
           _settings = _settings.apply(
@@ -331,6 +345,7 @@ class DemoBackend implements Backend {
             : r'C:\Users\me\AppData\Roaming\ScreenFerry',
         version: '0.1.0',
         platform: platform,
+        naturalScrolling: platform == 'macos' ? true : null,
       ),
       sharing: _sharing,
       problem: _problem,
@@ -361,6 +376,9 @@ class DemoBackend implements Backend {
             lastSeen: p.lastSeen,
             side: role == Role.server ? arrangement.placeOf(p.fingerprint)?.side : null,
             cursor: connected && p.online && _cursor == p.fingerprint,
+            alias: _settings.device(p.fingerprint).alias,
+            // 演示里对方总是和本机不同的系统。
+            platform: platform == 'macos' ? 'windows' : 'macos',
           ),
       ],
       found: List.of(_found),

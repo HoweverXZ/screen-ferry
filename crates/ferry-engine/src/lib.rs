@@ -20,7 +20,7 @@ mod pairing;
 pub mod resident;
 mod server;
 
-pub use client::{ClientConfig, ServerAddr, connect};
+pub use client::{ClientCommand, ClientConfig, ServerAddr, connect};
 pub use clipboard::{ClipLimit, DEFAULT_CLIP_LIMIT};
 pub use edge_drop::{Edge, EdgeDrop, EdgeFeed, Pointer};
 pub use error::{Error, Result};

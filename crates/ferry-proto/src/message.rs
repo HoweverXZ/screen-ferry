@@ -58,6 +58,9 @@ pub enum Message {
     },
     /// 拖动中的提示，见 [`DropHint`]。需要 `EDGE_DROP` 能力。
     DropHint(DropHint),
+    /// 请接收方打开它的设置界面，翻到发送方这台设备的设置页。需要 `REMOTE_SETTINGS` 能力。
+    /// 被控制的一方想改“对方控制本机时”的滚动、按键等设置时用：这些设置在控制的一方。
+    OpenSettings,
 
     // ── 数据连接 ──────────────────────────
     ClipboardOffer(ClipboardOffer),
@@ -105,6 +108,7 @@ mod ty {
     pub(super) const LEAVE: u16 = 0x0102;
     pub(super) const PEER_SIDE: u16 = 0x0103;
     pub(super) const DROP_HINT: u16 = 0x0104;
+    pub(super) const OPEN_SETTINGS: u16 = 0x0105;
     pub(super) const KEY: u16 = 0x0110;
     pub(super) const POINTER_MOTION: u16 = 0x0120;
     pub(super) const POINTER_DELTA: u16 = 0x0121;
@@ -138,6 +142,7 @@ pub(crate) fn allowed(ty: u16, channel: Channel) -> Option<bool> {
         | ty::LEAVE
         | ty::PEER_SIDE
         | ty::DROP_HINT
+        | ty::OPEN_SETTINGS
         | ty::KEY
         | ty::POINTER_MOTION
         | ty::POINTER_DELTA
@@ -178,6 +183,7 @@ impl Message {
             Self::Leave { .. } => ty::LEAVE,
             Self::PeerSide { .. } => ty::PEER_SIDE,
             Self::DropHint(_) => ty::DROP_HINT,
+            Self::OpenSettings => ty::OPEN_SETTINGS,
             Self::Input(event) => match event {
                 InputEvent::Key { .. } => ty::KEY,
                 InputEvent::PointerMotion { .. } => ty::POINTER_MOTION,
@@ -239,7 +245,7 @@ impl Message {
             Self::FileResume(m) => m.encode(w),
             Self::FileData { data } => file::encode_data(data, w),
             Self::FileEnd(m) => m.encode(w),
-            Self::FileDone => Ok(()),
+            Self::FileDone | Self::OpenSettings => Ok(()),
         }
     }
 
@@ -305,6 +311,7 @@ impl Message {
             },
             ty::FILE_END => Self::FileEnd(FileEnd::decode(r)?),
             ty::FILE_DONE => Self::FileDone,
+            ty::OPEN_SETTINGS => Self::OpenSettings,
             _ => return Err(DecodeError::UnknownMessage(ty)),
         })
     }

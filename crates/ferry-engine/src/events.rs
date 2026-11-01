@@ -29,6 +29,8 @@ pub enum Event {
         name: String,
         fingerprint: Fingerprint,
         addr: SocketAddr,
+        /// 对方是什么系统（`macos`、`windows`）；看不出来时为 `None`。
+        platform: Option<String>,
     },
     /// 与 `peer` 的会话结束。`reason` 为 `None` 表示对方正常断开。
     Disconnected {
@@ -68,6 +70,10 @@ pub enum Event {
     PairingRejected { name: String, by_peer: bool },
     /// 一次文件传输有了进展。传输中最多每 0.1 秒报告一次。
     Transfer(TransferUpdate),
+    /// 服务端：`peer` 请本机打开设置界面，翻到它的设置页。
+    OpenSettings { peer: Fingerprint },
+    /// 客户端：请 `peer` 打开它的设置界面的结果。`sent` 为假表示对方的版本不支持。
+    PeerSettings { peer: Fingerprint, sent: bool },
 }
 
 /// 一次文件传输的现状。

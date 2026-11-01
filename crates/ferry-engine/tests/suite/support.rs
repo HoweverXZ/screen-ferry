@@ -8,10 +8,10 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use ferry_core::{KeyRemap, Side};
+use ferry_core::Side;
 use ferry_engine::{
-    ClientConfig, ClipLimit, ConfirmPairing, EdgeFeed, Error, Event, Events, Files, Live,
-    PairingRequest, ServerAddr, ServerConfig, connect, serve,
+    ClientCommand, ClientConfig, ClipLimit, ConfirmPairing, EdgeFeed, Error, Event, Events, Files,
+    Live, PairingRequest, ServerAddr, ServerConfig, connect, serve,
 };
 use ferry_platform::CaptureEvent;
 use ferry_platform_mock::{MockCapture, MockClipboard, MockDisplays, MockInject};
@@ -210,7 +210,9 @@ impl Rig {
                     Live {
                         side: Side::Right,
                         layout: Vec::new(),
-                        remap: KeyRemap::swap_command_control(),
+                        devices: Vec::new(),
+                        fallback: ferry_types::DeviceSettings::default(),
+                        mouse_dpi: 1600,
                     }
                     .fixed()
                 }),
@@ -287,6 +289,8 @@ impl Rig {
             events: setup.pc_events.clone(),
             files,
             edge: setup.pc_edge.clone(),
+            devices: Vec::new(),
+            commands: None,
         };
         tokio::spawn(async move {
             match connect(config, inject, displays, clipboard, confirm).await {
@@ -387,6 +391,25 @@ impl Extra {
 impl Rig {
     /// 再连上一台叫 `name` 的客户端，等它和服务端建好会话再返回。
     pub async fn add_client(&self, name: &str, edge: EdgeFeed) -> Extra {
+        self.add_client_with(name, edge, None).await
+    }
+
+    /// 同 [`Rig::add_client`]，再交给它一个命令通道，测试借此像常驻后台一样给客户端下命令。
+    pub async fn add_commanded_client(
+        &self,
+        name: &str,
+    ) -> (Extra, tokio::sync::mpsc::UnboundedSender<ClientCommand>) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let extra = self.add_client_with(name, EdgeFeed::none(), Some(rx)).await;
+        (extra, tx)
+    }
+
+    async fn add_client_with(
+        &self,
+        name: &str,
+        edge: EdgeFeed,
+        commands: Option<tokio::sync::mpsc::UnboundedReceiver<ClientCommand>>,
+    ) -> Extra {
         let device = Device::new();
         let (events, mut rx) = Events::channel();
         let files = Files::new(&device.store, events.clone());
@@ -402,6 +425,8 @@ impl Rig {
             events,
             files,
             edge,
+            devices: Vec::new(),
+            commands,
         };
         let client = tokio::spawn({
             let inject = inject.clone();

@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::Side;
+use crate::device::DeviceSettings;
 
 /// 本机在一对设备中的角色。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -53,8 +54,8 @@ pub struct Config {
     pub role: Role,
     /// 服务端：没有在 `layout` 里单独安排的设备放在本机哪一侧。
     pub side: Side,
-    /// 服务端：把 Command 当作对方的 Ctrl。
-    pub swap_cmd_ctrl: bool,
+    /// 本机鼠标的 DPI，每台设备的光标速度以它为准换算。
+    pub mouse_dpi: u32,
     /// 服务端：在局域网里广播本机。
     pub announce: bool,
     /// 同步剪贴板。
@@ -70,8 +71,10 @@ pub struct Config {
     /// 服务端：单独安排过位置的设备，按先后排列。同一侧的几台按这个先后平分那条边，
     /// 没有列出的设备放在 `side` 一侧、排在列出的后面。
     ///
-    /// 写成 TOML 时是表格数组，必须放在最后。
+    /// 写成 TOML 时是表格数组，和 `devices` 一起放在最后。
     pub layout: Vec<Placement>,
+    /// 每台设备的单独设置，按指纹区分；没有列出的设备用缺省设置。
+    pub devices: Vec<DeviceSettings>,
 }
 
 impl Config {
@@ -80,15 +83,51 @@ impl Config {
     /// - 1：第一版。
     /// - 2：新增 `layout`；`side` 改为“没有单独安排的设备放在哪一侧”，只有一台设备时与版本 1 等价。
     /// - 3：新增 `clipboard_limit_mb`（缺省 32，与之前固定的上限相同）。
-    pub const SCHEMA_VERSION: u32 = 3;
+    /// - 4：去掉 `swap_cmd_ctrl`，改为每台设备的 `devices.modifiers`；新增 `mouse_dpi`（缺省 1600）。
+    ///   版本 3 里 `swap_cmd_ctrl = false` 的，迁移时给每台已配对的设备写上 `modifiers = "plain"`。
+    pub const SCHEMA_VERSION: u32 = 4;
 
     /// 剪贴板单项大小上限的取值范围（MB）。
     pub const CLIPBOARD_LIMIT_MB: std::ops::RangeInclusive<u32> = 1..=64;
+
+    /// 本机鼠标 DPI 的取值范围，与每台设备的光标速度相同。
+    pub const MOUSE_DPI: std::ops::RangeInclusive<u32> = DeviceSettings::POINTER_DPI;
 
     /// 剪贴板单项的大小上限（字节），超出范围的值收进范围内。
     pub fn clipboard_limit_bytes(&self) -> u64 {
         let range = Self::CLIPBOARD_LIMIT_MB;
         u64::from(self.clipboard_limit_mb.clamp(*range.start(), *range.end())) * 1024 * 1024
+    }
+
+    /// 本机鼠标的 DPI，超出范围的值收进范围内。
+    pub fn mouse_dpi(&self) -> u32 {
+        let range = Self::MOUSE_DPI;
+        self.mouse_dpi.clamp(*range.start(), *range.end())
+    }
+
+    /// 一台设备（指纹的十六进制）的设置；没有单独设置过的用缺省设置。
+    pub fn device(&self, fingerprint: &str) -> DeviceSettings {
+        self.devices
+            .iter()
+            .find(|d| d.fingerprint == fingerprint)
+            .cloned()
+            .unwrap_or_else(|| DeviceSettings::new(fingerprint))
+    }
+
+    /// 换上一台设备的设置：已有的替换，没有的加在后面。全是缺省值时去掉这一条。
+    pub fn set_device(&mut self, settings: DeviceSettings) {
+        let at = self
+            .devices
+            .iter()
+            .position(|d| d.fingerprint == settings.fingerprint);
+        match (at, settings.is_default()) {
+            (Some(i), true) => {
+                self.devices.remove(i);
+            }
+            (Some(i), false) => self.devices[i] = settings,
+            (None, true) => {}
+            (None, false) => self.devices.push(settings),
+        }
     }
 }
 
@@ -107,7 +146,7 @@ impl Default for Config {
             name: String::new(),
             role: Role::native(),
             side: Side::Right,
-            swap_cmd_ctrl: true,
+            mouse_dpi: 1600,
             announce: true,
             clipboard: true,
             clipboard_limit_mb: 32,
@@ -115,6 +154,7 @@ impl Default for Config {
             theme: Theme::System,
             accent: 0,
             layout: Vec::new(),
+            devices: Vec::new(),
         }
     }
 }

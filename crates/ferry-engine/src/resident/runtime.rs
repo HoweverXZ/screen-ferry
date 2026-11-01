@@ -7,7 +7,6 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use ferry_core::KeyRemap;
 use ferry_ipc::{
     ClipboardImage, ClipboardSync, FoundDevice, Link, LinkStatus, Local, LogIcon, LogKind, Notice,
     PairingPrompt, PeerInfo, PeerRef, Problem, ProblemKind, Request, Settings, SettingsPatch,
@@ -15,7 +14,7 @@ use ferry_ipc::{
 };
 use ferry_store::Store;
 use ferry_trust::{Fingerprint, PeerList};
-use ferry_types::{ClipboardFormat, Config, Role, Side, uses_command_key};
+use ferry_types::{ClipboardFormat, Config, DeviceSettings, Role, Side, uses_command_key};
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
@@ -25,7 +24,7 @@ use super::confirm::{PairAsk, UiConfirm};
 use super::record::{Activity, Log, Rtt, now_ms};
 use super::ui::UiEvent;
 use super::{Command, Host, Summary};
-use crate::client::{ClientConfig, ServerAddr, connect};
+use crate::client::{ClientCommand, ClientConfig, ServerAddr, connect};
 use crate::clipboard::ClipLimit;
 use crate::edge_drop::EdgeDrop;
 use crate::error::{Error, Result};
@@ -42,11 +41,15 @@ const RETRY_PAIRING: Duration = Duration::from_secs(3);
 const RETRY_OTHER: Duration = Duration::from_secs(5);
 /// 多久重新读一次已配对设备（用户可能用命令行删了设备）。
 const PEERS_REFRESH: Duration = Duration::from_secs(5);
+/// 另一台设备请本机打开设置时，设置界面在这么久之内连上来才翻到它的设置页。
+const SHOW_DEVICE_WINDOW: Duration = Duration::from_secs(30);
 
 struct EngineTask {
     handle: JoinHandle<Result<Infallible>>,
     /// 服务端的即时设置；客户端没有。
     live: Option<watch::Sender<Live>>,
+    /// 客户端的命令；服务端没有。
+    client: Option<mpsc::UnboundedSender<ClientCommand>>,
 }
 
 struct Pending {
@@ -112,6 +115,10 @@ pub(crate) struct Runtime<H> {
     dirty: bool,
     /// 上次要打开设置界面的时刻，界面连上时据此记下启动用了多久。
     settings_opened: Option<Instant>,
+    /// 本次运行中连上过的设备是什么系统。
+    platforms: HashMap<Fingerprint, String>,
+    /// 另一台设备请本机打开设置：等设置界面连上后翻到它（指纹的十六进制）的设置页。
+    show_device: Option<(String, Instant)>,
 }
 
 impl<H: Host> Runtime<H> {
@@ -169,6 +176,8 @@ impl<H: Host> Runtime<H> {
             next_prompt: 1,
             dirty: true,
             settings_opened: None,
+            platforms: HashMap::new(),
+            show_device: None,
         };
         let role = match runtime.config.role {
             Role::Server => "键鼠在本机",
@@ -235,6 +244,7 @@ impl<H: Host> Runtime<H> {
         self.engine = Some(EngineTask {
             handle,
             live: Some(live_tx),
+            client: None,
         });
         Ok(())
     }
@@ -246,6 +256,7 @@ impl<H: Host> Runtime<H> {
             "" => ServerAddr::Discover,
             text => ServerAddr::Fixed(resolve(text)?),
         };
+        let (commands_tx, commands) = mpsc::unbounded_channel();
         let config = ClientConfig {
             server,
             name: self.name.clone(),
@@ -256,10 +267,16 @@ impl<H: Host> Runtime<H> {
             events: self.events.clone(),
             files: self.files.clone(),
             edge: self.edge.feed(),
+            devices: self.config.devices.clone(),
+            commands: Some(commands),
         };
         let (displays, clipboard) = (self.host.displays(), self.host.clipboard());
         let handle = tokio::spawn(connect(config, inject, displays, clipboard, confirm));
-        self.engine = Some(EngineTask { handle, live: None });
+        self.engine = Some(EngineTask {
+            handle,
+            live: None,
+            client: Some(commands_tx),
+        });
         Ok(())
     }
 
@@ -352,11 +369,9 @@ impl<H: Host> Runtime<H> {
         Live {
             side: self.config.side,
             layout: self.config.layout.clone(),
-            remap: if self.config.swap_cmd_ctrl {
-                KeyRemap::swap_command_control()
-            } else {
-                KeyRemap::none()
-            },
+            devices: self.config.devices.clone(),
+            fallback: DeviceSettings::default(),
+            mouse_dpi: self.config.mouse_dpi(),
         }
     }
 
@@ -387,14 +402,29 @@ impl<H: Host> Runtime<H> {
             .or(self.links.last())
     }
 
-    /// 一台设备的名字：连着时用它报的名字，否则用配对时记下的。
+    /// 一台设备的名字：本机给它起过名字就用起的，否则连着时用它报的名字，再否则用配对时记下的。
     fn peer_name(&self, fingerprint: &Fingerprint) -> String {
-        self.links
-            .iter()
-            .find(|l| l.fingerprint == *fingerprint)
-            .map(|l| l.peer.name.clone())
+        self.alias_of(fingerprint)
+            .or_else(|| {
+                self.links
+                    .iter()
+                    .find(|l| l.fingerprint == *fingerprint)
+                    .map(|l| l.peer.name.clone())
+            })
             .or_else(|| self.peers.get(fingerprint).map(|p| p.name.clone()))
             .unwrap_or_else(|| "对方".to_owned())
+    }
+
+    /// 本机给一台设备起的名字。
+    fn alias_of(&self, fingerprint: &Fingerprint) -> Option<String> {
+        let hex = fingerprint.to_hex();
+        self.config
+            .devices
+            .iter()
+            .find(|d| d.fingerprint == hex)
+            .map(|d| d.alias.trim())
+            .filter(|alias| !alias.is_empty())
+            .map(str::to_owned)
     }
 
     /// 服务端：一台设备在本机哪一侧。
@@ -448,7 +478,11 @@ impl<H: Host> Runtime<H> {
                 name,
                 fingerprint,
                 addr,
+                platform,
             } => {
+                if let Some(platform) = platform {
+                    self.platforms.insert(fingerprint, platform);
+                }
                 self.status = LinkStatus::Connected;
                 self.clear_problem();
                 self.links.retain(|l| l.fingerprint != fingerprint);
@@ -469,6 +503,7 @@ impl<H: Host> Runtime<H> {
                     self.cursor = Some(fingerprint);
                 }
                 self.refresh_peers();
+                let name = self.alias_of(&fingerprint).unwrap_or(name);
                 self.log(
                     LogKind::Link,
                     LogIcon::Link,
@@ -504,6 +539,34 @@ impl<H: Host> Runtime<H> {
                 }
             }
             Event::Transfer(update) => self.on_transfer(update),
+            Event::OpenSettings { peer } => {
+                let name = self.peer_name(&peer);
+                self.log(
+                    LogKind::Link,
+                    LogIcon::Settings,
+                    format!("{name} 请本机打开设置"),
+                    "已翻到它的设置页",
+                );
+                // 已经开着的界面直接翻过去；没开的，打开后连上来时再翻。
+                if self.clients.is_empty() {
+                    self.show_device = Some((peer.to_hex(), Instant::now()));
+                } else {
+                    self.broadcast(Notice::ShowDevice {
+                        fingerprint: peer.to_hex(),
+                    });
+                }
+                self.open_settings();
+            }
+            Event::PeerSettings { peer, sent } => {
+                let name = self.peer_name(&peer);
+                if sent {
+                    self.toast(format!("已在 {name} 上打开设置，把光标移过去就能改"));
+                } else {
+                    self.toast(format!(
+                        "{name} 上的 ScreenFerry 版本较旧，请在那台电脑上打开设置"
+                    ));
+                }
+            }
             Event::Cursor { here, hotkey, peer } => {
                 self.cursor = (!here).then_some(peer);
                 if !here {
@@ -680,6 +743,11 @@ impl<H: Host> Runtime<H> {
                 initial.extend(self.pending.values().map(|p| Notice::Pairing {
                     prompt: p.prompt.clone(),
                 }));
+                if let Some((fingerprint, at)) = self.show_device.take()
+                    && at.elapsed() < SHOW_DEVICE_WINDOW
+                {
+                    initial.push(Notice::ShowDevice { fingerprint });
+                }
                 for notice in initial {
                     if outbox.try_send(notice).is_err() {
                         return;
@@ -708,6 +776,8 @@ impl<H: Host> Runtime<H> {
             Request::Hello { .. } => {}
             Request::SetSharing { on } => self.set_sharing(on).await,
             Request::UpdateSettings { settings } => self.update_settings(settings).await,
+            Request::SetDevice { device } => self.set_device(device).await,
+            Request::OpenPeerSettings { fingerprint } => self.open_peer_settings(&fingerprint),
             Request::Forget { fingerprint } => self.forget(&fingerprint).await,
             Request::PairReply { id, accept } => self.answer(id, accept),
             Request::Connect { fingerprint } => self.connect_to(&fingerprint).await,
@@ -751,6 +821,10 @@ impl<H: Host> Runtime<H> {
         let Some(peer) = target else {
             return self.toast(Error::NotConnected.to_string());
         };
+        if !self.config.device(&peer.to_hex()).files {
+            let name = self.peer_name(&peer);
+            return self.toast(format!("已在设置里关掉了拖文件给 {name}"));
+        }
         match self.files.send(peer, paths).await {
             Ok(_) => {
                 let name = self.peer_name(&peer);
@@ -871,8 +945,9 @@ impl<H: Host> Runtime<H> {
         if let Some(layout) = patch.layout {
             next.layout = layout;
         }
-        if let Some(swap) = patch.swap_cmd_ctrl {
-            next.swap_cmd_ctrl = swap;
+        if let Some(dpi) = patch.mouse_dpi {
+            let range = Config::MOUSE_DPI;
+            next.mouse_dpi = dpi.clamp(*range.start(), *range.end());
         }
         if let Some(theme) = patch.theme {
             next.theme = theme;
@@ -929,7 +1004,65 @@ impl<H: Host> Runtime<H> {
         if restart {
             self.name = resolve_name(&self.config, &self.host);
             self.restart_engine().await;
-        } else if let Some(live) = self.engine.as_ref().and_then(|t| t.live.as_ref()) {
+        } else {
+            self.push_live();
+        }
+    }
+
+    /// 换上一台设备的单独设置。服务端上立即生效；剪贴板开关要重新连接才生效，
+    /// 客户端上对服务端的剪贴板、拖文件开关也一样。
+    async fn set_device(&mut self, device: DeviceSettings) {
+        let Ok(fingerprint) = device.fingerprint.parse::<Fingerprint>() else {
+            return;
+        };
+        // 统一写成小写十六进制，免得同一台设备有两条。
+        let device = DeviceSettings {
+            fingerprint: fingerprint.to_hex(),
+            ..device.clamped()
+        };
+        let before = self.config.device(&device.fingerprint);
+        if before == device {
+            return;
+        }
+        let mut next = self.config.clone();
+        next.set_device(device.clone());
+        if let Err(e) = self.store.save_config(&next) {
+            return self.toast(format!("保存设置失败：{e}"));
+        }
+        self.config = next;
+        self.dirty = true;
+        let linked = self.links.iter().any(|l| l.fingerprint == fingerprint);
+        let reconnect = linked
+            && (before.clipboard != device.clipboard
+                || (self.config.role == Role::Client && before.files != device.files));
+        if reconnect {
+            self.restart_engine().await;
+        } else {
+            self.push_live();
+        }
+    }
+
+    /// 客户端：请连着的服务端打开它的设置界面。
+    fn open_peer_settings(&mut self, fingerprint: &str) {
+        let Ok(fingerprint) = fingerprint.parse::<Fingerprint>() else {
+            return;
+        };
+        let online = self.links.iter().any(|l| l.fingerprint == fingerprint);
+        let commands = self.engine.as_ref().and_then(|t| t.client.as_ref());
+        match commands {
+            Some(commands) if online => {
+                let _ = commands.send(ClientCommand::OpenPeerSettings);
+            }
+            _ => {
+                let name = self.peer_name(&fingerprint);
+                self.toast(format!("{name} 现在没连着"));
+            }
+        }
+    }
+
+    /// 把服务端的即时设置（布局、每台设备的设置）交给正在运行的引擎。
+    fn push_live(&self) {
+        if let Some(live) = self.engine.as_ref().and_then(|t| t.live.as_ref()) {
             live.send_if_modified(|current| {
                 let next = self.live();
                 let changed = *current != next;
@@ -955,11 +1088,14 @@ impl<H: Host> Runtime<H> {
             return self.toast(format!("移除失败：{e}"));
         }
         self.refresh_peers();
-        // 它的位置安排也不再需要。
+        // 它的位置安排和单独设置也不再需要。
         let hex = fingerprint.to_hex();
-        if self.config.layout.iter().any(|p| p.fingerprint == hex) {
+        if self.config.layout.iter().any(|p| p.fingerprint == hex)
+            || self.config.devices.iter().any(|d| d.fingerprint == hex)
+        {
             let mut next = self.config.clone();
             next.layout.retain(|p| p.fingerprint != hex);
+            next.devices.retain(|d| d.fingerprint != hex);
             match self.store.save_config(&next) {
                 Ok(()) => self.config = next,
                 Err(e) => warn!("保存设置失败：{e}"),
@@ -1093,7 +1229,7 @@ impl<H: Host> Runtime<H> {
             connected_to: (!self.links.is_empty()).then(|| {
                 self.links
                     .iter()
-                    .map(|l| l.peer.name.as_str())
+                    .map(|l| self.peer_name(&l.fingerprint))
                     .collect::<Vec<_>>()
                     .join("、")
             }),
@@ -1114,6 +1250,7 @@ impl<H: Host> Runtime<H> {
                 version: env!("CARGO_PKG_VERSION").to_owned(),
                 port: self.port,
                 platform: std::env::consts::OS.to_owned(),
+                natural_scrolling: self.host.natural_scrolling(),
             },
             sharing: !self.paused,
             problem: self.problem.clone(),
@@ -1136,6 +1273,12 @@ impl<H: Host> Runtime<H> {
                     last_seen: self.last_seen.get(&p.fingerprint).copied(),
                     side: server.then(|| self.side_of(&p.fingerprint)),
                     cursor: self.cursor == Some(p.fingerprint),
+                    alias: self.alias_of(&p.fingerprint).unwrap_or_default(),
+                    platform: self
+                        .platforms
+                        .get(&p.fingerprint)
+                        .cloned()
+                        .unwrap_or_default(),
                 })
                 .collect(),
             found: self
@@ -1157,14 +1300,15 @@ impl<H: Host> Runtime<H> {
                 name: self.config.name.clone(),
                 side: self.config.side,
                 layout: self.config.layout.clone(),
-                swap_cmd_ctrl: self.config.swap_cmd_ctrl,
                 announce: self.config.announce,
                 clipboard: self.config.clipboard,
                 clipboard_limit_mb: self.config.clipboard_limit_mb,
+                mouse_dpi: self.config.mouse_dpi(),
                 server: self.config.server.clone(),
                 autostart: self.autostart,
                 theme: self.config.theme,
                 accent: self.config.accent,
+                devices: self.config.devices.clone(),
             },
             activity: self.activity.recent(),
         }

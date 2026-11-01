@@ -313,7 +313,7 @@ async fn ctrl_option_escape_returns_to_local() {
 
 #[tokio::test]
 async fn changing_side_mid_session_takes_effect_without_reconnecting() {
-    use ferry_core::{KeyRemap, Side};
+    use ferry_core::Side;
     use ferry_engine::Live;
     use tokio::sync::watch;
 
@@ -322,7 +322,9 @@ async fn changing_side_mid_session_takes_effect_without_reconnecting() {
     let (tx, rx) = watch::channel(Live {
         side: Side::Right,
         layout: Vec::new(),
-        remap: KeyRemap::none(),
+        devices: Vec::new(),
+        fallback: ferry_types::DeviceSettings::default(),
+        mouse_dpi: 1600,
     });
     let rig = Rig::with(Setup {
         live: Some(rx),
@@ -356,7 +358,7 @@ async fn changing_side_mid_session_takes_effect_without_reconnecting() {
 }
 
 mod several_clients {
-    use ferry_core::{KeyRemap, Side};
+    use ferry_core::Side;
     use ferry_engine::{EdgeFeed, Live};
     use ferry_types::Placement;
     use tokio::sync::watch;
@@ -368,7 +370,9 @@ mod several_clients {
         let (tx, rx) = watch::channel(Live {
             side: Side::Right,
             layout: Vec::new(),
-            remap: KeyRemap::none(),
+            devices: Vec::new(),
+            fallback: ferry_types::DeviceSettings::default(),
+            mouse_dpi: 1600,
         });
         let rig = Rig::with(Setup {
             live: Some(rx),
@@ -490,5 +494,163 @@ mod several_clients {
         });
         eventually("先回到本机", || !rig.capture.is_grabbed()).await;
         enter_at(&rig, 500, 0, 0, -4).await;
+    }
+}
+
+/// 每台设备的单独设置（ADR 0009）：在服务端发出之前处理。
+mod per_device {
+    use std::time::Duration;
+
+    use ferry_core::Side;
+    use ferry_engine::{Event, Events, Live};
+    use ferry_platform::CaptureEvent;
+    use ferry_types::{
+        DeviceSettings, InputEvent, KeyAction, KeyCode, KeyMapping, ModifierPreset, ScrollSpeed,
+    };
+    use tokio::sync::watch;
+
+    use crate::support::{Rig, Setup, eventually};
+
+    /// 服务端连着 pc，`live` 由测试掌握。
+    async fn rig() -> (Rig, watch::Sender<Live>) {
+        let (tx, rx) = watch::channel(Live {
+            side: Side::Right,
+            layout: Vec::new(),
+            devices: Vec::new(),
+            fallback: DeviceSettings::default(),
+            mouse_dpi: 1600,
+        });
+        let rig = Rig::with(Setup {
+            live: Some(rx),
+            ..Setup::default()
+        })
+        .await;
+        (rig, tx)
+    }
+
+    fn keys(rig: &Rig) -> Vec<(KeyCode, KeyAction)> {
+        rig.inject
+            .events()
+            .into_iter()
+            .filter_map(|e| match e {
+                InputEvent::Key { code, action } => Some((code, action)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn wheels(rig: &Rig) -> Vec<(i32, i32)> {
+        rig.inject
+            .events()
+            .into_iter()
+            .filter_map(|e| match e {
+                InputEvent::Wheel { dx, dy, .. } => Some((dx, dy)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// 光标在客户端上时的最后位置。
+    fn last_x(rig: &Rig) -> i32 {
+        rig.inject
+            .events()
+            .into_iter()
+            .rev()
+            .find_map(|e| match e {
+                InputEvent::PointerMotion { position } => Some(position.x),
+                _ => None,
+            })
+            .expect("客户端收到过光标位置")
+    }
+
+    #[tokio::test]
+    async fn a_device_gets_its_own_wheel_and_keys() {
+        let (rig, tx) = rig().await;
+        let f13 = KeyCode::keyboard(0x68);
+        let print_screen = KeyCode::keyboard(0x46);
+        let mut device = DeviceSettings::new(rig.pc_fingerprint());
+        device.reverse_vertical = true;
+        device.scroll_speed = ScrollSpeed::Fast;
+        device.modifiers = ModifierPreset::Plain;
+        device.keys = vec![
+            KeyMapping {
+                from: f13.raw(),
+                to: print_screen.raw(),
+            },
+            KeyMapping {
+                from: KeyCode::CAPS_LOCK.raw(),
+                to: 0,
+            },
+        ];
+        tx.send_modify(|live| live.devices = vec![device]);
+        rig.enter().await;
+
+        rig.capture.emit(CaptureEvent::Wheel { dx: 0, dy: 120 });
+        rig.key(KeyCode::LEFT_GUI, KeyAction::Down);
+        rig.key(KeyCode::CAPS_LOCK, KeyAction::Down);
+        rig.key(f13, KeyAction::Down);
+        eventually("客户端收到按键", || keys(&rig).len() >= 2).await;
+
+        assert_eq!(wheels(&rig), [(0, -240)], "反向、两倍");
+        assert_eq!(
+            keys(&rig),
+            [
+                (KeyCode::LEFT_GUI, KeyAction::Down),
+                (print_screen, KeyAction::Down),
+            ],
+            "原样发送 ⌘；Caps Lock 不发送；F13 换成 Print Screen",
+        );
+    }
+
+    #[tokio::test]
+    async fn the_pointer_follows_the_dpi_set_for_the_device() {
+        let (rig, tx) = rig().await;
+        rig.enter().await;
+        let start = last_x(&rig);
+        rig.push(10, 0);
+        eventually("光标在客户端上移动", || last_x(&rig) != start).await;
+        let normal = last_x(&rig) - start;
+
+        let mut device = DeviceSettings::new(rig.pc_fingerprint());
+        device.pointer_dpi = 3200;
+        tx.send_modify(|live| live.devices = vec![device]);
+        // 等服务端换上新的设置。
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let before = last_x(&rig);
+        rig.push(10, 0);
+        eventually("光标在客户端上移动", || last_x(&rig) != before).await;
+        assert_eq!(
+            last_x(&rig) - before,
+            normal * 2,
+            "3200 DPI 是本机 1600 的两倍"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_client_can_ask_the_server_to_open_its_settings() {
+        let (events, mut rx) = Events::channel();
+        let rig = Rig::with(Setup {
+            mac_events: events,
+            ..Setup::default()
+        })
+        .await;
+        let (extra, commands) = rig.add_commanded_client("书房").await;
+        commands
+            .send(ferry_engine::ClientCommand::OpenPeerSettings)
+            .unwrap();
+
+        let fingerprint = extra.fingerprint();
+        let asked = async {
+            while let Some(event) = rx.recv().await {
+                if let Event::OpenSettings { peer } = event
+                    && peer.to_hex() == fingerprint
+                {
+                    return;
+                }
+            }
+        };
+        tokio::time::timeout(Duration::from_secs(5), asked)
+            .await
+            .expect("服务端 5 秒内没有收到打开设置的请求");
     }
 }

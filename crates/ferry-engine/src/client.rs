@@ -7,6 +7,7 @@
 //! 先发起配对，由两边的用户核对配对码，确认后才建立会话。
 //!
 //! 双方都支持剪贴板时，握手后再连一条数据连接同步剪贴板；它失败不影响键鼠。
+//! 本机对服务端的单独设置里关掉了剪贴板或拖文件时，相应地不同步、不显示拖放的边。
 //!
 //! 不指定地址时，每次连接前都在局域网里用 mDNS 寻找服务端（见 [`ferry_net::discovery`]），
 //! 对方换了 IP 也能找回来。
@@ -23,8 +24,8 @@ use ferry_platform::{Clipboard, Displays, Error as PlatformError, InputInject};
 use ferry_proto::{Capabilities, Channel, Hello, Message, RejectReason};
 use ferry_store::Store;
 use ferry_trust::{Fingerprint, Peer};
-use ferry_types::{Display, InputEvent, LockKeys, Point, Side};
-use tokio::sync::watch;
+use ferry_types::{DeviceSettings, Display, InputEvent, LockKeys, Point, Side};
+use tokio::sync::{mpsc, watch};
 use tokio::time::{MissedTickBehavior, interval, sleep, timeout};
 use tracing::{debug, info, warn};
 
@@ -34,7 +35,8 @@ use crate::error::{Error, Result};
 use crate::events::{Event, Events, FoundServer};
 use crate::files::{FileLink, Files, Opener};
 use crate::link::{
-    CONNECT_TIMEOUT, DISPLAY_CHECK, HANDSHAKE_TIMEOUT, capabilities, frame_of, primary_scale, send,
+    CONNECT_TIMEOUT, DISPLAY_CHECK, HANDSHAKE_TIMEOUT, capabilities, frame_of, platform_of,
+    primary_scale, send,
 };
 use crate::pairing::{self, ConfirmPairing, Outcome};
 
@@ -48,6 +50,13 @@ const DISCOVERY_WAIT: Duration = Duration::from_secs(3);
 const PER_ADDRESS_TIMEOUT: Duration = Duration::from_secs(2);
 /// 客户端自己测量往返延迟的间隔（服务端的 Ping 只用于判断连接存活）。
 const RTT_INTERVAL: Duration = Duration::from_secs(1);
+
+/// 常驻后台在运行中交给客户端的事。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClientCommand {
+    /// 请服务端打开它的设置界面，翻到本机的设置页。结果以 [`Event::PeerSettings`] 报告。
+    OpenPeerSettings,
+}
 
 /// 服务端在哪里。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,6 +85,10 @@ pub struct ClientConfig {
     pub files: Files,
     /// 边缘投递：报告本机光标和朝向服务端的那条边。
     pub edge: EdgeFeed,
+    /// 单独设置过的设备。对服务端的设置管着同不同步剪贴板、能不能把文件拖给它、在本机上叫它什么。
+    pub devices: Vec<DeviceSettings>,
+    /// 常驻后台的命令；命令行模式为 `None`。
+    pub commands: Option<mpsc::UnboundedReceiver<ClientCommand>>,
 }
 
 /// 运行客户端：连接服务端，断开后自动重连。
@@ -83,7 +96,7 @@ pub struct ClientConfig {
 /// 需要配对时用 `confirm` 请本机用户核对配对码。
 /// 启动失败（例如读不到本机显示器）或任何一方拒绝配对时返回错误。
 pub async fn connect<I, D, K, P>(
-    config: ClientConfig,
+    mut config: ClientConfig,
     inject: I,
     displays: D,
     clipboard: K,
@@ -119,6 +132,8 @@ where
         edge: config.edge.clone(),
         peer_side: None,
         server: None,
+        commands: config.commands.take(),
+        drop_files: true,
     };
     let mut searching = false;
     let mut seen = Vec::new();
@@ -298,6 +313,10 @@ struct Client<I: InputInject, K, P> {
     peer_side: Option<Side>,
     /// 最近一次会话的服务端。
     server: Option<Fingerprint>,
+    /// 常驻后台的命令。
+    commands: Option<mpsc::UnboundedReceiver<ClientCommand>>,
+    /// 本次会话能把文件拖给服务端（本机对它的设置没有关掉）。
+    drop_files: bool,
 }
 
 /// 无论因为什么停下（包括整个引擎被关掉），都松开对方按着的键、让本机光标重新出现。
@@ -334,7 +353,14 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
             return Ok(Ended::Paired);
         }
 
-        let caps = capabilities(config.clipboard, config.command_key);
+        let device = config
+            .devices
+            .iter()
+            .find(|d| d.fingerprint == server.to_hex())
+            .cloned()
+            .unwrap_or_else(|| DeviceSettings::new(server.to_hex()));
+        self.drop_files = device.files;
+        let caps = capabilities(config.clipboard && device.clipboard, config.command_key);
         let hello = Hello::new(Channel::Input, caps, 0, config.name.clone());
         let welcome =
             match timeout(HANDSHAKE_TIMEOUT, ferry_net::initiate(&mut framed, hello)).await {
@@ -353,11 +379,24 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
         self.server = Some(server);
         // 刚连上时光标在服务端屏幕上。
         self.hide_cursor(true);
+        // 本机是 Mac 时看得出对方是不是 Mac：交集里有 COMMAND_KEY 说明两边都是。
+        let platform = config
+            .command_key
+            .then(|| platform_of(welcome.capabilities.contains(Capabilities::COMMAND_KEY)));
         self.events.emit(Event::Connected {
             name: welcome.name.clone(),
             fingerprint: server,
             addr,
+            platform,
         });
+        // 上次会话里没来得及处理的命令已经过时。
+        if let Some(commands) = &mut self.commands {
+            while commands.try_recv().is_ok() {}
+        }
+        let shown = match device.alias.trim() {
+            "" => welcome.name.clone(),
+            alias => alias.to_owned(),
+        };
 
         // 会话结束时随之丢弃，剪贴板同步也就停了。
         let clipboard = welcome.capabilities.contains(Capabilities::CLIPBOARD);
@@ -401,6 +440,18 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
         loop {
             let message = tokio::select! {
                 message = framed.recv() => message?,
+                Some(command) = next_command(&mut self.commands) => {
+                    match command {
+                        ClientCommand::OpenPeerSettings => {
+                            let sent = welcome.capabilities.contains(Capabilities::REMOTE_SETTINGS);
+                            if sent {
+                                send(&mut framed, &Message::OpenSettings).await?;
+                            }
+                            self.events.emit(Event::PeerSettings { peer: server, sent });
+                        }
+                    }
+                    continue;
+                }
                 changed = hints.changed(), if edge_drop => {
                     if changed.is_ok() {
                         let hint = hints.borrow_and_update().clone();
@@ -419,7 +470,7 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                         send(&mut framed, &Message::Displays(now.clone())).await?;
                         screens = now;
                         if let Some(side) = self.peer_side {
-                            self.publish_edge(side, &screens, &welcome.name);
+                            self.publish_edge(side, &screens, &shown);
                         }
                     }
                     continue;
@@ -484,7 +535,7 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                 Some(Message::Input(event)) => self.apply(event),
                 Some(Message::PeerSide { side }) => {
                     info!(?side, "服务端在本机的这一侧");
-                    self.publish_edge(side, &screens, &welcome.name);
+                    self.publish_edge(side, &screens, &shown);
                 }
                 Some(Message::DropHint(hint)) => self.edge.remote(server, Some(hint)),
                 Some(Message::Displays(_)) => {}
@@ -601,12 +652,15 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
         });
     }
 
-    /// 告诉边缘投递：朝向服务端的是哪条边、本机屏幕多大。
+    /// 告诉边缘投递：朝向服务端的是哪条边、本机屏幕多大。本机对它关掉了拖文件时不摆这条边。
     fn publish_edge(&mut self, side: Side, screens: &[Display], peer: &str) {
         self.peer_side = Some(side);
         let (Some(rect), Some(id)) = (bounds(screens), self.server) else {
             return;
         };
+        if !self.drop_files {
+            return;
+        }
         self.edge.edges(vec![Edge {
             id,
             side,
@@ -679,5 +733,15 @@ impl Link {
             let link = link.clone();
             Box::pin(async move { link.connect(Channel::File).await })
         })
+    }
+}
+
+/// 等常驻后台的下一条命令；没有命令通道（命令行模式）时永远等下去。
+async fn next_command(
+    commands: &mut Option<mpsc::UnboundedReceiver<ClientCommand>>,
+) -> Option<ClientCommand> {
+    match commands {
+        Some(commands) => commands.recv().await,
+        None => std::future::pending().await,
     }
 }

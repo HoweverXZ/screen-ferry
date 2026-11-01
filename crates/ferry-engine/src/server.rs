@@ -6,6 +6,9 @@
 //! 任何原因结束一个会话（对方断开、心跳超时、出错）时，光标在它上面就立即把控制权交还本机。
 //! 光标在对方屏幕时，按 Ctrl + Option（Alt）+ Esc 可以强制回到本机。
 //!
+//! 每台设备可以单独设置（ADR 0009）：按键映射与文本编辑快捷键、滚动方向与速度、光标速度、
+//! 切过去前在边上停多久、同不同步剪贴板、能不能拖文件给它。这些都在发给它之前、在本机这边处理。
+//!
 //! 所有连接都走 TLS 1.3。只有配对过的设备能建立会话；陌生设备会先发起配对，
 //! 由两边的用户核对配对码。客户端握手后会用拿到的会话号再连一条数据连接，
 //! 用来同步剪贴板和收发文件控制消息；每次传文件再连一条文件连接。
@@ -15,8 +18,9 @@ use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 
-use ferry_core::{KeyRemap, Neighbors, Place, Pressed, Side, Transition, bounds};
+use ferry_core::{KeyMapper, Neighbors, Place, Pressed, Side, Transition, WheelScale, bounds};
 use ferry_net::discovery::Advertiser;
 use ferry_net::{Framed, ServerStream, Tls};
 use ferry_platform::{CaptureEvent, Captured, Clipboard, Displays, InputCapture};
@@ -25,7 +29,9 @@ use ferry_proto::{
 };
 use ferry_store::Store;
 use ferry_trust::{Fingerprint, Peer};
-use ferry_types::{Display, InputEvent, KeyAction, KeyCode, Placement, Point, Rect};
+use ferry_types::{
+    DeviceSettings, Display, InputEvent, KeyAction, KeyCode, Placement, Point, Rect,
+};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 use tokio::sync::watch;
@@ -39,7 +45,9 @@ use crate::error::{Error, Result};
 use crate::events::{Event, Events};
 use crate::files::Files;
 use crate::heartbeat::{self, Heartbeat};
-use crate::link::{DISPLAY_CHECK, HANDSHAKE_TIMEOUT, capabilities, frame_of, primary_scale, send};
+use crate::link::{
+    DISPLAY_CHECK, HANDSHAKE_TIMEOUT, capabilities, frame_of, platform_of, primary_scale, send,
+};
 use crate::pairing::{self, ConfirmPairing, Outcome};
 
 /// 主循环交给一个会话、还没发出去的消息最多积压多少条。积压满了说明对方长时间收不动。
@@ -54,7 +62,7 @@ pub struct ServerConfig {
     pub clipboard: bool,
     /// 剪贴板单项的大小上限，会话中途也能改。
     pub clipboard_limit: ClipLimit,
-    /// 本机的快捷键以 Command 键为主（macOS）。客户端与本机不同时，按键才按 `Live::remap` 重映射。
+    /// 本机的快捷键以 Command 键为主（macOS）。客户端与本机不同时，修饰键的“本机习惯”才互换 Command 与 Ctrl。
     pub command_key: bool,
     /// 数据目录：本机身份和已信任的设备。
     pub store: Store,
@@ -76,15 +84,31 @@ pub struct Live {
     /// 单独安排过位置的设备，按先后排列：同一侧的几台按这个先后平分那条边。
     /// 光标所在的设备换到另一侧时，先回到本机。
     pub layout: Vec<Placement>,
-    /// 发送前对按键做的重映射，例如把 Command 当作对方的 Ctrl。
-    /// 只用在键盘习惯与本机不同的设备上（一台以 Command 为主、一台不是）。
-    pub remap: KeyRemap,
+    /// 单独设置过的设备。
+    pub devices: Vec<DeviceSettings>,
+    /// 没有单独设置过的设备用它（指纹不看）。命令行模式的 `--no-cmd-ctrl-swap` 用它把修饰键改为原样。
+    pub fallback: DeviceSettings,
+    /// 本机鼠标的 DPI，各台设备的光标速度以它为准换算。
+    pub mouse_dpi: u32,
 }
 
 impl Live {
     /// 运行期间不会改变的设置。
     pub fn fixed(self) -> watch::Receiver<Self> {
         watch::channel(self).1
+    }
+
+    /// 一台设备的设置。
+    fn device(&self, peer: &Fingerprint) -> DeviceSettings {
+        let hex = peer.to_hex();
+        self.devices
+            .iter()
+            .find(|d| d.fingerprint == hex)
+            .cloned()
+            .unwrap_or_else(|| DeviceSettings {
+                fingerprint: hex,
+                ..self.fallback.clone()
+            })
     }
 
     /// 一台设备在布局里的位置：单独安排过的按安排的来，其余放在 `side` 一侧、排在后面。
@@ -194,7 +218,7 @@ struct Shared<P> {
 #[derive(Clone, Copy)]
 struct Keys {
     peer: Fingerprint,
-    /// 双方是否都开启了剪贴板同步。
+    /// 双方是否都开启了剪贴板同步（本机对这台设备也没有关掉）。
     clipboard: bool,
     /// 双方是否都支持传文件。
     files: bool,
@@ -231,8 +255,12 @@ struct Session {
     keys: Keys,
     /// 对方懂边缘投递的消息（`PeerSide`、`DropHint`）。
     edge_drop: bool,
-    /// 对方的键盘习惯与本机不同（一台以 Command 为主、一台不是），按键要重映射。
-    remap: bool,
+    /// 对方的快捷键以 Command 键为主（macOS）。
+    remote_command: bool,
+    /// 本机对这台设备的单独设置，以及据此做的按键和滚轮换算。
+    settings: DeviceSettings,
+    mapper: KeyMapper,
+    wheel: WheelScale,
     /// 最近一次告诉它的“服务端在你的哪一侧”。
     side: Side,
     _io: Task,
@@ -390,13 +418,17 @@ where
             warn!(peer = %hello.name, "对方没有报告显示器，已断开");
             return;
         };
-        let place = self.config.live.borrow().place_of(&peer);
+        let (place, settings, mouse_dpi) = {
+            let live = self.config.live.borrow();
+            (live.place_of(&peer), live.device(&peer), live.mouse_dpi)
+        };
         let scale = relative_scale(&self.local, &remote);
         self.neighbors.insert(id, place, remote_rect, scale);
+        self.apply_pointer(id, &settings, mouse_dpi);
         let caps = welcome.capabilities;
         let keys = Keys {
             peer,
-            clipboard: caps.contains(Capabilities::CLIPBOARD),
+            clipboard: caps.contains(Capabilities::CLIPBOARD) && settings.clipboard,
             files: caps.contains(Capabilities::FILES),
         };
         self.shared.sessions().insert(id, keys);
@@ -414,8 +446,7 @@ where
         ));
         let edge_drop = caps.contains(Capabilities::EDGE_DROP);
         // 看对方自己声明的那一位，不看交集：交集里只有两边都是 Mac 时才有它。
-        let remap =
-            self.config.command_key != hello.capabilities.contains(Capabilities::COMMAND_KEY);
+        let remote_command = hello.capabilities.contains(Capabilities::COMMAND_KEY);
         let session = Session {
             peer,
             name: hello.name.clone(),
@@ -424,7 +455,10 @@ where
             remote,
             keys,
             edge_drop,
-            remap,
+            remote_command,
+            mapper: KeyMapper::new(&settings, self.config.command_key, remote_command),
+            wheel: WheelScale::new(&settings),
+            settings,
             side: place.side,
             _io: Task(io),
             sync: None,
@@ -446,6 +480,7 @@ where
             name: hello.name,
             fingerprint: peer,
             addr,
+            platform: Some(platform_of(remote_command)),
         });
         self.publish_edges();
     }
@@ -490,6 +525,12 @@ where
                 }
             }
             Message::DropHint(hint) => self.config.edge.remote(session.peer, Some(hint)),
+            Message::OpenSettings => {
+                info!(peer = %session.name, "对方请本机打开设置界面");
+                self.config
+                    .events
+                    .emit(Event::OpenSettings { peer: session.peer });
+            }
             other => debug!(?other, "忽略消息"),
         }
     }
@@ -545,7 +586,11 @@ where
                         p.y = position.y as f32;
                         p.here = true;
                     });
-                    if free && let Some((id, t)) = self.neighbors.local_motion(position, dx, dy) {
+                    if free
+                        && let Some((id, t)) =
+                            self.neighbors
+                                .local_motion(position, dx, dy, Instant::now())
+                    {
                         self.perform(id, t, false);
                     }
                 } else if let Some((id, t)) = self.neighbors.remote_motion(dx, dy, free) {
@@ -575,9 +620,13 @@ where
             CaptureEvent::Wheel { dx, dy } => {
                 if current
                     && let (Some(id), Some(position)) = (remote, self.neighbors.remote_position())
+                    && let Some(session) = self.sessions.get_mut(&id)
                 {
-                    let event = InputEvent::Wheel { dx, dy, position };
-                    self.send_to(id, Message::Input(event));
+                    let (dx, dy) = session.wheel.apply(dx, dy);
+                    if dx != 0 || dy != 0 {
+                        let event = InputEvent::Wheel { dx, dy, position };
+                        self.send_to(id, Message::Input(event));
+                    }
                 }
             }
             CaptureEvent::Key { code, action } => {
@@ -594,14 +643,10 @@ where
                     if let Some((id, t)) = self.neighbors.leave() {
                         self.perform(id, t, true);
                     }
-                } else {
-                    let remap = self.sessions.get(&id).is_some_and(|s| s.remap);
-                    let code = if remap {
-                        self.config.live.borrow().remap.apply(code)
-                    } else {
-                        code
-                    };
-                    self.send_to(id, Message::Input(InputEvent::Key { code, action }));
+                } else if let Some(session) = self.sessions.get_mut(&id) {
+                    for (code, action) in session.mapper.key(code, action) {
+                        self.send_to(id, Message::Input(InputEvent::Key { code, action }));
+                    }
                 }
             }
         }
@@ -648,7 +693,8 @@ where
                 self.config.edge.pointer(|p| p.here = true);
                 // 对方收到 Leave 会松开所有键，这些键不再需要跟踪。
                 self.pressed.clear_keys();
-                if let Some(session) = self.sessions.get(&id) {
+                if let Some(session) = self.sessions.get_mut(&id) {
+                    session.mapper.reset();
                     session.active.send_replace(true);
                 }
                 self.send_to(id, Message::Leave { seq });
@@ -674,11 +720,26 @@ where
 
     // ── 布局、显示器与边缘投递 ─────────────────────
 
-    /// 用户改了布局：每台设备按新的位置摆。光标所在的那台换到另一侧时先回到本机。
+    /// 用户改了布局或某台设备的设置：每台设备按新的位置摆、按新的设置换算。
+    /// 光标所在的那台换到另一侧时先回到本机。
     fn relayout(&mut self) {
         let live = self.config.live.borrow_and_update().clone();
         let ids: Vec<u64> = self.sessions.keys().copied().collect();
         for id in ids {
+            let Some(session) = self.sessions.get_mut(&id) else {
+                continue;
+            };
+            let settings = live.device(&session.peer);
+            if settings != session.settings {
+                info!(peer = %session.name, "这台设备的设置变了");
+                // 改设置要点本机的设置界面，那时光标在本机、对方没有按着的键，直接换成新的。
+                // 万一还按着，光标离开时对方也会松开所有键。
+                session.mapper =
+                    KeyMapper::new(&settings, self.config.command_key, session.remote_command);
+                session.wheel = WheelScale::new(&settings);
+                session.settings = settings.clone();
+            }
+            self.apply_pointer(id, &settings, live.mouse_dpi);
             let Some(session) = self.sessions.get(&id) else {
                 continue;
             };
@@ -730,6 +791,18 @@ where
         self.publish_edges();
     }
 
+    /// 按一台设备的设置调整光标在它上面的速度，以及切过去前在边上停多久。
+    fn apply_pointer(&mut self, id: u64, settings: &DeviceSettings, mouse_dpi: u32) {
+        let base = mouse_dpi.max(1);
+        let dpi = match settings.pointer_dpi {
+            0 => base,
+            dpi => dpi,
+        };
+        self.neighbors.set_speed(id, dpi, base);
+        self.neighbors
+            .set_delay(id, Duration::from_millis(u64::from(settings.edge_delay_ms)));
+    }
+
     /// 告诉边缘投递朝向各台能收文件的设备的那一段边。一台都没连着时，
     /// 照最后连着的那些设备和现在的布局摆出“未连接”的边。
     fn publish_edges(&mut self) {
@@ -737,7 +810,7 @@ where
         let mut online: Vec<(u64, &Session)> = self
             .sessions
             .iter()
-            .filter(|(_, s)| s.keys.files)
+            .filter(|(_, s)| s.keys.files && s.settings.files)
             .map(|(id, s)| (*id, s))
             .collect();
         online.sort_by_key(|(id, _)| *id);
@@ -775,14 +848,14 @@ where
                         side,
                         screen: frame_of(segment),
                         scale,
-                        peer: s.name.clone(),
+                        peer: s.display_name(),
                         online: true,
                     })
                 })
                 .collect();
             self.known = online
                 .iter()
-                .map(|(_, s)| (s.peer, s.name.clone()))
+                .map(|(_, s)| (s.peer, s.display_name()))
                 .collect();
             edges
         };
@@ -973,7 +1046,7 @@ async fn run_session(
                         send(&mut framed, &Message::Pong { nonce }).await?;
                     }
                     Some(Message::Bye(_)) | None => return Ok(()),
-                    Some(message @ (Message::Displays(_) | Message::DropHint(_))) => {
+                    Some(message @ (Message::Displays(_) | Message::DropHint(_) | Message::OpenSettings)) => {
                         let _ = arrivals.send(Arrival::Message { id, message }).await;
                     }
                     Some(other) => debug!(?other, "忽略消息"),
@@ -998,6 +1071,16 @@ async fn run_session(
     .await;
     let reason = result.err().map(|e| e.to_string());
     let _ = arrivals.send(Arrival::Closed { id, reason }).await;
+}
+
+impl Session {
+    /// 显示给用户的名字：本机给它起过名字就用起的名字。
+    fn display_name(&self) -> String {
+        match self.settings.alias.trim() {
+            "" => self.name.clone(),
+            alias => alias.to_owned(),
+        }
+    }
 }
 
 /// Ctrl + Option（Alt）是否都按着。左右两侧的键都算。

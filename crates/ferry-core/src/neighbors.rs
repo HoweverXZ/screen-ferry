@@ -4,6 +4,8 @@
 //! 回到本机的同一段。每台邻居的进出换算交给各自的 [`EdgeSwitch`]：在它眼里，本机就是自己那一段。
 //! 同一时刻光标最多在一台邻居上。
 
+use std::time::{Duration, Instant};
+
 use ferry_types::{Point, Rect};
 
 use crate::edge_switch::{EdgeSwitch, Transition};
@@ -109,23 +111,48 @@ impl Neighbors {
         }
     }
 
+    /// 一台邻居的光标速度：光标在它上面时，位移再乘以 `numerator / denominator`。
+    pub fn set_speed(&mut self, id: u64, numerator: u32, denominator: u32) {
+        if let Some(neighbor) = self.find_mut(id) {
+            neighbor.switch.set_speed(numerator, denominator);
+        }
+    }
+
+    /// 光标要在朝向这台邻居的那一段边上停够 `delay` 才切过去。
+    pub fn set_delay(&mut self, id: u64, delay: Duration) {
+        if let Some(neighbor) = self.find_mut(id) {
+            neighbor.switch.set_delay(delay);
+        }
+    }
+
     /// 光标在本机时的一次移动。推出某一段边缘时返回那台邻居和 `Enter`。
     ///
-    /// `position` 是光标被边缘挡住后的位置，`dx`、`dy` 是这次的位移。
-    pub fn local_motion(&mut self, position: Point, dx: i32, dy: i32) -> Option<(u64, Transition)> {
+    /// `position` 是光标被边缘挡住后的位置，`dx`、`dy` 是这次的位移，`now` 是这次移动的时刻。
+    pub fn local_motion(
+        &mut self,
+        position: Point,
+        dx: i32,
+        dy: i32,
+        now: Instant,
+    ) -> Option<(u64, Transition)> {
         if self.active.is_some() {
             return None;
         }
+        let mut entered = None;
         for neighbor in &mut self.list {
-            if !along_inside(neighbor.place.side, neighbor.segment, position) {
+            if entered.is_some() || !along_inside(neighbor.place.side, neighbor.segment, position) {
+                // 光标不在这一段（或者已经切到了别的邻居）：重新计算在这一段上停了多久。
+                neighbor.switch.left_edge();
                 continue;
             }
-            if let Some(t) = neighbor.switch.local_motion(position, dx, dy) {
-                self.active = Some(neighbor.id);
-                return Some((neighbor.id, t));
+            if let Some(t) = neighbor.switch.local_motion(position, dx, dy, now) {
+                entered = Some((neighbor.id, t));
             }
         }
-        None
+        if let Some((id, _)) = entered {
+            self.active = Some(id);
+        }
+        entered
     }
 
     /// 光标在邻居上时的一次相对移动。`can_leave` 为假时（例如还按着鼠标键）不回本机。

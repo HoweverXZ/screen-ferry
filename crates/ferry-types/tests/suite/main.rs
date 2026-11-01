@@ -4,6 +4,7 @@
 
 mod clipboard;
 mod config;
+mod device;
 mod geometry;
 mod key;
 mod pointer;

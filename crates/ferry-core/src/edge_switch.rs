@@ -1,5 +1,7 @@
 //! 边缘切换：根据光标移动决定何时进入、离开远端屏幕，并维护远端光标位置。
 
+use std::time::{Duration, Instant};
+
 use ferry_types::{Point, Rect};
 
 use crate::layout::Side;
@@ -29,13 +31,21 @@ pub enum Transition {
 ///
 /// 越过边缘的那一段位移会带到另一边：快速划过时光标是连贯的，不会在边缘停一下。
 /// 落点离边缘至少留出一个单位，免得在边缘来回弹。
+///
+/// 可以要求光标在边上停够一段时间才切过去（防止误切），也可以让光标在远端走得快一些或慢一些（光标速度）。
 #[derive(Clone, Debug)]
 pub struct EdgeSwitch {
     local: Rect,
     remote: Rect,
     side: Side,
-    /// 本机位移换算到远端的比例（百分数）。
+    /// 本机位移换算到远端的比例（百分数），来自两边显示器的缩放比例。
     scale_percent: i64,
+    /// 光标速度：远端的位移再乘以分子 / 分母。
+    speed: (i64, i64),
+    /// 光标要在边上停这么久才切过去。
+    delay: Duration,
+    /// 光标贴上朝向远端那条边的时刻；不在边上时为 `None`。
+    arrived: Option<Instant>,
     seq: u32,
     remote_at: Option<Point>,
     /// 换算后不足一个单位的余数，累积到下一次。
@@ -50,10 +60,33 @@ impl EdgeSwitch {
             remote,
             side,
             scale_percent: i64::from(scale_percent),
+            speed: (1, 1),
+            delay: Duration::ZERO,
+            arrived: None,
             seq: 0,
             remote_at: None,
             carry: (0, 0),
         }
+    }
+
+    /// 光标在远端时，位移再乘以 `numerator / denominator`（例如“这台设备的 DPI / 本机鼠标的 DPI”）。
+    /// 缺省 1/1。余数按分母累积，不丢精度。分母为 0 时当作 1。
+    pub fn set_speed(&mut self, numerator: u32, denominator: u32) {
+        let speed = (i64::from(numerator), i64::from(denominator.max(1)));
+        if speed != self.speed {
+            self.speed = speed;
+            self.carry = (0, 0);
+        }
+    }
+
+    /// 光标要在朝向远端的边上停够 `delay` 才切过去。缺省为 0，推出去就切。
+    pub fn set_delay(&mut self, delay: Duration) {
+        self.delay = delay;
+    }
+
+    /// 光标离开了这一段边（例如沿边移到了另一台设备那一段）：重新计算停留时间。
+    pub fn left_edge(&mut self) {
+        self.arrived = None;
     }
 
     pub fn is_remote(&self) -> bool {
@@ -82,21 +115,34 @@ impl EdgeSwitch {
 
     /// 光标在本机时的一次移动。需要进入远端时返回 `Enter`。
     ///
-    /// `position` 是光标被边缘挡住后的位置，`dx`、`dy` 是这次的位移。
-    pub fn local_motion(&mut self, position: Point, dx: i32, dy: i32) -> Option<Transition> {
+    /// `position` 是光标被边缘挡住后的位置，`dx`、`dy` 是这次的位移，`now` 是这次移动的时刻。
+    /// 设了停留时间时，光标贴上边之后要停够这么久，再往外推才切过去。
+    pub fn local_motion(
+        &mut self,
+        position: Point,
+        dx: i32,
+        dy: i32,
+        now: Instant,
+    ) -> Option<Transition> {
         if self.is_remote() || is_empty(self.remote) {
             return None;
         }
         let (l, r) = (self.local, self.remote);
-        let pushing_out = match self.side {
-            Side::Right => position.x >= l.right() - 1 && dx > 0,
-            Side::Left => position.x <= l.x && dx < 0,
-            Side::Bottom => position.y >= l.bottom() - 1 && dy > 0,
-            Side::Top => position.y <= l.y && dy < 0,
+        let (at_edge, outward) = match self.side {
+            Side::Right => (position.x >= l.right() - 1, dx > 0),
+            Side::Left => (position.x <= l.x, dx < 0),
+            Side::Bottom => (position.y >= l.bottom() - 1, dy > 0),
+            Side::Top => (position.y <= l.y, dy < 0),
         };
-        if !pushing_out {
+        if !at_edge {
+            self.arrived = None;
             return None;
         }
+        let arrived = *self.arrived.get_or_insert(now);
+        if !outward || now.saturating_duration_since(arrived) < self.delay {
+            return None;
+        }
+        self.arrived = None;
 
         // 没有边缘挡着的话，这次位移会把光标带出边缘多远。
         let (x, y) = (
@@ -204,22 +250,29 @@ impl EdgeSwitch {
         clamp_into(p, l)
     }
 
+    /// 换算比例：本机移动 1 个单位，远端移动 `分子 / 分母` 个单位。
+    fn ratio(&self) -> (i64, i64) {
+        (self.scale_percent * self.speed.0, 100 * self.speed.1)
+    }
+
     /// 本机的一段距离换算到远端。
     fn to_remote(&self, v: i64) -> i64 {
-        v * self.scale_percent / 100
+        let (n, d) = self.ratio();
+        v * n / d
     }
 
     /// 远端的一段距离换算回本机。
     fn to_local(&self, v: i64) -> i64 {
-        v * 100 / self.scale_percent.max(1)
+        let (n, d) = self.ratio();
+        v * d / n.max(1)
     }
 
     fn scale(&mut self, dx: i32, dy: i32) -> (i64, i64) {
-        let k = self.scale_percent;
-        self.carry.0 += i64::from(dx) * k;
-        self.carry.1 += i64::from(dy) * k;
-        let step = (self.carry.0 / 100, self.carry.1 / 100);
-        self.carry = (self.carry.0 % 100, self.carry.1 % 100);
+        let (n, d) = self.ratio();
+        self.carry.0 += i64::from(dx) * n;
+        self.carry.1 += i64::from(dy) * n;
+        let step = (self.carry.0 / d, self.carry.1 / d);
+        self.carry = (self.carry.0 % d, self.carry.1 % d);
         step
     }
 }

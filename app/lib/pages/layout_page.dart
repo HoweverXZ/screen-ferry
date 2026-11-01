@@ -457,7 +457,7 @@ class _DeviceTile extends StatelessWidget {
             duration: Motion.fast,
             curve: Motion.spring,
             child: _ScreenBox(
-              name: peer.name,
+              name: peer.displayName,
               look: peer.online ? _Look.online : _Look.offline,
               cursor: cursor,
               lifted: lifted,

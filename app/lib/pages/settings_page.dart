@@ -1,4 +1,4 @@
-// 设置：外观、键盘与剪贴板、通用，以及进入“关于”。
+// 设置：外观、鼠标与剪贴板、通用，以及进入“关于”。按键映射、滚动方向等在“设备”里逐台设置。
 
 import 'package:flutter/material.dart';
 
@@ -6,6 +6,7 @@ import '../state/app_scope.dart';
 import '../state/app_state.dart';
 import '../theme/tokens.dart';
 import '../widgets/controls.dart';
+import '../widgets/dpi_field.dart';
 import '../widgets/group.dart';
 import '../widgets/page_scaffold.dart';
 import '../widgets/pressable.dart';
@@ -77,20 +78,30 @@ class SettingsPage extends StatelessWidget {
             ],
           ),
         ),
-        const SectionTitle('键盘与剪贴板'),
+        const SectionTitle('鼠标与剪贴板'),
         SfGroup(
           children: [
-            if (state.isServer)
+            if (state.isServer) ...[
               SfRow(
-                icon: state.localIsMac ? Icons.keyboard_command_key_rounded : Icons.keyboard_control_key_rounded,
-                title: state.localIsMac ? '⌘ 当作 Ctrl' : 'Ctrl 当作 ⌘',
-                subtitle: state.localIsMac ? '在 Windows 上按 ⌘C、⌘V 就是复制、粘贴' : '在 Mac 上按 Ctrl+C、Ctrl+V 就是复制、粘贴',
-                trailing: SfSwitch(
-                  value: s.swapCmdCtrl,
-                  label: state.localIsMac ? '⌘ 当作 Ctrl' : 'Ctrl 当作 ⌘',
-                  onChanged: set((v) => SettingsPatch(swapCmdCtrl: v)),
+                icon: Icons.mouse_outlined,
+                title: '本机鼠标的 DPI',
+                subtitle: '每台设备的光标速度以它为准',
+                trailing: DpiField(
+                  value: s.mouseDpi,
+                  label: '本机鼠标的 DPI',
+                  min: DaemonSettings.mouseDpiRange.min,
+                  max: DaemonSettings.mouseDpiRange.max,
+                  onChanged: state.online ? (v) => state.updateSettings(SettingsPatch(mouseDpi: v)) : null,
                 ),
               ),
+              SfRow(
+                icon: Icons.devices_rounded,
+                title: '按键映射、滚动方向',
+                subtitle: '在“设备”里逐台设置',
+                trailing: Icon(Icons.chevron_right_rounded, color: c.muted),
+                onTap: () => state.go(SfPage.devices),
+              ),
+            ],
             SfRow(
               icon: Icons.content_paste_rounded,
               title: '同步剪贴板',

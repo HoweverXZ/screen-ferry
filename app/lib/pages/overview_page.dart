@@ -145,7 +145,7 @@ class _HeroCard extends StatelessWidget {
                           ),
                         Pill(
                           state.cursorOnPeer || state.cursorPeer != null
-                              ? '光标在 ${state.cursorPeer?.name ?? peer?.name ?? state.peerName}'
+                              ? '光标在 ${state.cursorPeer?.displayName ?? state.peerName}'
                               : '光标在本机',
                           icon: Icons.near_me_rounded,
                         ),
@@ -504,25 +504,18 @@ class _QuickTiles extends StatelessWidget {
         on: s.clipboard,
         onTap: toggle(SettingsPatch(clipboard: !s.clipboard)),
       ),
-      if (state.isServer) ...[
-        _QuickTile(
-          icon: state.localIsMac ? Icons.keyboard_command_key_rounded : Icons.keyboard_control_key_rounded,
-          label: state.localIsMac ? '⌘ 当作 Ctrl' : 'Ctrl 当作 ⌘',
-          on: s.swapCmdCtrl,
-          onTap: toggle(SettingsPatch(swapCmdCtrl: !s.swapCmdCtrl)),
-        ),
+      _QuickTile(
+        icon: Icons.power_settings_new_rounded,
+        label: '开机自动启动',
+        on: s.autostart,
+        onTap: toggle(SettingsPatch(autostart: !s.autostart)),
+      ),
+      if (state.isServer)
         _QuickTile(
           icon: Icons.wifi_tethering_rounded,
           label: '局域网广播',
           on: s.announce,
           onTap: toggle(SettingsPatch(announce: !s.announce)),
-        ),
-      ] else
-        _QuickTile(
-          icon: Icons.power_settings_new_rounded,
-          label: '开机自动启动',
-          on: s.autostart,
-          onTap: toggle(SettingsPatch(autostart: !s.autostart)),
         ),
     ];
     if (!wide) {
@@ -628,14 +621,14 @@ class _DevicesCard extends StatelessWidget {
               padding: const EdgeInsets.symmetric(vertical: 10),
               child: Row(
                 children: [
-                  IconTile(state.peerIcon, emphasized: peers[i].online),
+                  IconTile(state.peerIconOf(peers[i]), emphasized: peers[i].online),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          peers[i].name,
+                          peers[i].displayName,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(fontWeight: FontWeight.w600),

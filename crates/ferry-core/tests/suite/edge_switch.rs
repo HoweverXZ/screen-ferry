@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use ferry_core::{EdgeSwitch, Side, Transition};
 use ferry_types::{Point, Rect};
 
@@ -12,7 +14,7 @@ fn switch(side: Side) -> EdgeSwitch {
 }
 
 fn enter(s: &mut EdgeSwitch, position: Point, dx: i32, dy: i32) -> Point {
-    match s.local_motion(position, dx, dy) {
+    match s.local_motion(position, dx, dy, Instant::now()) {
         Some(Transition::Enter { at, .. }) => at,
         other => panic!("应进入远端，实际 {other:?}"),
     }
@@ -22,22 +24,22 @@ fn enter(s: &mut EdgeSwitch, position: Point, dx: i32, dy: i32) -> Point {
 fn enters_only_when_pushing_past_the_edge() {
     let mut s = switch(Side::Right);
     assert_eq!(
-        s.local_motion(Point::new(998, 400), 5, 0),
+        s.local_motion(Point::new(998, 400), 5, 0, Instant::now()),
         None,
         "还没到边缘"
     );
     assert_eq!(
-        s.local_motion(Point::new(999, 400), 0, 3),
+        s.local_motion(Point::new(999, 400), 0, 3, Instant::now()),
         None,
         "在边缘但没有向外推"
     );
     assert_eq!(
-        s.local_motion(Point::new(999, 400), -2, 0),
+        s.local_motion(Point::new(999, 400), -2, 0, Instant::now()),
         None,
         "在边缘但向里走"
     );
     assert_eq!(
-        s.local_motion(Point::new(999, 400), 4, 0),
+        s.local_motion(Point::new(999, 400), 4, 0, Instant::now()),
         Some(Transition::Enter {
             seq: 1,
             at: Point::new(3, 540)
@@ -46,7 +48,7 @@ fn enters_only_when_pushing_past_the_edge() {
     );
     assert!(s.is_remote());
     assert_eq!(
-        s.local_motion(Point::new(999, 400), 4, 0),
+        s.local_motion(Point::new(999, 400), 4, 0, Instant::now()),
         None,
         "已在远端，本机移动不再处理"
     );
@@ -205,7 +207,10 @@ fn never_enters_an_empty_remote() {
         Side::Right,
         100,
     );
-    assert_eq!(s.local_motion(Point::new(999, 0), 1, 0), None);
+    assert_eq!(
+        s.local_motion(Point::new(999, 0), 1, 0, Instant::now()),
+        None
+    );
 }
 
 #[test]
@@ -230,7 +235,10 @@ fn changing_side_while_local_takes_effect_immediately() {
     assert_eq!(s.set_side(Side::Left), None);
     assert_eq!(s.side(), Side::Left);
     // 右边缘不再触发，左边缘触发。
-    assert_eq!(s.local_motion(Point::new(999, 400), 5, 0), None);
+    assert_eq!(
+        s.local_motion(Point::new(999, 400), 5, 0, Instant::now()),
+        None
+    );
     enter(&mut s, Point::new(0, 400), -5, 0);
 }
 
@@ -262,7 +270,7 @@ fn a_one_unit_wobble_at_the_edge_does_not_bounce_back() {
     assert_eq!(local_at, Point::new(998, 400));
 
     assert_eq!(
-        s.local_motion(local_at, 1, 0),
+        s.local_motion(local_at, 1, 0, Instant::now()),
         None,
         "刚回来往外抖一下：还没到边缘"
     );
@@ -328,7 +336,7 @@ fn local_layout_change_moves_the_edges() {
     s.set_local(Rect::new(0, 0, 800, 600), 100);
 
     assert_eq!(
-        s.local_motion(Point::new(798, 300), 1, 0),
+        s.local_motion(Point::new(798, 300), 1, 0, Instant::now()),
         None,
         "还没到新的边缘"
     );
@@ -345,4 +353,100 @@ fn local_layout_change_moves_the_edges() {
         }),
         "回来时落在新的范围内"
     );
+}
+
+// ── 光标速度与切换前停留（ADR 0009） ────────────────
+
+#[test]
+fn pointer_speed_is_exact_to_one_dpi() {
+    let mut s = switch(Side::Right);
+    s.set_speed(2000, 1600);
+    enter(&mut s, Point::new(999, 400), 1, 0);
+    let start = s.remote_position().unwrap();
+    // 8 × 2000 / 1600 = 10。
+    assert_eq!(
+        s.remote_motion(8, 0, true),
+        Some(Transition::Move(Point::new(start.x + 10, start.y)))
+    );
+    // 每次 1 × 1.25：前三次各走 1，余下的累积起来，第四次多走 1。
+    let mut x = start.x + 10;
+    for expected in [1, 1, 1, 2] {
+        x += expected;
+        assert_eq!(
+            s.remote_motion(1, 0, true),
+            Some(Transition::Move(Point::new(x, start.y)))
+        );
+    }
+}
+
+#[test]
+fn a_slower_pointer_keeps_the_small_steps() {
+    let mut s = switch(Side::Right);
+    s.set_speed(800, 1600);
+    enter(&mut s, Point::new(999, 400), 1, 0);
+    let start = s.remote_position().unwrap();
+    assert_eq!(s.remote_motion(1, 0, true), None, "半个单位先攒着");
+    assert_eq!(
+        s.remote_motion(1, 0, true),
+        Some(Transition::Move(Point::new(start.x + 1, start.y)))
+    );
+}
+
+#[test]
+fn with_a_delay_the_cursor_must_rest_on_the_edge_first() {
+    use std::time::Duration;
+
+    let mut s = switch(Side::Right);
+    s.set_delay(Duration::from_millis(200));
+    let t0 = Instant::now();
+    let at = |ms| t0 + Duration::from_millis(ms);
+    let edge = Point::new(999, 400);
+    assert_eq!(s.local_motion(edge, 5, 0, at(0)), None, "刚贴上边");
+    assert_eq!(s.local_motion(edge, 5, 0, at(150)), None, "还没停够");
+    assert!(
+        matches!(
+            s.local_motion(edge, 5, 0, at(200)),
+            Some(Transition::Enter { .. })
+        ),
+        "停够了再推就过去"
+    );
+}
+
+#[test]
+fn moving_off_the_edge_starts_the_wait_over() {
+    use std::time::Duration;
+
+    let mut s = switch(Side::Right);
+    s.set_delay(Duration::from_millis(200));
+    let t0 = Instant::now();
+    let at = |ms| t0 + Duration::from_millis(ms);
+    let edge = Point::new(999, 400);
+    assert_eq!(s.local_motion(edge, 5, 0, at(0)), None);
+    assert_eq!(s.local_motion(Point::new(990, 400), -9, 0, at(100)), None);
+    assert_eq!(
+        s.local_motion(edge, 9, 0, at(250)),
+        None,
+        "离开过边，重新计时"
+    );
+    assert_eq!(s.local_motion(edge, 1, 0, at(400)), None);
+    assert!(matches!(
+        s.local_motion(edge, 1, 0, at(450)),
+        Some(Transition::Enter { .. })
+    ));
+}
+
+#[test]
+fn resting_on_the_edge_without_pushing_also_counts() {
+    use std::time::Duration;
+
+    let mut s = switch(Side::Right);
+    s.set_delay(Duration::from_millis(200));
+    let t0 = Instant::now();
+    let at = |ms| t0 + Duration::from_millis(ms);
+    // 沿着边移动，没有往外推。
+    assert_eq!(s.local_motion(Point::new(999, 400), 0, 3, at(0)), None);
+    assert!(matches!(
+        s.local_motion(Point::new(999, 403), 2, 0, at(300)),
+        Some(Transition::Enter { .. })
+    ));
 }

@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use ferry_trust::{Identity, PeerList};
-use ferry_types::Config;
+use ferry_types::{Config, ModifierPreset};
 use ring::digest::{SHA256, digest};
 
 use crate::config;
@@ -86,13 +86,26 @@ impl Store {
         file::write(&self.peers_path(), peers::render(list).as_bytes())
     }
 
-    /// 用户设置。文件不存在时为缺省设置（不会自动写入）。
+    /// 用户设置。文件不存在时为缺省设置（不会自动写入）。旧版本的文件读进来时迁移到当前版本，
+    /// 下次保存时才写回。
     pub fn config(&self) -> Result<Config> {
         let path = self.config_path();
-        match file::read(&path)? {
-            Some(data) => config::parse(&path, &data),
-            None => Ok(Config::default()),
+        let Some(data) = file::read(&path)? else {
+            return Ok(Config::default());
+        };
+        let parsed = config::parse(&path, &data)?;
+        let mut config = parsed.config;
+        // 版本 3 关掉了“Command 当作 Ctrl”：每台已配对的设备都改为原样发送。
+        // 读不到已配对设备时只是少迁移这一项，不影响用。
+        if parsed.legacy_swap_cmd_ctrl == Some(false) {
+            let peers = self.peers().unwrap_or_default();
+            for peer in peers.iter() {
+                let mut device = config.device(&peer.fingerprint.to_hex());
+                device.modifiers = ModifierPreset::Plain;
+                config.set_device(device);
+            }
         }
+        Ok(config)
     }
 
     pub fn save_config(&self, config: &Config) -> Result<()> {

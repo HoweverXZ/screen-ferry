@@ -233,6 +233,59 @@ async fn settings_are_saved_and_reported_back() {
 }
 
 #[tokio::test]
+async fn device_settings_are_saved_and_reported_back() {
+    use ferry_types::DeviceSettings;
+
+    let daemon = Daemon::start(MockHost::default()).await;
+    let mut ui = daemon.ui().await;
+    let fingerprint = "AB".repeat(32);
+    let mut device = DeviceSettings::new(fingerprint.clone());
+    device.alias = "书房的电脑".into();
+    device.reverse_vertical = true;
+    device.pointer_dpi = 50_000;
+    ui.send(Request::SetDevice { device }).await;
+    ui.send(Request::UpdateSettings {
+        settings: SettingsPatch {
+            mouse_dpi: Some(800),
+            ..SettingsPatch::default()
+        },
+    })
+    .await;
+    let state = ui
+        .state_where("设备设置已生效", |s| {
+            !s.settings.devices.is_empty() && s.settings.mouse_dpi == 800
+        })
+        .await;
+    let saved = &state.settings.devices[0];
+    assert_eq!(
+        saved.fingerprint,
+        fingerprint.to_lowercase(),
+        "统一写成小写"
+    );
+    assert_eq!(saved.alias, "书房的电脑");
+    assert!(saved.reverse_vertical);
+    assert_eq!(
+        saved.pointer_dpi,
+        *DeviceSettings::POINTER_DPI.end(),
+        "超出范围的收进范围内"
+    );
+
+    let config = daemon.device.store.config().unwrap();
+    assert_eq!(config.devices, state.settings.devices);
+    assert_eq!(config.mouse_dpi, 800);
+
+    // 恢复默认：这一条从配置里去掉。
+    ui.send(Request::SetDevice {
+        device: DeviceSettings::new(fingerprint),
+    })
+    .await;
+    ui.state_where("恢复默认", |s| s.settings.devices.is_empty())
+        .await;
+    assert!(daemon.device.store.config().unwrap().devices.is_empty());
+    daemon.task.abort();
+}
+
+#[tokio::test]
 async fn first_pairing_is_confirmed_in_the_ui() {
     let daemon = Daemon::start(MockHost::default()).await;
     let mut ui = daemon.ui().await;
@@ -258,6 +311,8 @@ async fn first_pairing_is_confirmed_in_the_ui() {
             events: Events::none(),
             files: Files::new(&pc.store, Events::none()),
             edge: EdgeFeed::none(),
+            devices: Vec::new(),
+            commands: None,
         },
         MockInject::new(),
         MockDisplays::new(vec![Display {
@@ -393,6 +448,8 @@ async fn pairing_with_no_ui_open_opens_the_settings() {
             events: Events::none(),
             files: Files::new(&pc.store, Events::none()),
             edge: EdgeFeed::none(),
+            devices: Vec::new(),
+            commands: None,
         },
         MockInject::new(),
         MockDisplays::default(),

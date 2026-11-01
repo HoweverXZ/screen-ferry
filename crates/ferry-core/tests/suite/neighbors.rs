@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use ferry_core::{Neighbors, Place, Side, Transition};
 use ferry_types::{Point, Rect};
 
@@ -18,7 +20,7 @@ fn three() -> Neighbors {
 }
 
 fn enter(n: &mut Neighbors, position: Point, dx: i32) -> (u64, Point) {
-    match n.local_motion(position, dx, 0) {
+    match n.local_motion(position, dx, 0, Instant::now()) {
         Some((id, Transition::Enter { at, .. })) => (id, at),
         other => panic!("应进入一台邻居，实际 {other:?}"),
     }
@@ -67,8 +69,14 @@ fn neighbors_on_the_same_side_share_the_edge_in_order() {
 fn while_on_a_neighbor_other_edges_do_not_switch() {
     let mut n = three();
     enter(&mut n, Point::new(999, 100), 4);
-    assert_eq!(n.local_motion(Point::new(0, 400), -4, 0), None);
-    assert_eq!(n.local_motion(Point::new(999, 600), 4, 0), None);
+    assert_eq!(
+        n.local_motion(Point::new(0, 400), -4, 0, Instant::now()),
+        None
+    );
+    assert_eq!(
+        n.local_motion(Point::new(999, 600), 4, 0, Instant::now()),
+        None
+    );
     assert!(n.remote_position().is_some());
 }
 
@@ -121,4 +129,57 @@ fn the_hotkey_and_errors_bring_the_cursor_back() {
     assert_eq!(id, 2);
     assert!(at.y >= 400);
     assert_eq!(n.active(), None);
+}
+
+#[test]
+fn each_neighbor_has_its_own_delay() {
+    use std::time::Duration;
+
+    let mut n = three();
+    n.set_delay(1, Duration::from_millis(500));
+    let t0 = Instant::now();
+    let at = |ms| t0 + Duration::from_millis(ms);
+    // A（右侧上半段）要停 0.5 秒，B（下半段）立即切换。
+    assert_eq!(n.local_motion(Point::new(999, 100), 4, 0, at(0)), None);
+    assert!(matches!(
+        n.local_motion(Point::new(999, 600), 4, 0, at(10)),
+        Some((2, Transition::Enter { .. }))
+    ));
+}
+
+#[test]
+fn sliding_along_the_edge_to_another_part_starts_the_wait_over() {
+    use std::time::Duration;
+
+    let mut n = three();
+    n.set_delay(1, Duration::from_millis(200));
+    n.set_delay(2, Duration::from_millis(200));
+    let t0 = Instant::now();
+    let at = |ms| t0 + Duration::from_millis(ms);
+    assert_eq!(n.local_motion(Point::new(999, 100), 4, 0, at(0)), None);
+    // 沿边滑到 B 那一段，再回到 A：A 要重新计时。
+    assert_eq!(n.local_motion(Point::new(999, 600), 0, 9, at(100)), None);
+    assert_eq!(n.local_motion(Point::new(999, 100), 4, 0, at(250)), None);
+    assert!(matches!(
+        n.local_motion(Point::new(999, 100), 4, 0, at(450)),
+        Some((1, Transition::Enter { .. }))
+    ));
+}
+
+#[test]
+fn each_neighbor_has_its_own_pointer_speed() {
+    let mut n = three();
+    n.set_speed(1, 2, 1);
+    let (_, at) = enter(&mut n, Point::new(999, 100), 4);
+    assert_eq!(
+        n.remote_motion(10, 0, true),
+        Some((1, Transition::Move(Point::new(at.x + 20, at.y))))
+    );
+    leave(&mut n, -5000);
+    let (_, at) = enter(&mut n, Point::new(999, 600), 4);
+    assert_eq!(
+        n.remote_motion(10, 0, true),
+        Some((2, Transition::Move(Point::new(at.x + 10, at.y)))),
+        "B 没改速度"
+    );
 }

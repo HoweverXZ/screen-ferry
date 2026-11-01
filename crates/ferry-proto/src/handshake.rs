@@ -55,6 +55,8 @@ bitflags! {
         /// 本机的快捷键以 Command 键为主（macOS）。这一位说的是本机是什么键盘，不是一项能力：
         /// 服务端看客户端 `Hello` 里有没有它，决定要不要互换 Command 与 Ctrl，不看交集。
         const COMMAND_KEY = 1 << 4;
+        /// 能按对方的请求打开本机的设置界面（`OpenSettings` 消息）。
+        const REMOTE_SETTINGS = 1 << 5;
     }
 }
 

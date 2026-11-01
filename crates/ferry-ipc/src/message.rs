@@ -3,11 +3,11 @@
 //! 设置界面（Dart）手写了对应的类型，两边靠 `app/test/fixtures/ipc_samples.json` 中的样例保持一致：
 //! 改动这里的任何结构，都要同时改 Dart 侧并重新生成样例，见 `docs/ipc.md`。
 
-use ferry_types::{Placement, Role, Side, Theme};
+use ferry_types::{DeviceSettings, Placement, Role, Side, Theme};
 use serde::{Deserialize, Serialize};
 
 /// 协议版本。不兼容的改动才递增。
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 
 /// 单行消息的上限。状态快照通常只有几 KB。
 pub const MAX_LINE: usize = 1 << 20;
@@ -22,6 +22,8 @@ pub enum Request {
     SetSharing { on: bool },
     /// 修改设置，只含要改的字段。
     UpdateSettings { settings: SettingsPatch },
+    /// 换上一台设备（`device.fingerprint`）的单独设置，整份替换。全是缺省值即恢复默认。
+    SetDevice { device: DeviceSettings },
     /// 删除一台已配对的设备，下次连接需要重新配对。
     Forget { fingerprint: String },
     /// 回答配对请求。
@@ -34,6 +36,9 @@ pub enum Request {
     ClearLog,
     /// 请后台打开设置界面。另一份后台启动时用它把用户引到已在运行的这一份。
     OpenSettings,
+    /// 请连着的那台设备 `fingerprint` 打开它的设置界面，并翻到本机的设置页。
+    /// 本机被它控制时，滚动、按键等设置要在它那边改。结果以 `toast` 告知。
+    OpenPeerSettings { fingerprint: String },
     /// 把这些文件和文件夹（本机的绝对路径）发给连着的设备 `to`（证书指纹）。
     /// 不指定时发给光标最近去过的那台，只连着一台时就是它。结果以 `toast` 和日志告知。
     SendFiles {
@@ -61,6 +66,8 @@ pub enum Notice {
     PairingClosed { id: u64 },
     /// 给用户的简短提示。
     Toast { text: String },
+    /// 请界面翻到这台设备（证书指纹）的设置页。另一台设备请本机打开设置时发送。
+    ShowDevice { fingerprint: String },
 }
 
 /// 后台的完整状态。
@@ -102,6 +109,9 @@ pub struct Local {
     /// 本机系统：`macos`、`windows` 等。旧版后台没有这个字段，为空字符串。
     #[serde(default)]
     pub platform: String,
+    /// macOS：系统设置里开着“自然滚动”。其他系统为 `null`。
+    #[serde(default)]
+    pub natural_scrolling: Option<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -195,6 +205,10 @@ fn default_clipboard_limit() -> u32 {
     32
 }
 
+fn default_mouse_dpi() -> u32 {
+    1600
+}
+
 /// 一台已配对的设备。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PeerInfo {
@@ -211,6 +225,12 @@ pub struct PeerInfo {
     /// 光标正在这台设备上。
     #[serde(default)]
     pub cursor: bool,
+    /// 本机给它起的名字（见 `settings.devices`），空为没起。`name` 总是它自己报的名字。
+    #[serde(default)]
+    pub alias: String,
+    /// 它是什么系统：`macos`、`windows`；本次运行还没连上过、不知道时为空字符串。
+    #[serde(default)]
+    pub platform: String,
 }
 
 /// 局域网里发现的一台服务端。
@@ -233,18 +253,23 @@ pub struct Settings {
     /// （左右两侧从上到下，上下两侧从左到右）。
     #[serde(default)]
     pub layout: Vec<Placement>,
-    pub swap_cmd_ctrl: bool,
     pub announce: bool,
     pub clipboard: bool,
     /// 剪贴板单项（一种格式）的大小上限，单位 MB，1–64。
     #[serde(default = "default_clipboard_limit")]
     pub clipboard_limit_mb: u32,
+    /// 本机鼠标的 DPI，100–12800。每台设备的光标速度以它为准。
+    #[serde(default = "default_mouse_dpi")]
+    pub mouse_dpi: u32,
     pub server: String,
     /// 登录时启动。以系统中的登记为准。
     pub autostart: bool,
     /// 设置界面的配色与强调色，由后台保存，重启后不变。
     pub theme: Theme,
     pub accent: u8,
+    /// 单独设置过的设备；没列出的用缺省设置。
+    #[serde(default)]
+    pub devices: Vec<DeviceSettings>,
 }
 
 /// 要修改的设置；为 `null` 或缺少的字段不变。
@@ -262,14 +287,15 @@ pub struct SettingsPatch {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub layout: Option<Vec<Placement>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub swap_cmd_ctrl: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub announce: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub clipboard: Option<bool>,
     /// 1–64，超出的收进范围内。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub clipboard_limit_mb: Option<u32>,
+    /// 100–12800，超出的收进范围内。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mouse_dpi: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

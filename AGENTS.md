@@ -8,7 +8,7 @@
 
 ## 1. 项目概述
 
-屏渡 ScreenFerry 是跨 Windows 和 macOS 的键鼠共享工具，同时提供剪贴板与文件同步，定位类似 Deskflow。
+ScreenFerry 是跨 Windows 和 macOS 的键鼠共享工具，同时提供剪贴板与文件同步，定位类似 Deskflow。
 
 目标：**低内存、稳定、易扩展**。
 

@@ -1,147 +1,152 @@
 # ScreenFerry
 
-跨 Windows 与 macOS 的键鼠共享工具，同时提供剪贴板与文件同步。
+[![CI](https://github.com/icloudza/screen-ferry/actions/workflows/ci.yml/badge.svg)](https://github.com/icloudza/screen-ferry/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#许可证)
 
-目标：低内存、稳定、易扩展。
+一套键盘鼠标控制多台电脑。ScreenFerry 在 macOS 与 Windows 之间共享键鼠，同步剪贴板、互传文件，连接全程 TLS 1.3 加密。
+
+## 特性
+
+- **键鼠共享**：光标推出屏幕边缘即切到另一台；按物理键传输，不受键盘布局和输入法影响；同步 Caps Lock，转发媒体键。
+- **多台、双向**：任意一台都能当控制端，一台可以控制多台，按布局摆在上下左右。
+- **剪贴板**：文字、带格式的文字、图片，光标切过去时才同步。
+- **文件**：拖到屏幕边缘即发送，断线后接着传。
+- **每台设备单独设置**：光标速度（DPI）、滚动方向与速度、修饰键与按键映射、防误切。
+- **安全**：首次连接核对 6 位配对码，之后只认对方的证书指纹。
+- **连得上**：局域网自动发现；网络不支持时按地址连接，或从控制端邀请。
+- **轻量**：Rust 编写的后台常驻托盘；设置界面按需启动，关闭即退出。
+
+## 工作方式
+
+```mermaid
+flowchart LR
+  subgraph S["控制端（键鼠所在）"]
+    A["后台<br/>捕获键鼠"]
+    UA["设置界面"]
+  end
+  subgraph C["被控端"]
+    B["后台<br/>注入键鼠"]
+    UB["设置界面"]
+  end
+  UA -.-|本机通信| A
+  A ==>|"输入连接<br/>键鼠、屏幕切换"| B
+  A <-->|"数据连接<br/>剪贴板、文件"| B
+  B -.-|本机通信| UB
+```
+
+每台电脑上常驻一个后台，负责捕获或注入键鼠、网络与同步；设置界面是独立进程，经本机回环连接后台。
+每对设备之间有两条 TLS 1.3 连接，传大文件不会拖慢键鼠。
+
+首次连接时这样建立信任：
+
+```mermaid
+sequenceDiagram
+  participant C as 被控端
+  participant S as 控制端
+  S -->> C: mDNS 广播（找不到时按地址连接，或由控制端邀请）
+  C ->> S: TLS 1.3 握手，双方出示设备证书
+  opt 第一次连接
+    C ->> S: 配对
+    Note over C,S: 两边显示同一个 6 位配对码，核对后互相记住证书指纹
+  end
+  C ->> S: 建立输入连接、数据连接
+```
+
+## 安装
+
+| 系统 | 方式 |
+|---|---|
+| macOS | 从源码打包（见[从源码构建](#从源码构建)），把 `ScreenFerry.app` 拖进“应用程序”。首次运行时在「系统设置 → 隐私与安全性 → 辅助功能」中允许 ScreenFerry。 |
+| Windows | 在 [Actions](https://github.com/icloudza/screen-ferry/actions/workflows/ci.yml) 最近一次运行的 Artifacts 中下载 `ScreenFerry-windows-setup-<提交号>`，运行其中的安装程序。 |
+
+Windows 安装包：
+
+- 没有代码签名，SmartScreen 拦截时点“更多信息 → 仍要运行”。
+- 装进 Program Files，并在防火墙中放行专用网络和域网络。
+- 升级直接运行新的安装包，正在运行的 ScreenFerry 会自动退出，装完重新启动。卸载在“设置 → 应用”，配置和配对记录保留。
+
+## 使用
+
+1. 两台电脑都打开 ScreenFerry。默认 Mac 控制、Windows 被控制，可以在“设置 → 这台电脑”里互换。
+2. 在被控端的“设备”页选中控制端，两边核对 6 位配对码。局域网里找不到时，用“按地址连接”，或在控制端“邀请一台电脑”；地址在对方「设备」页顶部。
+3. 在控制端的“布局”页摆好各台的位置，把光标推出屏幕边缘即可切过去。
+
+光标在对方屏幕上时，按 <kbd>Ctrl</kbd>+<kbd>Option</kbd>+<kbd>Esc</kbd>（Windows 控制时是 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Esc</kbd>）强制回到本机。
+使用前请退出其他键鼠共享软件，避免争抢键鼠。
+
+### 命令行
+
+| 命令 | 作用 |
+|---|---|
+| `screenferry` | 常驻运行：托盘图标，打开设置界面 |
+| `screenferry send <文件>…` | 把文件或文件夹发给连着的电脑 |
+| `screenferry peers` / `forget <设备>` | 查看、删除已配对的设备 |
+| `screenferry quit` | 退出正在运行的 ScreenFerry |
+| `screenferry serve` / `connect [地址]` | 不读配置，在终端里直接运行（调试用） |
+
+完整选项见 `screenferry --help`。
+
+### 数据位置
+
+| | macOS | Windows |
+|---|---|---|
+| 配置、配对记录 | `~/Library/Application Support/ScreenFerry/` | `%APPDATA%\ScreenFerry\` |
+| 日志、运行时文件 | `~/Library/Caches/ScreenFerry/` | `%LOCALAPPDATA%\ScreenFerry\` |
+
+## 从源码构建
+
+需要 Rust（版本由 `rust-toolchain.toml` 固定，rustup 自动安装）和 Flutter 3.47。
+macOS 另需 Xcode；Windows 另需 Visual Studio 2022（使用 C++ 的桌面开发）和 [Inno Setup](https://jrsoftware.org/isdl.php) 7.1 或更高版本。
+
+```bash
+cargo xtask bundle
+```
+
+在哪个系统上运行就打哪个系统的包，产物在 `target/bundle/`：macOS 是 `ScreenFerry.app`，Windows 是 `ScreenFerry-<版本>-windows-x64-setup.exe`。
+macOS 上钥匙串里有 Developer ID 证书时自动签名（也可以用 `SCREENFERRY_SIGN_IDENTITY` 指定），否则用临时签名，每次重新打包都要重新授予辅助功能权限。
 
 ## 开发
 
+```mermaid
+flowchart TB
+  app["设置界面 · Flutter"] -.->|本机通信| L4
+  subgraph L4["L4 应用"]
+    daemon["ferry-daemon → screenferry"]
+  end
+  subgraph L3["L3 组装"]
+    engine["ferry-engine"]
+  end
+  subgraph L2["L2 适配"]
+    direction LR
+    pm["platform-macos"] ~~~ pw["platform-windows"] ~~~ net["net"] ~~~ store["store"] ~~~ ipc["ipc"]
+  end
+  subgraph L1["L1 纯逻辑"]
+    direction LR
+    proto["proto"] ~~~ core["core"] ~~~ trust["trust"] ~~~ platform["platform（trait）"]
+  end
+  subgraph L0["L0 领域类型"]
+    types["ferry-types"]
+  end
+  L4 --> L3 --> L2 --> L1 --> L0
+```
+
+每层只依赖更低的层；`unsafe` 只出现在 `ferry-platform-*` 里，按系统区分的代码只在它们和 L4 应用里。
+
 ```bash
-cargo build --workspace
 cargo test --workspace
 cargo xtask lint
 ```
 
-工程规范见 [AGENTS.md](AGENTS.md)，架构说明见 [docs/architecture.md](docs/architecture.md)。
+设置界面的测试在 `app/` 下运行 `flutter test`。提交前的完整检查见 [AGENTS.md](AGENTS.md)。
 
-## 试运行原型
-
-目前是端到端验证原型：Mac 作为服务端，把键盘和鼠标（移动、按键、滚轮）共享给同一局域网内的 Windows，并双向同步剪贴板中的文本。
-
-- 默认把 Mac 的 Command 当作 Windows 的 Ctrl，⌘C、⌘V 即复制粘贴；命令行不需要时加 `--no-cmd-ctrl-swap`。
-- 每台设备可以单独设置（设置界面的“设备”里点那台的“设置”）：光标速度（按 DPI）、滚动方向和速度、修饰键怎么对应、
-  把某个键换成另一个键、文本编辑快捷键按本机习惯转换、切过去前在边上停一下防误切、同不同步剪贴板、能不能拖文件给它，
-  还可以给它起个名字。键鼠方面的设置在本机控制它时生效；被控制的一方可以一键在对方那台上打开设置（见 ADR 0009）。
-- 局域网里找不到对方时（有的网络不支持自动发现），在被控制的那台上“按地址连接”，或者在控制的那台上“邀请一台电脑”，
-  填对方「设备」页顶部列出的地址即可（见 ADR 0010）。被控制的一方在 24811 端口等邀请（Windows 安装版已在防火墙里放行）。
-- 进入 Windows 时同步 Caps Lock 状态。
-- 媒体键（音量加减、静音、播放/暂停、上一首、下一首）也会转发；亮度、键盘背光仍作用在 Mac 上。
-- 光标在 Windows 上时，按 **Ctrl + Option + Esc** 可以强制回到 Mac（键盘鼠标接在 Windows 上时是 Ctrl + Alt + Esc）。
-- 剪贴板在光标切过去时才同步：在 Mac 上复制，移到 Windows 即可粘贴，反之亦然。不需要时在任意一端加 `--no-clipboard`。
-  文字、带格式的文字（网页、文档里复制的，保留粗体、链接等）和图片（截图、网页里的图片）都会同步；
-  每一项超过 32 MB 的不同步，上限可以在设置里调（1–64 MB）。在访达或资源管理器里复制的文件不算图片，要传文件请用下面的办法。
-- 两台电脑可以互传文件和文件夹：`screenferry send <文件或文件夹>...` 请正在运行的 ScreenFerry 发给它连着的电脑，对方收到后放在“下载”文件夹，重名时自动编号。断线后重新连上会接着传。也可以直接把文件拖到朝向对方的屏幕边缘：贴边滑出胶囊，放上去就发送；收到文件时胶囊变成卡片，可以打开、在访达（资源管理器）中显示，或者直接把文件从卡片拖到任意文件夹。Mac 和 Windows 上都可以，样子一样（见 ADR 0005）。
-- Mac 可以同时连着几台电脑：在设置界面的布局页把它们摆到本机的上下左右，同一侧的几台平分那条边，光标推出哪一段就去哪台。拖文件到哪一段就发给哪台；`screenferry send` 发给光标最近去过的那台（见 ADR 0006）。
-- 反过来也可以：键盘鼠标接在 Windows 上时，在设置界面的“设置 → 这台电脑”里把 Windows 改为“控制别的电脑”、Mac 改为“被控制”
-  （命令行：Windows 上运行 `serve`，Mac 上运行 `connect`）。Windows 控制 Mac 时 Ctrl 当作 ⌘；两台都是 Mac 或都是 Windows 时不互换。
-  Mac 被控制同样需要辅助功能权限；Windows 安装版已在防火墙里放行；直接运行没安装的程序时，防火墙可能询问是否允许 ScreenFerry 接受连接，请允许（见 ADR 0007、0011）。
-- 测试时请先退出 Deskflow 等同类软件，两者会争抢同一套键鼠。
-
-两台电脑之间的连接全程 TLS 1.3 加密。第一次连接时两边终端都会显示同一个 6 位配对码，核对一致后分别输入 `y` 回车确认；之后两台电脑互相记住对方，不再询问。用 `screenferry peers` 查看已配对的设备，`screenferry forget <设备名或指纹>` 删除。
-
-1. 在 Mac 上编译两个版本（Windows 版需要 `brew install mingw-w64` 和 `rustup target add x86_64-pc-windows-gnu`）：
-
-   ```bash
-   cargo build --release -p ferry-daemon
-   cargo build --release -p ferry-daemon --target x86_64-pc-windows-gnu
-   ```
-
-2. Mac 上运行服务端。首次运行需要在「系统设置 → 隐私与安全性」中给终端打开辅助功能权限（较新的 macOS 中名为“设备控制和数据访问”）：
-
-   ```bash
-   ./target/release/screenferry serve --side right
-   ```
-
-3. 把 `target/x86_64-pc-windows-gnu/release/screenferry.exe` 拷到 Windows，在终端中运行：
-
-   ```bash
-   screenferry.exe connect
-   ```
-
-   不填地址时会在局域网里自动寻找 Mac（mDNS），Mac 换了 IP 也能找回来。网络不支持组播时，改用 `connect <Mac 的局域网 IP>`。
-
-4. 把 Mac 的光标推出屏幕右边缘，光标就会出现在 Windows 上；从 Windows 屏幕左边缘推回来即可返回。Mac 终端每 5 秒打印一次往返延迟。
-
-断线、Windows 端退出或心跳超时时，Mac 会立即收回鼠标控制。
-
-## 常驻运行与设置界面
-
-`screenferry` 不带参数时常驻运行：按数据目录中的 `config.toml` 工作（macOS 默认当服务端），
-菜单栏有图标，可以暂停或继续共享、打开设置、退出；配对、方向、开关都在设置界面里完成。
-已经有一份在运行时，再运行一次会请它打开设置界面。
-
-在 Mac 上打包成一个应用（后台 + 设置界面）：
-
-```bash
-cargo xtask bundle
-open target/bundle/macos/ScreenFerry.app
-```
-
-产物在 `target/bundle/macos/ScreenFerry.app`，可以拖进“应用程序”文件夹。第一次运行时系统会请你
-在「系统设置 → 隐私与安全性 → 辅助功能」中允许 ScreenFerry 控制键盘和鼠标。
-
-签名：钥匙串里有“Developer ID Application”证书时自动用它签名（也可以用环境变量
-`SCREENFERRY_SIGN_IDENTITY` 指定），系统按“团队 + bundle id”认这个应用，重新打包后已授予的权限不会丢；
-没有证书时用临时签名，每次重新打包都要重新授权。要清掉 ScreenFerry 的辅助功能授权重新来过：
-
-```bash
-tccutil reset Accessibility io.github.icloudza.screenferry
-```
-
-设置里的“开机自动启动”会在 `~/Library/LaunchAgents/`
-登记，登录时安静地启动，不弹出设置界面。没有终端时日志写在 `~/Library/Caches/ScreenFerry/logs/`。
-
-设置界面用 Flutter 编写，工程在 `app/`，需要 Flutter 3.47 和 Xcode。它读取后台写在
-`~/Library/Caches/ScreenFerry/ipc.json` 中的端口和令牌连接后台（协议见 [docs/ipc.md](docs/ipc.md)）；
-后台没在运行时显示“后台没有运行”，后台启动后自动连上。另一台电脑第一次连接时，
-配对码在设置界面里核对；没有打开设置界面时，后台会自动打开它。
-
-## Windows
-
-### 安装
-
-在 GitHub 的 Actions 页面里打开最近一次运行，在 Artifacts 中下载 `ScreenFerry-windows-setup-<提交号>`
-（保留 14 天），解压出 `ScreenFerry-<版本>-windows-x64-setup.exe`，双击安装：
-
-- 安装包没有代码签名，第一次运行时 Windows 可能提示“Windows 已保护你的电脑”，点“更多信息 → 仍要运行”。
-- 安装需要管理员权限：装进 `C:\Program Files\ScreenFerry`，开始菜单里有 ScreenFerry（可选桌面快捷方式），
-  并在 Windows 防火墙里允许它在专用网络和域网络上接受连接，不用再逐个端口确认。
-  电脑连在“公用网络”上时防火墙会照常询问。
-- 升级：直接运行新的安装包。正在运行的 ScreenFerry 会先正常退出（归还键鼠、松开按键），装完马上重新启动；
-  正从另一台电脑控制这台时，几秒后就能接着操作。
-- 卸载：在“设置 → 应用”里找到 ScreenFerry。防火墙规则和开机自启的登记一并删掉；
-  配置、配对记录留在 `%APPDATA%\ScreenFerry\`，以后重装还能用。
-
-设置里的“开机自动启动”写在当前用户的启动项里（`HKCU\...\Run`）。日志在 `%LOCALAPPDATA%\ScreenFerry\logs\`。
-
-从命令行用的调试命令（`peers`、`quit` 等）把结果输出到启动它的终端；`serve`、`connect` 要核对配对码、
-按 Ctrl+C 退出，会在单独的窗口里运行。
-
-### 自己打包
-
-Windows 版的设置界面必须在 Windows 上编译（Flutter 不能在 macOS 上交叉编译 Windows 应用）。需要：
-
-- Flutter 3.47（`flutter doctor` 全部打勾）；
-- Visual Studio 2022，安装“使用 C++ 的桌面开发”（附带要放进安装包的 Visual C++ 运行库）；
-- Rust（rustup，默认的 MSVC 工具链）；
-- [Inno Setup](https://jrsoftware.org/isdl.php) 7.1 或更高版本（自带简体中文界面）。不在默认位置时用环境变量
-  `ISCC` 指定 `ISCC.exe`。
-
-在仓库根目录运行：
-
-```bash
-cargo xtask bundle
-```
-
-产物是 `target/bundle/windows/ScreenFerry-<版本>-windows-x64-setup.exe`。安装包里的文件先组装在
-`target/bundle/windows/ScreenFerry/`，不安装也可以直接双击那里的 `screenferry.exe` 试用。
-打包方式见 [ADR 0011](docs/adr/0011-windows-installer.md)。
+| 文档 | 内容 |
+|---|---|
+| [AGENTS.md](AGENTS.md) | 工程规范：目录、分层、命名、测试 |
+| [docs/architecture.md](docs/architecture.md) | 架构总览与 crate 依赖 |
+| [docs/protocol.md](docs/protocol.md) | 线协议 |
+| [docs/ipc.md](docs/ipc.md) | 设置界面与后台之间的本机通信 |
+| [docs/adr/](docs/adr/) | 架构决策记录 |
 
 ## 许可证
 
-可任选以下一种许可证使用：
-
-- [Apache License 2.0](LICENSE-APACHE)
-- [MIT License](LICENSE-MIT)
-
-除非你明确声明，否则你提交的任何贡献都将按上述双许可证授权，不附加其他条款或条件。
+[MIT](LICENSE-MIT) 或 [Apache-2.0](LICENSE-APACHE)，任选其一。除非另有声明，你提交的贡献同样按这两种许可证授权。

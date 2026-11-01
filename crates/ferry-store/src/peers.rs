@@ -1,12 +1,15 @@
 //! `peers.toml`：已信任的设备。
 //!
 //! ```toml
-//! schema_version = 1
+//! schema_version = 2
 //!
 //! [[peer]]
 //! name = "办公室 PC"
 //! fingerprint = "3f9a…（64 位十六进制）"
+//! addr = "192.168.2.18:24810"   # 上次连上时的地址，可以没有
 //! ```
+//!
+//! 版本 1 → 2：新增可选的 `addr`，版本 1 的文件读进来就是没有地址的版本 2。
 
 use std::path::Path;
 
@@ -15,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
 
 #[derive(Serialize, Deserialize)]
 struct PeersFile {
@@ -28,6 +31,8 @@ struct PeersFile {
 struct Entry {
     name: String,
     fingerprint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    addr: Option<String>,
 }
 
 pub(crate) fn parse(path: &Path, data: &[u8]) -> Result<PeerList> {
@@ -50,9 +55,12 @@ pub(crate) fn parse(path: &Path, data: &[u8]) -> Result<PeerList> {
                 .fingerprint
                 .parse()
                 .map_err(|e: ferry_trust::Error| format(format!("{}：{e}", entry.name)))?;
+            // 地址写坏了只是少一个兜底，不影响信任关系。
+            let addr = entry.addr.and_then(|a| a.parse().ok());
             Ok(Peer {
                 name: entry.name,
                 fingerprint,
+                addr,
             })
         })
         .collect()
@@ -66,6 +74,7 @@ pub(crate) fn render(peers: &PeerList) -> String {
             .map(|p| Entry {
                 name: p.name.clone(),
                 fingerprint: p.fingerprint.to_hex(),
+                addr: p.addr.map(|a| a.to_string()),
             })
             .collect(),
     };

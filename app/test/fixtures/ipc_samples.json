@@ -54,8 +54,13 @@
           "status": "connected"
         },
         "local": {
+          "addresses": [
+            "192.168.2.12",
+            "10.8.0.3"
+          ],
           "data_dir": "/Users/me/Library/Application Support/ScreenFerry",
           "fingerprint": "7ab05cb238fbd60311223344556677889900aabbccddeeff0011223344556677",
+          "invite_port": null,
           "name": "Mac Studio",
           "natural_scrolling": true,
           "platform": "macos",
@@ -66,6 +71,7 @@
         },
         "peers": [
           {
+            "addr": "192.168.2.18",
             "alias": "书房的电脑",
             "cursor": true,
             "fingerprint": "3f9a12c477e0b1d2aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55",
@@ -159,8 +165,13 @@
           "status": "stopped"
         },
         "local": {
+          "addresses": [
+            "192.168.2.12",
+            "10.8.0.3"
+          ],
           "data_dir": "/Users/me/Library/Application Support/ScreenFerry",
           "fingerprint": "7ab05cb238fbd60311223344556677889900aabbccddeeff0011223344556677",
+          "invite_port": null,
           "name": "Mac Studio",
           "natural_scrolling": true,
           "platform": "macos",
@@ -171,6 +182,7 @@
         },
         "peers": [
           {
+            "addr": "192.168.2.18",
             "alias": "书房的电脑",
             "cursor": true,
             "fingerprint": "3f9a12c477e0b1d2aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55",
@@ -284,6 +296,18 @@
     {
       "fingerprint": "3f9a12c477e0b1d2aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55",
       "type": "show_device"
+    },
+    {
+      "address": "192.168.2.12",
+      "error": null,
+      "invite": false,
+      "type": "dialed"
+    },
+    {
+      "address": "192.168.2.18",
+      "error": "not_screen_ferry",
+      "invite": true,
+      "type": "dialed"
     }
   ],
   "requests": [
@@ -394,6 +418,14 @@
     {
       "fingerprint": "7ab05cb238fbd60311223344556677889900aabbccddeeff0011223344556677",
       "type": "connect"
+    },
+    {
+      "address": "192.168.2.12",
+      "type": "connect_address"
+    },
+    {
+      "address": "192.168.2.18:24811",
+      "type": "invite"
     },
     {
       "type": "open_permission_settings"

@@ -6,10 +6,7 @@ use ferry_trust::{Fingerprint, Peer, PeerList};
 use crate::support::TempDir;
 
 fn peer(name: &str, seed: u8) -> Peer {
-    Peer {
-        name: name.into(),
-        fingerprint: Fingerprint::from_bytes([seed; 32]),
-    }
+    Peer::new(name, Fingerprint::from_bytes([seed; 32]))
 }
 
 #[test]
@@ -56,7 +53,7 @@ fn peers_start_empty_and_round_trip() {
     assert_eq!(store.peers().unwrap(), list);
 
     let text = fs::read_to_string(dir.path().join("peers.toml")).unwrap();
-    assert!(text.starts_with("schema_version = 1"), "{text}");
+    assert!(text.starts_with("schema_version = 2"), "{text}");
     assert!(text.contains("[[peer]]"), "{text}");
     assert!(!dir.path().join("peers.toml.tmp").exists());
 }
@@ -80,8 +77,8 @@ fn bad_peers_files_are_rejected() {
     let store = Store::open(dir.path()).unwrap();
     let path = dir.path().join("peers.toml");
 
-    fs::write(&path, "schema_version = 2\n").unwrap();
-    assert!(matches!(store.peers(), Err(Error::TooNew { found: 2, .. })));
+    fs::write(&path, "schema_version = 3\n").unwrap();
+    assert!(matches!(store.peers(), Err(Error::TooNew { found: 3, .. })));
 
     fs::write(
         &path,
@@ -328,4 +325,32 @@ fn device_settings_round_trip_through_the_file() {
     config.set_device(device);
     store.save_config(&config).unwrap();
     assert_eq!(store.config().unwrap(), config);
+}
+
+#[test]
+fn peers_remember_their_last_address_and_old_files_read_without_one() {
+    let dir = TempDir::new();
+    let store = Store::open(dir.path()).unwrap();
+    let mut pc = peer("PC", 1);
+    pc.addr = Some("192.168.2.18:24810".parse().unwrap());
+    let mut peers = PeerList::new();
+    peers.add(pc.clone());
+    peers.add(peer("没地址", 2));
+    store.save_peers(&peers).unwrap();
+    let text = fs::read_to_string(dir.path().join("peers.toml")).unwrap();
+    assert!(text.starts_with("schema_version = 2"), "{text}");
+    assert!(text.contains("addr = \"192.168.2.18:24810\""), "{text}");
+    assert_eq!(store.peers().unwrap(), peers);
+
+    // 版本 1 的文件没有地址。
+    fs::write(
+        dir.path().join("peers.toml"),
+        format!(
+            "schema_version = 1\n\n[[peer]]\nname = \"PC\"\nfingerprint = \"{}\"\n",
+            pc.fingerprint.to_hex()
+        ),
+    )
+    .unwrap();
+    let old = store.peers().unwrap();
+    assert_eq!(old.get(&pc.fingerprint).unwrap().addr, None);
 }

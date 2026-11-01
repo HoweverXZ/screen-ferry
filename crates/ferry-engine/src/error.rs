@@ -28,7 +28,9 @@ pub enum Error {
     PeerMismatch,
     #[error("局域网广播的指纹与对方的证书不符，可能有设备在冒充，已跳过")]
     AdvertisedMismatch,
-    #[error("局域网里有多台未配对的服务端：{0}。请用 connect <地址> 指定一台")]
+    #[error(
+        "局域网里有多台未配对的服务端：{0}。请在设置界面里按地址连接，或者用 connect <地址> 指定一台"
+    )]
     AmbiguousServers(String),
     #[error("服务端地址无效：{0}")]
     BadAddress(String),

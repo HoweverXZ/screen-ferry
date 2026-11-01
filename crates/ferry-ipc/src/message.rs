@@ -28,8 +28,13 @@ pub enum Request {
     Forget { fingerprint: String },
     /// 回答配对请求。
     PairReply { id: u64, accept: bool },
-    /// 客户端：连接局域网里发现的一台服务端，未配对时先配对。
+    /// 客户端：连接局域网里发现的一台服务端，未配对时先配对。只连这一次，不会把地址写死。
     Connect { fingerprint: String },
+    /// 客户端：按地址连接一台服务端（IP、IP:端口、电脑名或电脑名:端口，不写端口用 24810），
+    /// 未配对时先配对。结果以 `dialed` 告知。
+    ConnectAddress { address: String },
+    /// 服务端：邀请这个地址上的电脑（被控制的一方）连过来，端口不写用 24811。结果以 `dialed` 告知。
+    Invite { address: String },
     /// 打开系统设置中授予键鼠控制权限的页面。
     OpenPermissionSettings,
     /// 清空日志。
@@ -68,6 +73,33 @@ pub enum Notice {
     Toast { text: String },
     /// 请界面翻到这台设备（证书指纹）的设置页。另一台设备请本机打开设置时发送。
     ShowDevice { fingerprint: String },
+    /// 按地址连接（`invite` 为假）或邀请（为真）的结果。`error` 为 `null` 表示成了：
+    /// 连上了、开始核对配对码，或者对方接受了邀请、正在连过来。
+    Dialed {
+        address: String,
+        invite: bool,
+        error: Option<DialError>,
+    },
+}
+
+/// 按地址连接、邀请为什么没成。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DialError {
+    /// 地址写得不对，或者电脑名找不到。
+    BadAddress,
+    /// 那个地址上没有在等待的 ScreenFerry：没开、角色不对，或者版本太旧不支持邀请。
+    Refused,
+    /// 连不上：网络不通、被防火墙挡住，或者超时。
+    Unreachable,
+    /// 那个地址上不是 ScreenFerry。
+    NotScreenFerry,
+    /// 对方的版本与本机不兼容。
+    Incompatible,
+    /// 邀请时对方正连着另一台电脑。
+    Busy,
+    /// 本机现在的角色做不了这件事（例如服务端按地址连接）。
+    WrongRole,
 }
 
 /// 后台的完整状态。
@@ -112,6 +144,12 @@ pub struct Local {
     /// macOS：系统设置里开着“自然滚动”。其他系统为 `null`。
     #[serde(default)]
     pub natural_scrolling: Option<bool>,
+    /// 本机的局域网地址（IPv4），常见网段在前。另一台电脑按地址连接时填它。
+    #[serde(default)]
+    pub addresses: Vec<String>,
+    /// 客户端：等待邀请的端口；服务端为 `null`。
+    #[serde(default)]
+    pub invite_port: Option<u16>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -231,6 +269,9 @@ pub struct PeerInfo {
     /// 它是什么系统：`macos`、`windows`；本次运行还没连上过、不知道时为空字符串。
     #[serde(default)]
     pub platform: String,
+    /// 上次连上时它的地址：`IP:端口`，只知道 IP 时就是 IP；没连上过为空字符串。
+    #[serde(default)]
+    pub addr: String,
 }
 
 /// 局域网里发现的一台服务端。

@@ -8,9 +8,9 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use ferry_ipc::{
-    ClipboardImage, ClipboardSync, FoundDevice, Link, LinkStatus, Local, LogIcon, LogKind, Notice,
-    PairingPrompt, PeerInfo, PeerRef, Problem, ProblemKind, Request, Settings, SettingsPatch,
-    State,
+    ClipboardImage, ClipboardSync, DialError as IpcDialError, FoundDevice, Link, LinkStatus, Local,
+    LogIcon, LogKind, Notice, PairingPrompt, PeerInfo, PeerRef, Problem, ProblemKind, Request,
+    Settings, SettingsPatch, State,
 };
 use ferry_store::Store;
 use ferry_trust::{Fingerprint, PeerList};
@@ -28,8 +28,9 @@ use crate::client::{ClientCommand, ClientConfig, ServerAddr, connect};
 use crate::clipboard::ClipLimit;
 use crate::edge_drop::EdgeDrop;
 use crate::error::{Error, Result};
-use crate::events::{Event, Events, FoundServer, TransferState, TransferUpdate};
+use crate::events::{DialError, Event, Events, FoundServer, TransferState, TransferUpdate};
 use crate::files::Files;
+use crate::invite::{INVITE_PORT, invite};
 use crate::link::DEFAULT_PORT;
 use crate::server::{Live, ServerConfig, serve};
 
@@ -121,6 +122,8 @@ pub(crate) struct Runtime<H> {
     platforms: HashMap<Fingerprint, String>,
     /// 另一台设备请本机打开设置：等设置界面连上后翻到它（指纹的十六进制）的设置页。
     show_device: Option<(String, Instant)>,
+    /// 客户端：等邀请的端口。
+    invite_port: Option<u16>,
 }
 
 impl<H: Host> Runtime<H> {
@@ -181,6 +184,7 @@ impl<H: Host> Runtime<H> {
             settings_opened: None,
             platforms: HashMap::new(),
             show_device: None,
+            invite_port: None,
         };
         let role = match runtime.config.role {
             Role::Server => "键鼠在本机",
@@ -272,6 +276,7 @@ impl<H: Host> Runtime<H> {
             edge: self.edge.feed(),
             devices: self.config.devices.clone(),
             commands: Some(commands),
+            invite_port: Some(self.host.invite_port()),
         };
         let (displays, clipboard) = (self.host.displays(), self.host.clipboard());
         let handle = tokio::spawn(connect(config, inject, displays, clipboard, confirm));
@@ -290,6 +295,7 @@ impl<H: Host> Runtime<H> {
             let _ = task.handle.await;
         }
         self.edge.feed().reset();
+        self.invite_port = None;
         self.drop_link();
         self.retry_at = None;
     }
@@ -464,7 +470,18 @@ impl<H: Host> Runtime<H> {
                     format!("端口 {port} · 没有在局域网里广播")
                 };
                 self.log(LogKind::Link, LogIcon::Power, "已开始共享", detail);
+                self.invite_known(port);
             }
+            Event::InviteListening { port } => self.invite_port = Some(port),
+            Event::Dialed {
+                address,
+                invite,
+                error,
+            } => self.broadcast(Notice::Dialed {
+                address,
+                invite,
+                error: error.map(ipc_dial_error),
+            }),
             Event::Searching => {
                 if self.links.is_empty() {
                     self.status = LinkStatus::Searching;
@@ -784,7 +801,9 @@ impl<H: Host> Runtime<H> {
             Request::OpenPeerSettings { fingerprint } => self.open_peer_settings(&fingerprint),
             Request::Forget { fingerprint } => self.forget(&fingerprint).await,
             Request::PairReply { id, accept } => self.answer(id, accept),
-            Request::Connect { fingerprint } => self.connect_to(&fingerprint).await,
+            Request::Connect { fingerprint } => self.connect_to(&fingerprint),
+            Request::ConnectAddress { address } => self.connect_address(address),
+            Request::Invite { address } => self.invite_address(address),
             Request::OpenPermissionSettings => self.host.open_permission_settings(),
             Request::ClearLog => {
                 self.log.clear();
@@ -1118,8 +1137,8 @@ impl<H: Host> Runtime<H> {
         }
     }
 
-    /// 客户端：连接局域网里发现的一台服务端。
-    async fn connect_to(&mut self, fingerprint: &str) {
+    /// 客户端：连接局域网里发现的一台服务端。只连这一次，不把地址写死。
+    fn connect_to(&mut self, fingerprint: &str) {
         if self.config.role != Role::Client {
             return;
         }
@@ -1134,11 +1153,99 @@ impl<H: Host> Runtime<H> {
         else {
             return self.toast("这台电脑已经不在局域网里了");
         };
-        let patch = SettingsPatch {
-            server: Some(addr.to_string()),
-            ..SettingsPatch::default()
+        self.dial(addr);
+    }
+
+    /// 客户端：按地址连接一台服务端。电脑名在后台解析，结果以 `dialed` 告诉界面。
+    fn connect_address(&mut self, address: String) {
+        if self.config.role != Role::Client {
+            return self.broadcast(Notice::Dialed {
+                address,
+                invite: false,
+                error: Some(IpcDialError::WrongRole),
+            });
+        }
+        let Some(commands) = self.engine.as_ref().and_then(|t| t.client.clone()) else {
+            self.toast("已暂停共享，继续共享后再连接");
+            return self.broadcast(Notice::Dialed {
+                address,
+                invite: false,
+                error: Some(IpcDialError::Unreachable),
+            });
         };
-        self.update_settings(patch).await;
+        let events = self.events.clone();
+        tokio::spawn(async move {
+            match resolve_input(&address, DEFAULT_PORT).await {
+                Some(addr) => {
+                    let _ = commands.send(ClientCommand::Connect(addr));
+                }
+                None => events.emit(Event::Dialed {
+                    address,
+                    invite: false,
+                    error: Some(DialError::BadAddress),
+                }),
+            }
+        });
+    }
+
+    fn dial(&mut self, addr: SocketAddr) {
+        match self.engine.as_ref().and_then(|t| t.client.as_ref()) {
+            Some(commands) => {
+                let _ = commands.send(ClientCommand::Connect(addr));
+            }
+            None => self.toast("已暂停共享，继续共享后再连接"),
+        }
+    }
+
+    /// 服务端：邀请这个地址上的电脑连过来。结果以 `dialed` 告诉界面。
+    fn invite_address(&mut self, address: String) {
+        let refuse = |error| Notice::Dialed {
+            address: address.clone(),
+            invite: true,
+            error: Some(error),
+        };
+        if self.config.role != Role::Server {
+            return self.broadcast(refuse(IpcDialError::WrongRole));
+        }
+        let Some(port) = self.port else {
+            self.toast("还没开始共享，开始后再邀请");
+            return self.broadcast(refuse(IpcDialError::Unreachable));
+        };
+        let (store, name, events) = (self.store.clone(), self.name.clone(), self.events.clone());
+        tokio::spawn(async move {
+            let error = match resolve_input(&address, INVITE_PORT).await {
+                None => Some(DialError::BadAddress),
+                Some(addr) => invite(&store, &name, addr, port)
+                    .await
+                    .err()
+                    .map(|e| DialError::of(&e)),
+            };
+            events.emit(Event::Dialed {
+                address,
+                invite: true,
+                error,
+            });
+        });
+    }
+
+    /// 服务端开始共享时，邀请上次连过、现在没连着的客户端：局域网发现不可靠时也能自己连上来。
+    /// 不成功也不提示。
+    fn invite_known(&self, port: u16) {
+        for peer in self.peers.iter() {
+            let Some(addr) = peer.addr else {
+                continue;
+            };
+            if self.links.iter().any(|l| l.fingerprint == peer.fingerprint) {
+                continue;
+            }
+            let to = SocketAddr::new(addr.ip(), INVITE_PORT);
+            let (store, name) = (self.store.clone(), self.name.clone());
+            tokio::spawn(async move {
+                if invite(&store, &name, to, port).await.is_ok() {
+                    info!(%to, "已邀请上次连过的电脑");
+                }
+            });
+        }
     }
 
     // ── 定时 ─────────────────────────────────────
@@ -1255,6 +1362,11 @@ impl<H: Host> Runtime<H> {
                 port: self.port,
                 platform: std::env::consts::OS.to_owned(),
                 natural_scrolling: self.host.natural_scrolling(),
+                addresses: ferry_net::local_addresses()
+                    .into_iter()
+                    .map(|ip| ip.to_string())
+                    .collect(),
+                invite_port: self.invite_port,
             },
             sharing: !self.paused,
             problem: self.problem.clone(),
@@ -1288,6 +1400,7 @@ impl<H: Host> Runtime<H> {
                         .get(&p.fingerprint)
                         .cloned()
                         .unwrap_or_default(),
+                    addr: p.addr.map(addr_text).unwrap_or_default(),
                 })
                 .collect(),
             found: self
@@ -1349,6 +1462,54 @@ fn resolve(text: &str) -> Result<SocketAddr> {
         .ok()
         .and_then(|mut addrs| addrs.next())
         .ok_or_else(|| Error::BadAddress(text.to_owned()))
+}
+
+/// 用户输入的地址：IP、IP:端口、电脑名或电脑名:端口；不写端口时用 `port`。解析不了时为 `None`。
+async fn resolve_input(text: &str, port: u16) -> Option<SocketAddr> {
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    if let Ok(addr) = text.parse::<SocketAddr>() {
+        return Some(addr);
+    }
+    if let Ok(ip) = text.parse::<IpAddr>() {
+        return Some(SocketAddr::new(ip, port));
+    }
+    let with_port = if text.contains(':') {
+        text.to_owned()
+    } else {
+        format!("{text}:{port}")
+    };
+    let found = tokio::time::timeout(Duration::from_secs(3), tokio::net::lookup_host(with_port))
+        .await
+        .ok()?
+        .ok()?
+        .collect::<Vec<_>>();
+    found
+        .iter()
+        .find(|a| a.is_ipv4())
+        .or(found.first())
+        .copied()
+}
+
+/// 给用户看的地址：默认端口和不知道的端口（0）都不写。
+fn addr_text(addr: SocketAddr) -> String {
+    match addr.port() {
+        0 | DEFAULT_PORT => addr.ip().to_string(),
+        _ => addr.to_string(),
+    }
+}
+
+fn ipc_dial_error(error: DialError) -> IpcDialError {
+    match error {
+        DialError::BadAddress => IpcDialError::BadAddress,
+        DialError::Refused => IpcDialError::Refused,
+        DialError::Unreachable => IpcDialError::Unreachable,
+        DialError::NotScreenFerry => IpcDialError::NotScreenFerry,
+        DialError::Incompatible => IpcDialError::Incompatible,
+        DialError::Busy => IpcDialError::Busy,
+    }
 }
 
 fn side_label(side: Side) -> &'static str {

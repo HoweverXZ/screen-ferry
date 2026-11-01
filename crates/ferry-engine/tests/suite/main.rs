@@ -7,6 +7,7 @@ mod clipboard;
 mod edge_drop;
 mod events;
 mod files;
+mod invite;
 mod pairing;
 mod resident;
 mod server;

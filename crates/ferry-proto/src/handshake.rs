@@ -25,6 +25,9 @@ pub enum Channel {
     Pair,
     /// 文件：一次文件传输一条，传完即关闭。
     File,
+    /// 邀请：服务端请客户端连过来。客户端在单独的端口上等它；`Hello` 的 `session` 填服务端监听的端口，
+    /// 客户端回 `Welcome`（或者正连着别的服务端时回 `Reject(BUSY)`）后关闭，再照常连接服务端。
+    Invite,
 }
 
 impl fmt::Display for Channel {
@@ -34,6 +37,7 @@ impl fmt::Display for Channel {
             Self::Data => "数据",
             Self::Pair => "配对",
             Self::File => "文件",
+            Self::Invite => "邀请",
         })
     }
 }
@@ -182,6 +186,7 @@ impl Body for Channel {
             Self::Data => 2,
             Self::Pair => 3,
             Self::File => 4,
+            Self::Invite => 5,
         });
         Ok(())
     }
@@ -192,6 +197,7 @@ impl Body for Channel {
             2 => Ok(Self::Data),
             3 => Ok(Self::Pair),
             4 => Ok(Self::File),
+            5 => Ok(Self::Invite),
             _ => Err(DecodeError::InvalidValue("连接类型")),
         }
     }

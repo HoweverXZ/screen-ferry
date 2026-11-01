@@ -1,5 +1,5 @@
-// 设备：本机横幅（可以改名）、已配对设备的卡片墙（点开是那台设备的设置页）、
-// 局域网里发现但还没配对的设备（虚线框）。
+// 设备：本机横幅（可以改名，列出本机地址）、已配对设备的卡片墙（点开是那台设备的设置页）、
+// 局域网里发现但还没配对的设备（虚线框）。局域网发现不可靠时，被控端可以按地址连接，控制端可以邀请对方。
 
 import 'dart:math';
 
@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import '../state/app_scope.dart';
 import '../state/app_state.dart';
 import '../theme/tokens.dart';
+import '../widgets/address_dialog.dart';
 import '../widgets/name_editor.dart';
 import '../widgets/page_scaffold.dart';
 import '../widgets/pressable.dart';
@@ -61,6 +62,7 @@ class DevicesPage extends StatelessWidget {
                   ),
                   style: TextStyle(color: c.muted),
                 ),
+                if (state.localAddresses.isNotEmpty) ...[const SizedBox(height: 10), const _LocalAddresses()],
               ],
             ),
             trailing: PillButton(
@@ -81,16 +83,33 @@ class DevicesPage extends StatelessWidget {
           ),
           children: [for (final d in state.peers) _PairedCard(key: ValueKey('p-${d.fingerprint}'), device: d)],
         ),
-        const SectionTitle('在局域网里发现', note: '还没配对'),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            const Expanded(child: SectionTitle('在局域网里发现', note: '还没配对')),
+            _HeaderAction(
+              label: state.isServer ? '邀请一台电脑' : '按地址连接',
+              icon: state.isServer ? Icons.login_rounded : Icons.link_rounded,
+              onPressed: state.online ? () => showAddressDialog(context, invite: state.isServer) : null,
+            ),
+          ],
+        ),
         if (state.isServer)
-          const _Empty(
+          _Empty(
             icon: Icons.radar_rounded,
             title: '等另一台电脑来找本机',
-            text: '在另一台电脑上运行 ScreenFerry 并选择本机后，这里会弹出配对码请你核对。',
+            text: state.localAddresses.isEmpty
+                ? '在另一台电脑上运行 ScreenFerry 并选择本机后，这里会弹出配对码请你核对。'
+                : '它在局域网里找不到本机时，在那台电脑上按地址连接 ${state.localAddresses.first}；'
+                      '那台电脑没有键盘鼠标时，在这里邀请它连过来。',
           )
         else
           _CardWall(
-            empty: const _Empty(icon: Icons.radar_rounded, title: '局域网里没有其他设备', text: '运行 ScreenFerry 的电脑会自动出现在这里。'),
+            empty: const _Empty(
+              icon: Icons.radar_rounded,
+              title: '局域网里没有找到其他设备',
+              text: '有的网络不支持自动发现（例如公司网络、开了设备隔离的 Wi‑Fi）。可以按地址连接，地址在控制端的「设备」页上。',
+            ),
             children: [for (final d in state.found) _FoundCard(key: ValueKey('f-${d.fingerprint}'), device: d)],
           ),
         Padding(
@@ -101,6 +120,91 @@ class DevicesPage extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// 本机的局域网地址：点一下复制。
+class _LocalAddresses extends StatelessWidget {
+  const _LocalAddresses();
+
+  @override
+  Widget build(BuildContext context) {
+    final state = AppScope.of(context);
+    final c = SfColors.of(context);
+    return Wrap(
+      spacing: 8,
+      runSpacing: 6,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        Text('本机地址', style: TextStyle(fontSize: 14, color: c.muted)),
+        for (final address in state.localAddresses.take(3))
+          Pressable(
+            onTap: () => copyText(context, address, '地址已复制'),
+            color: c.card,
+            hoverColor: c.card2,
+            radius: 10,
+            tooltip: '复制 $address',
+            semanticLabel: '复制本机地址 $address',
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: SizedBox(
+              height: 30,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    address,
+                    style: const TextStyle(
+                      fontFamily: monoFont,
+                      fontFamilyFallback: monoFallback,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Icon(Icons.copy_rounded, size: 14, color: c.muted),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// 分节标题右边的操作：浅强调色底、强调色字。
+class _HeaderAction extends StatelessWidget {
+  const _HeaderAction({required this.label, required this.icon, required this.onPressed});
+
+  final String label;
+  final IconData icon;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = SfColors.of(context);
+    return Pressable(
+      onTap: onPressed,
+      color: c.accentSoft,
+      hoverColor: Color.lerp(c.accentSoft, c.accent, 0.12),
+      radius: 999,
+      pressScale: 0.96,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      semanticLabel: label,
+      child: SizedBox(
+        height: 38,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 17, color: c.accent),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: c.accent),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

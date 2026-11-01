@@ -9,6 +9,7 @@ import '../ipc/messages.dart';
 import 'arrangement.dart';
 import 'backend.dart';
 import 'demo_backend.dart';
+import 'dial_text.dart';
 
 export '../ipc/messages.dart';
 export 'arrangement.dart';
@@ -93,8 +94,27 @@ class TodayStats {
   final List<int> hours;
 }
 
+/// 一次按地址连接或邀请。
+class DialAttempt {
+  const DialAttempt({required this.address, required this.invite, this.done = false, this.error});
+
+  final String address;
+  final bool invite;
+
+  /// 有结果了。
+  final bool done;
+
+  /// 没成的原因；还在连、或者成了时为 null。
+  final DialError? error;
+
+  bool get succeeded => done && error == null;
+}
+
 /// 乐观更新等待后台确认的最长时间，超时就以后台为准。
 const _pendingTimeout = Duration(seconds: 3);
+
+/// 按地址连接、邀请最多等这么久；后台一直没给结果时按连不上处理。
+const _dialTimeout = Duration(seconds: 20);
 
 class AppState extends ChangeNotifier {
   AppState({Backend? backend}) : backend = backend ?? DemoBackend() {
@@ -143,6 +163,10 @@ class AppState extends ChangeNotifier {
   final _forgotten = <String>{};
   final _freshPeers = <String, DateTime>{};
 
+  // ── 按地址连接与邀请 ──
+  DialAttempt? _dial;
+  Timer? _dialTimer;
+
   // ── 配对与日志 ──
   final _prompts = <PairingPrompt>[];
   final List<LogEntry> log = [];
@@ -166,6 +190,9 @@ class AppState extends ChangeNotifier {
   String get localName => _daemon?.local.name ?? '';
   String get localFingerprint => _daemon?.local.short ?? '';
   String get dataDir => _daemon?.local.dataDir ?? '';
+
+  /// 本机的局域网地址，常见网段在前。
+  List<String> get localAddresses => _daemon?.local.addresses ?? const [];
 
   /// macOS：本机开着“自然滚动”。
   bool get naturalScrolling => _daemon?.local.naturalScrolling ?? false;
@@ -396,6 +423,33 @@ class AppState extends ChangeNotifier {
   /// 本机被控制时：请对方打开它的设置界面，翻到本机的设置页。
   void openPeerSettings(PeerInfo peer) => _send(OpenPeerSettingsRequest(peer.fingerprint));
 
+  /// 正在进行或刚有结果的按地址连接、邀请；没有时为 null。
+  DialAttempt? get dial => _dial;
+
+  /// 按地址连接（客户端）或邀请（服务端）。结果见 [dial]。
+  void dialAddress(String address, {required bool invite}) {
+    final text = address.trim();
+    if (text.isEmpty) return;
+    if (!_send(invite ? InviteRequest(text) : ConnectAddressRequest(text))) return;
+    _dial = DialAttempt(address: text, invite: invite);
+    _dialTimer?.cancel();
+    _dialTimer = Timer(_dialTimeout, () {
+      final d = _dial;
+      if (d == null || d.done) return;
+      _dial = DialAttempt(address: d.address, invite: d.invite, done: true, error: DialError.unreachable);
+      notifyListeners();
+    });
+    notifyListeners();
+  }
+
+  /// 关掉按地址连接、邀请的对话框时调用。
+  void clearDial() {
+    _dialTimer?.cancel();
+    if (_dial == null) return;
+    _dial = null;
+    notifyListeners();
+  }
+
   void connectTo(FoundDevice device) {
     if (_send(ConnectRequest(device.fingerprint))) showToast('正在连接 ${device.name}…');
   }
@@ -439,6 +493,15 @@ class AppState extends ChangeNotifier {
       case ShowDeviceNotice(:final fingerprint):
         openDevice(fingerprint);
         return;
+      case DialedNotice(:final address, :final invite, :final error):
+        final d = _dial;
+        if (d != null && !d.done && d.invite == invite) {
+          _dialTimer?.cancel();
+          _dial = DialAttempt(address: d.address, invite: invite, done: true, error: error);
+        } else if (error != null) {
+          // 没有对话框在等（例如点了局域网里发现的设备）：失败时提示一下。
+          showToast(dialFailure(error, address: address, invite: invite).title);
+        }
       case WelcomeNotice():
         return;
     }
@@ -474,6 +537,7 @@ class AppState extends ChangeNotifier {
 
   @override
   void dispose() {
+    _dialTimer?.cancel();
     unawaited(_subscription.cancel());
     backend.link.removeListener(_onLink);
     unawaited(backend.dispose());

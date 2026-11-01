@@ -43,6 +43,7 @@ void main() {
       PairingClosedNotice,
       ToastNotice,
       ShowDeviceNotice,
+      DialedNotice,
     });
   });
 
@@ -59,6 +60,8 @@ void main() {
     expect(s.local.port, 24810);
     expect(s.local.platform, 'macos');
     expect(s.local.naturalScrolling, isTrue);
+    expect(s.local.addresses, ['192.168.2.12', '10.8.0.3']);
+    expect(s.local.invitePort, isNull, reason: '控制端不等邀请');
     expect(s.sharing, isTrue);
     expect(s.problem, isNull);
     expect(s.link.status, LinkStatus.connected);
@@ -81,6 +84,7 @@ void main() {
     expect(s.peers.single.side, ScreenSide.left);
     expect(s.peers.single.cursor, isTrue);
     expect(s.peers.single.alias, '书房的电脑');
+    expect(s.peers.single.addr, '192.168.2.18');
     expect(s.peers.single.platform, 'windows');
     expect(s.peers.single.displayName, '书房的电脑', reason: '起过名字就显示起的名字');
     expect(s.settings.mouseDpi, 1600);
@@ -130,6 +134,12 @@ void main() {
     expect(decoded.whereType<PairingClosedNotice>().single.id, 3);
     expect(decoded.whereType<ToastNotice>().single.text, '已暂停共享');
     expect(decoded.whereType<ShowDeviceNotice>().single.fingerprint, pc);
+    final dialed = decoded.whereType<DialedNotice>().toList();
+    expect(dialed.first.address, '192.168.2.12');
+    expect(dialed.first.invite, isFalse);
+    expect(dialed.first.error, isNull);
+    expect(dialed.last.invite, isTrue);
+    expect(dialed.last.error, DialError.notScreenFerry);
   });
 
   test('Dart 编码的命令与样例一致', () {
@@ -170,6 +180,8 @@ void main() {
       const ForgetRequest(pc),
       const PairReplyRequest(3, accept: true),
       const ConnectRequest(mac),
+      const ConnectAddressRequest('192.168.2.12'),
+      const InviteRequest('192.168.2.18:24811'),
       const OpenPermissionSettingsRequest(),
       const ClearLogRequest(),
       const OpenSettingsRequest(),

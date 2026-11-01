@@ -100,3 +100,60 @@ async fn the_local_cursor_is_hidden_while_the_pointer_is_on_the_server() {
     })
     .await;
 }
+
+// ── 按地址连接 ───────────────────────────────
+
+mod by_address {
+    use ferry_engine::{ClientCommand, DialError, Event};
+
+    use crate::support::{Rig, Setup};
+
+    async fn server_only() -> Rig {
+        Rig::with(Setup {
+            start_client: false,
+            ..Setup::default()
+        })
+        .await
+    }
+
+    #[tokio::test]
+    async fn a_client_connects_to_an_address_when_asked_and_pairs() {
+        let rig = server_only().await;
+        let mut pc = rig.idle_client("书房", false);
+        pc.commands.send(ClientCommand::Connect(rig.addr)).unwrap();
+
+        let error = pc
+            .wait_for("按地址连接的结果", |e| match e {
+                Event::Dialed { error, invite, .. } if !invite => Some(*error),
+                _ => None,
+            })
+            .await;
+        assert_eq!(error, None, "连上了，开始核对配对码");
+        // 配对完立即用这个地址重连，不用等局域网发现。
+        pc.wait_for("配对后连上服务端", |e| {
+            matches!(e, Event::Connected { .. }).then_some(())
+        })
+        .await;
+        let peers = pc.device.store.peers().unwrap();
+        let server = peers.iter().next().expect("记住了服务端");
+        assert_eq!(server.addr, Some(rig.addr), "记下了服务端的地址");
+    }
+
+    #[tokio::test]
+    async fn an_address_where_nothing_waits_is_reported() {
+        let rig = server_only().await;
+        let closed = {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.local_addr().unwrap()
+        };
+        let mut pc = rig.idle_client("书房", false);
+        pc.commands.send(ClientCommand::Connect(closed)).unwrap();
+        let error = pc
+            .wait_for("按地址连接的结果", |e| match e {
+                Event::Dialed { error, .. } => Some(*error),
+                _ => None,
+            })
+            .await;
+        assert_eq!(error, Some(DialError::Refused));
+    }
+}

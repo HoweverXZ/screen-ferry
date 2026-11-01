@@ -156,6 +156,7 @@ pub(crate) fn run(options: Options) -> ExitCode {
                         edge: EdgeFeed::none(),
                         devices: Vec::new(),
                         commands: None,
+                        invite_port: None,
                     };
                     connect(config).await
                 }

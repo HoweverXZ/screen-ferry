@@ -9,9 +9,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ferry_core::clip_format::png_size;
+use ferry_proto::RejectReason;
 use ferry_trust::Fingerprint;
 use ferry_types::{ClipboardContent, ClipboardFormat, TransferId};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+
+use crate::error::Error;
 
 /// 一件发生了的事。
 #[derive(Clone, Debug, PartialEq)]
@@ -74,6 +77,65 @@ pub enum Event {
     OpenSettings { peer: Fingerprint },
     /// 客户端：请 `peer` 打开它的设置界面的结果。`sent` 为假表示对方的版本不支持。
     PeerSettings { peer: Fingerprint, sent: bool },
+    /// 客户端开始在 `port` 上等服务端的邀请。
+    InviteListening { port: u16 },
+    /// 用户按地址连接（客户端）或邀请一台电脑（服务端）的结果。`error` 为 `None` 表示成了：
+    /// 连上了、开始核对配对码，或者对方接受了邀请、正在连过来。
+    Dialed {
+        /// 连的是哪里，给用户看。
+        address: String,
+        invite: bool,
+        error: Option<DialError>,
+    },
+}
+
+/// 按地址连接、邀请为什么没成。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DialError {
+    /// 地址写得不对，或者电脑名找不到。
+    BadAddress,
+    /// 那个地址上没有程序在等：没开 ScreenFerry、角色不对，或者版本太旧不支持邀请。
+    Refused,
+    /// 连不上：网络不通、地址不对、被防火墙挡住，或者超时。
+    Unreachable,
+    /// 那个地址上不是 ScreenFerry。
+    NotScreenFerry,
+    /// 对方的 ScreenFerry 版本与本机不兼容。
+    Incompatible,
+    /// 邀请时对方正连着另一台电脑。
+    Busy,
+}
+
+impl DialError {
+    /// 把连接时的错误归到用户看得懂的几类。
+    pub fn of(error: &Error) -> Self {
+        use std::io::ErrorKind;
+
+        let io_kind = |e: &std::io::Error| match e.kind() {
+            ErrorKind::ConnectionRefused => Self::Refused,
+            // TLS 握手读到的不是 TLS：那个端口上是别的程序。
+            ErrorKind::InvalidData => Self::NotScreenFerry,
+            _ => Self::Unreachable,
+        };
+        match error {
+            Error::Io(e) => io_kind(e),
+            Error::Net(ferry_net::Error::Io(e)) => io_kind(e),
+            Error::Net(ferry_net::Error::Rejected(r)) => match r.reason {
+                RejectReason::INCOMPATIBLE_VERSION => Self::Incompatible,
+                RejectReason::BUSY => Self::Busy,
+                _ => Self::Refused,
+            },
+            Error::Net(
+                ferry_net::Error::WrongProtocol
+                | ferry_net::Error::NoPeerCertificate
+                | ferry_net::Error::Decode(_)
+                | ferry_net::Error::TlsConfig(_)
+                | ferry_net::Error::UnexpectedMessage { .. },
+            )
+            | Error::Protocol(_) => Self::NotScreenFerry,
+            _ => Self::Unreachable,
+        }
+    }
 }
 
 /// 一次文件传输的现状。

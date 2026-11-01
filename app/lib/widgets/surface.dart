@@ -211,7 +211,14 @@ class SectionTitle extends StatelessWidget {
           Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
           if (note != null) ...[
             const SizedBox(width: 10),
-            Text(note!, style: TextStyle(fontSize: 14, color: SfColors.of(context).muted)),
+            Flexible(
+              child: Text(
+                note!,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 14, color: SfColors.of(context).muted),
+              ),
+            ),
           ],
         ],
       ),

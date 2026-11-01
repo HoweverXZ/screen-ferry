@@ -56,6 +56,10 @@ pub trait Host: Send + Sync + 'static {
     fn natural_scrolling(&self) -> Option<bool> {
         None
     }
+    /// 客户端等邀请的端口；0 表示由系统分配（测试用），实际端口见状态里的 `local.invite_port`。
+    fn invite_port(&self) -> u16 {
+        crate::INVITE_PORT
+    }
     /// 服务端监听的端口；0 表示由系统分配（测试用），实际端口见状态里的 `local.port`。
     fn listen_port(&self) -> u16 {
         crate::DEFAULT_PORT

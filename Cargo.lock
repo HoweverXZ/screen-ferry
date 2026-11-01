@@ -272,6 +272,7 @@ dependencies = [
  "ferry-proto",
  "ferry-trust",
  "ferry-types",
+ "if-addrs",
  "mdns-sd",
  "rustls",
  "thiserror",

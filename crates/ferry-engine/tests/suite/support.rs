@@ -291,6 +291,7 @@ impl Rig {
             edge: setup.pc_edge.clone(),
             devices: Vec::new(),
             commands: None,
+            invite_port: None,
         };
         tokio::spawn(async move {
             match connect(config, inject, displays, clipboard, confirm).await {
@@ -368,6 +369,43 @@ impl Rig {
     }
 }
 
+/// 见 [`Rig::idle_client`]。
+pub struct Idle {
+    pub device: Device,
+    pub events: tokio::sync::mpsc::UnboundedReceiver<Event>,
+    pub commands: tokio::sync::mpsc::UnboundedSender<ClientCommand>,
+}
+
+impl Idle {
+    /// 等到一个让 `pick` 返回 `Some` 的事件，最多 10 秒。
+    pub async fn wait_for<T>(
+        &mut self,
+        what: &str,
+        mut pick: impl FnMut(&Event) -> Option<T>,
+    ) -> T {
+        let found = async {
+            while let Some(event) = self.events.recv().await {
+                if let Some(found) = pick(&event) {
+                    return found;
+                }
+            }
+            panic!("{what}：事件通道关了");
+        };
+        tokio::time::timeout(Duration::from_secs(10), found)
+            .await
+            .unwrap_or_else(|_| panic!("{what}：10 秒内没等到"))
+    }
+
+    pub fn fingerprint(&self, name: &str) -> String {
+        self.device
+            .store
+            .identity(name)
+            .unwrap()
+            .fingerprint()
+            .to_hex()
+    }
+}
+
 /// 同一台服务端上再连的一台客户端（1920×1080，150%），用来测同时连着几台设备。
 pub struct Extra {
     pub name: String,
@@ -427,6 +465,7 @@ impl Rig {
             edge,
             devices: Vec::new(),
             commands,
+            invite_port: None,
         };
         let client = tokio::spawn({
             let inject = inject.clone();
@@ -467,6 +506,45 @@ impl Rig {
         })
         .await;
         extra
+    }
+
+    /// 一台还没连上服务端的客户端：它固定去连一个没人在等的地址（一直重试），等测试让它按地址连接，
+    /// 或者邀请它。`invite` 为真时它在系统分配的端口上等邀请。
+    pub fn idle_client(&self, name: &str, invite: bool) -> Idle {
+        let device = Device::new();
+        let (events, rx) = Events::channel();
+        let (commands, commands_rx) = tokio::sync::mpsc::unbounded_channel();
+        let config = ClientConfig {
+            server: ServerAddr::Fixed(SocketAddr::from(([127, 0, 0, 1], 1))),
+            name: name.into(),
+            clipboard: true,
+            clipboard_limit: Default::default(),
+            command_key: false,
+            store: device.store.clone(),
+            events,
+            files: Files::new(&device.store, Events::none()),
+            edge: EdgeFeed::none(),
+            devices: Vec::new(),
+            commands: Some(commands_rx),
+            invite_port: invite.then_some(0),
+        };
+        // 测试结束时运行时一停，它也就停了。
+        tokio::spawn(async move {
+            let confirm = AutoConfirm::answering(true);
+            let _ = connect(
+                config,
+                MockInject::new(),
+                MockDisplays::new(vec![display(1920, 1080, 150)]),
+                MockClipboard::new(),
+                confirm,
+            )
+            .await;
+        });
+        Idle {
+            device,
+            events: rx,
+            commands,
+        }
     }
 
     /// 主客户端 `pc` 的证书指纹（十六进制）。

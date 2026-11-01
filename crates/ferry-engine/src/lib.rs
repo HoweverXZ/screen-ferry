@@ -15,6 +15,7 @@ mod error;
 mod events;
 mod files;
 mod heartbeat;
+mod invite;
 mod link;
 mod pairing;
 pub mod resident;
@@ -25,9 +26,10 @@ pub use clipboard::{ClipLimit, DEFAULT_CLIP_LIMIT};
 pub use edge_drop::{Edge, EdgeDrop, EdgeFeed, Pointer};
 pub use error::{Error, Result};
 pub use events::{
-    ClipImage, ClipSummary, Event, Events, FoundServer, TransferState, TransferUpdate,
+    ClipImage, ClipSummary, DialError, Event, Events, FoundServer, TransferState, TransferUpdate,
 };
 pub use files::Files;
+pub use invite::{INVITE_PORT, invite};
 pub use link::DEFAULT_PORT;
 pub use pairing::{ConfirmPairing, PairingRequest};
 pub use server::{Live, ServerConfig, serve};

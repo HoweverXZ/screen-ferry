@@ -208,6 +208,11 @@ class DemoBackend implements Backend {
         _logLayout(before, Arrangement.of(_peers, _settings));
       case SetDeviceRequest(:final device):
         _settings = _settings.withDevice(device);
+      // 演示：地址里带 9.9.9.9 的连不上，其余都成。
+      case ConnectAddressRequest(:final address):
+        emit(DialedNotice(address: address, invite: false, error: _demoDial(address)));
+      case InviteRequest(:final address):
+        emit(DialedNotice(address: address, invite: true, error: _demoDial(address)));
       case OpenPeerSettingsRequest(:final fingerprint):
         emit(ToastNotice('已在 ${_nameOf(fingerprint)} 上打开设置，把光标移过去就能改'));
       case ForgetRequest(:final fingerprint):
@@ -270,6 +275,8 @@ class DemoBackend implements Backend {
   }
 
   final _pairing = <int, FoundDevice>{};
+
+  static DialError? _demoDial(String address) => address.contains('9.9.9.9') ? DialError.unreachable : null;
 
   @override
   Future<void> dispose() async {
@@ -353,6 +360,8 @@ class DemoBackend implements Backend {
         version: '0.1.0',
         platform: platform,
         naturalScrolling: platform == 'macos' ? true : null,
+        addresses: role == Role.server ? const ['192.168.2.12'] : const ['192.168.2.18'],
+        invitePort: role == Role.server ? null : 24811,
       ),
       sharing: _sharing,
       problem: _problem,
@@ -399,6 +408,11 @@ class DemoBackend implements Backend {
             alias: _settings.device(p.fingerprint).alias,
             // 演示里对方总是和本机不同的系统。
             platform: platform == 'macos' ? 'windows' : 'macos',
+            addr: switch ((p.online || p.lastSeen != null, role)) {
+              (false, _) => '',
+              (true, Role.server) => '192.168.2.${18 + _peers.indexOf(p)}',
+              (true, Role.client) => '192.168.2.12',
+            },
           ),
       ],
       found: List.of(_found),

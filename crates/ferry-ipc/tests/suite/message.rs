@@ -6,9 +6,9 @@
 use std::path::PathBuf;
 
 use ferry_ipc::{
-    ClipboardImage, ClipboardSync, FoundDevice, HourActivity, Link, LinkStatus, Local, LogEntry,
-    LogIcon, LogKind, Notice, PairingPrompt, PeerInfo, PeerRef, Problem, ProblemKind, Request,
-    Settings, SettingsPatch, State, VERSION,
+    ClipboardImage, ClipboardSync, DialError, FoundDevice, HourActivity, Link, LinkStatus, Local,
+    LogEntry, LogIcon, LogKind, Notice, PairingPrompt, PeerInfo, PeerRef, Problem, ProblemKind,
+    Request, Settings, SettingsPatch, State, VERSION,
 };
 use ferry_types::{
     DeviceSettings, KeyMapping, ModifierPreset, ModifierTarget, Placement, Role, ScrollSpeed, Side,
@@ -104,6 +104,12 @@ fn requests() -> Vec<Request> {
         Request::Connect {
             fingerprint: FP_MAC.into(),
         },
+        Request::ConnectAddress {
+            address: "192.168.2.12".into(),
+        },
+        Request::Invite {
+            address: "192.168.2.18:24811".into(),
+        },
         Request::OpenPermissionSettings,
         Request::ClearLog,
         Request::OpenSettings,
@@ -136,6 +142,8 @@ fn state() -> State {
             port: Some(24810),
             platform: "macos".into(),
             natural_scrolling: Some(true),
+            addresses: vec!["192.168.2.12".into(), "10.8.0.3".into()],
+            invite_port: None,
         },
         sharing: true,
         problem: None,
@@ -177,6 +185,7 @@ fn state() -> State {
             cursor: true,
             alias: "书房的电脑".into(),
             platform: "windows".into(),
+            addr: "192.168.2.18".into(),
         }],
         found: vec![FoundDevice {
             name: "会议室 Mac".into(),
@@ -263,6 +272,16 @@ fn notices() -> Vec<Notice> {
         },
         Notice::ShowDevice {
             fingerprint: FP_PC.into(),
+        },
+        Notice::Dialed {
+            address: "192.168.2.12".into(),
+            invite: false,
+            error: None,
+        },
+        Notice::Dialed {
+            address: "192.168.2.18".into(),
+            invite: true,
+            error: Some(DialError::NotScreenFerry),
         },
     ]
 }

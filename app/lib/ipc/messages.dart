@@ -61,6 +61,9 @@ enum ModifierKey { gui, ctrl, alt, capsLock }
 
 enum ScrollSpeed { slow, normal, fast }
 
+/// 按地址连接、邀请为什么没成。
+enum DialError { badAddress, refused, unreachable, notScreenFerry, incompatible, busy, wrongRole }
+
 // ── 状态 ─────────────────────────────────────
 
 /// 后台的完整状态快照。
@@ -113,6 +116,8 @@ class Local {
     this.port,
     this.platform = '',
     this.naturalScrolling,
+    this.addresses = const [],
+    this.invitePort,
   });
 
   factory Local.fromJson(Json j) => Local(
@@ -125,6 +130,11 @@ class Local {
     port: j['port'] is num ? _int(j['port']) : null,
     platform: _str(j['platform']),
     naturalScrolling: j['natural_scrolling'] is bool ? j['natural_scrolling'] as bool : null,
+    addresses: [
+      for (final a in (j['addresses'] is List ? j['addresses'] as List : const []))
+        if (a is String) a,
+    ],
+    invitePort: j['invite_port'] is num ? _int(j['invite_port']) : null,
   );
 
   final String name;
@@ -142,6 +152,12 @@ class Local {
 
   /// macOS：系统设置里开着“自然滚动”。其他系统为 null。
   final bool? naturalScrolling;
+
+  /// 本机的局域网地址，常见网段在前。另一台电脑按地址连接时填它。
+  final List<String> addresses;
+
+  /// 客户端：等待邀请的端口；服务端为 null。
+  final int? invitePort;
 }
 
 class Problem {
@@ -267,6 +283,7 @@ class PeerInfo {
     this.cursor = false,
     this.alias = '',
     this.platform = '',
+    this.addr = '',
   });
 
   factory PeerInfo.fromJson(Json j) => PeerInfo(
@@ -279,6 +296,7 @@ class PeerInfo {
     cursor: _bool(j['cursor']),
     alias: _str(j['alias']),
     platform: _str(j['platform']),
+    addr: _str(j['addr']),
   );
 
   /// 它自己报的名字。
@@ -301,6 +319,9 @@ class PeerInfo {
 
   /// 它是什么系统：`macos`、`windows`；本次运行还没连上过、不知道时为空。
   final String platform;
+
+  /// 上次连上时它的地址（只知道 IP 时就是 IP）；没连上过为空。
+  final String addr;
 
   /// 显示给用户的名字：起过名字就用起的。
   String get displayName => alias.trim().isEmpty ? name : alias.trim();
@@ -781,6 +802,11 @@ sealed class Notice {
     'pairing_closed' => PairingClosedNotice(_int(j['id'])),
     'toast' => ToastNotice(_str(j['text'])),
     'show_device' => ShowDeviceNotice(_str(j['fingerprint'])),
+    'dialed' => DialedNotice(
+      address: _str(j['address']),
+      invite: _bool(j['invite']),
+      error: _enumOrNull(DialError.values, _camel(j['error'])),
+    ),
     _ => null,
   };
 }
@@ -826,6 +852,15 @@ class ToastNotice extends Notice {
 class ShowDeviceNotice extends Notice {
   const ShowDeviceNotice(this.fingerprint);
   final String fingerprint;
+}
+
+/// 按地址连接（[invite] 为假）或邀请的结果。[error] 为 null 表示成了：
+/// 连上了、开始核对配对码，或者对方接受了邀请、正在连过来。
+class DialedNotice extends Notice {
+  const DialedNotice({required this.address, required this.invite, this.error});
+  final String address;
+  final bool invite;
+  final DialError? error;
 }
 
 // ── 界面 → 后台 ──────────────────────────────
@@ -877,6 +912,24 @@ class OpenPeerSettingsRequest extends Request {
 
   @override
   Json toJson() => {'type': 'open_peer_settings', 'fingerprint': fingerprint};
+}
+
+/// 客户端：按地址连接一台服务端（IP、IP:端口、电脑名），不写端口用 24810。
+class ConnectAddressRequest extends Request {
+  const ConnectAddressRequest(this.address);
+  final String address;
+
+  @override
+  Json toJson() => {'type': 'connect_address', 'address': address};
+}
+
+/// 服务端：邀请这个地址上的电脑（被控制的一方）连过来，不写端口用 24811。
+class InviteRequest extends Request {
+  const InviteRequest(this.address);
+  final String address;
+
+  @override
+  Json toJson() => {'type': 'invite', 'address': address};
 }
 
 class ForgetRequest extends Request {

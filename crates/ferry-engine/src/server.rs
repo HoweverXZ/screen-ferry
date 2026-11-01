@@ -916,6 +916,8 @@ async fn handshake<P: ConfirmPairing>(
             }
             Channel::Input => Err(RejectReason::NOT_PAIRED),
             Channel::Pair => Ok(0),
+            // 本机是服务端，不等邀请。
+            Channel::Invite => Err(RejectReason::UNKNOWN_SESSION),
             // 数据连接和文件连接必须来自会话的同一台设备（证书指纹相同），并带着那个会话号。
             Channel::Data | Channel::File => {
                 let keys = shared.sessions().get(&hello.session).copied();
@@ -943,7 +945,8 @@ async fn handshake<P: ConfirmPairing>(
         Ok(result) => result?,
     };
     match hello.channel {
-        Channel::Pair => pair(shared, &mut framed, peer, &hello.name).await,
+        Channel::Invite => Ok(()),
+        Channel::Pair => pair(shared, &mut framed, peer, addr, &hello.name).await,
         Channel::File => {
             shared.files.serve(peer, framed);
             Ok(())
@@ -956,6 +959,10 @@ async fn handshake<P: ConfirmPairing>(
         }
         Channel::Input => {
             info!(peer = %hello.name, fingerprint = %peer, "客户端已连接");
+            // 记下它的 IP：以后本机开始共享时邀请它。记不下来只是少一个兜底。
+            if let Err(e) = remember_addr(&shared.store, peer, SocketAddr::new(addr.ip(), 0)) {
+                warn!("记下客户端的地址失败：{e}");
+            }
             let local = shared.local().clone();
             send(&mut framed, &Message::Displays(local)).await?;
             let remote = timeout(HANDSHAKE_TIMEOUT, expect_displays(&mut framed))
@@ -980,6 +987,7 @@ async fn pair<P: ConfirmPairing>(
     shared: &Shared<P>,
     framed: &mut Framed<ServerStream>,
     peer: Fingerprint,
+    addr: SocketAddr,
     name: &str,
 ) -> Result<()> {
     info!(peer = name, fingerprint = %peer, "收到配对请求");
@@ -988,9 +996,11 @@ async fn pair<P: ConfirmPairing>(
     match outcome {
         Outcome::Paired => {
             let mut peers = shared.store.peers()?;
+            // 只知道它的 IP：它是来连本机的，端口是临时的。
             peers.add(Peer {
                 name: name.to_owned(),
                 fingerprint: peer,
+                addr: Some(SocketAddr::new(addr.ip(), 0)),
             });
             shared.store.save_peers(&peers)?;
             info!(peer = name, "配对成功，已记住这台设备");
@@ -1081,6 +1091,15 @@ impl Session {
             alias => alias.to_owned(),
         }
     }
+}
+
+/// 记下一台已配对设备这次连上的地址（有变化才写）。
+pub(crate) fn remember_addr(store: &Store, peer: Fingerprint, addr: SocketAddr) -> Result<()> {
+    let mut peers = store.peers()?;
+    if peers.set_addr(&peer, addr) {
+        store.save_peers(&peers)?;
+    }
+    Ok(())
 }
 
 /// Ctrl + Option（Alt）是否都按着。左右两侧的键都算。

@@ -7,6 +7,7 @@ import 'package:screenferry_settings/shell/bottom_nav.dart';
 import 'package:screenferry_settings/shell/sidebar.dart';
 import 'package:screenferry_settings/state/app_state.dart';
 import 'package:screenferry_settings/theme/tokens.dart';
+import 'package:screenferry_settings/widgets/address_dialog.dart';
 import 'package:screenferry_settings/widgets/controls.dart';
 import 'package:screenferry_settings/widgets/glyph.dart';
 import 'package:screenferry_settings/widgets/group.dart';
@@ -129,7 +130,7 @@ void main() {
     expect(state.peers.first.name, '会议室 Mac');
     expect(state.found, isEmpty);
     expect(find.text('与“会议室 Mac”配对'), findsNothing, reason: '配对结束后对话框自动关闭');
-    expect(find.text('局域网里没有其他设备'), findsOneWidget);
+    expect(find.text('局域网里没有找到其他设备'), findsOneWidget);
   });
 
   testWidgets('服务端不列出局域网设备，只说明怎么配对', (tester) async {
@@ -860,6 +861,139 @@ void main() {
       expect(tester.takeException(), isNull);
       await tester.scrollUntilVisible(find.text('移除这台设备'), 200, scrollable: find.byType(Scrollable).first);
       await settle(tester);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  group('按地址连接', () {
+    Finder inDialog(Finder f) => find.descendant(of: find.byType(AddressDialog), matching: f);
+
+    Future<void> dial(WidgetTester tester, String address, String button) async {
+      await tester.enterText(inDialog(find.byType(TextField)), address);
+      await settle(tester, steps: 2);
+      await tester.tap(inDialog(find.text(button)));
+      await settle(tester);
+    }
+
+    testWidgets('被控端在设备页按地址连接，连上后关掉对话框', (tester) async {
+      final backend = DemoBackend(role: Role.client, animate: false);
+      final state = await launch(tester, const Size(1160, 780), backend: backend);
+      state.go(SfPage.devices);
+      await settle(tester);
+      expect(find.text('192.168.2.18'), findsOneWidget, reason: '本机地址');
+
+      await tester.tap(find.text('按地址连接'));
+      await settle(tester);
+      expect(find.byType(AddressDialog), findsOneWidget);
+      expect(find.text('输入控制端（键盘鼠标所在那台）的地址'), findsOneWidget);
+
+      await dial(tester, ' 192.168.2.12 ', '连接');
+      expect(backend.sent.whereType<ConnectAddressRequest>().single.address, '192.168.2.12');
+      expect(find.byType(AddressDialog), findsNothing);
+      expect(find.text('已连上 192.168.2.12'), findsOneWidget);
+      expect(state.dial, isNull, reason: '关掉对话框后不再记着这次连接');
+    });
+
+    testWidgets('连不上时说明原因，可以改了地址重试', (tester) async {
+      final backend = DemoBackend(role: Role.client, animate: false);
+      final state = await launch(tester, const Size(1160, 780), backend: backend);
+      state.go(SfPage.devices);
+      await settle(tester);
+      await tester.tap(find.text('按地址连接'));
+      await settle(tester);
+
+      await dial(tester, '9.9.9.9', '连接');
+      expect(find.byType(AddressDialog), findsOneWidget);
+      expect(find.text('连不上 9.9.9.9'), findsOneWidget);
+      expect(inDialog(find.text('重试')), findsOneWidget);
+
+      await dial(tester, '192.168.2.12', '重试');
+      expect(backend.sent.whereType<ConnectAddressRequest>().map((r) => r.address), ['9.9.9.9', '192.168.2.12']);
+      expect(find.byType(AddressDialog), findsNothing);
+    });
+
+    testWidgets('控制端邀请一台电脑；点本机地址复制', (tester) async {
+      final copied = <String>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'Clipboard.setData') copied.add((call.arguments as Map)['text'] as String);
+        return null;
+      });
+      addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
+      final backend = DemoBackend(animate: false);
+      final state = await launch(tester, const Size(1160, 780), backend: backend);
+      state.go(SfPage.devices);
+      await settle(tester);
+
+      await tester.tap(find.text('192.168.2.12'));
+      await settle(tester);
+      expect(copied, ['192.168.2.12']);
+      expect(find.text('地址已复制'), findsOneWidget);
+
+      await tester.tap(find.text('邀请一台电脑'));
+      await settle(tester);
+      expect(find.text('输入被控制那台的地址，它会自动连过来'), findsOneWidget);
+      await dial(tester, '192.168.2.40', '邀请');
+      expect(backend.sent.whereType<InviteRequest>().single.address, '192.168.2.40');
+      expect(find.text('已邀请 192.168.2.40，它正在连过来'), findsOneWidget);
+    });
+
+    testWidgets('控制端在设备设置页邀请离线的设备，地址预先填好', (tester) async {
+      final backend = DemoBackend(animate: false);
+      final state = await launch(tester, const Size(1160, 780), backend: backend);
+      state.openDevice(fingerprintOf(state, '办公室 PC'));
+      await settle(tester);
+      await tester.scrollUntilVisible(find.text('邀请它连过来'), 200, scrollable: find.byType(Scrollable).first);
+      await settle(tester);
+      expect(find.text('它已经连着本机'), findsOneWidget);
+      final invite = find.descendant(of: find.widgetWithText(SfRow, '邀请它连过来'), matching: find.byType(SmallButton));
+      expect(tester.widget<SmallButton>(invite).onPressed, isNull, reason: '在线的不用邀请');
+
+      state.openDevice(fingerprintOf(state, '家里的笔记本'));
+      await settle(tester);
+      await tester.scrollUntilVisible(find.text('邀请它连过来'), 200, scrollable: find.byType(Scrollable).first);
+      await settle(tester);
+      expect(find.text('192.168.2.20'), findsOneWidget, reason: '上次连上的地址');
+      await tapInView(tester, invite);
+      expect(tester.widget<TextField>(inDialog(find.byType(TextField))).controller!.text, '192.168.2.20');
+      await tester.tap(inDialog(find.text('邀请')));
+      await settle(tester);
+      expect(backend.sent.whereType<InviteRequest>().single.address, '192.168.2.20');
+    });
+
+    testWidgets('被控端在设备设置页选连接方式：固定地址或自动寻找', (tester) async {
+      final backend = DemoBackend(role: Role.client, animate: false);
+      final state = await launch(tester, const Size(1160, 780), backend: backend);
+      state.openDevice(state.peers.single.fingerprint);
+      await settle(tester);
+      await tester.scrollUntilVisible(find.text('连接方式'), 200, scrollable: find.byType(Scrollable).first);
+      await settle(tester);
+      expect(find.text('192.168.2.12'), findsOneWidget, reason: '上次连上的地址');
+      List<Object?> servers() => [
+        for (final r in backend.sent.whereType<UpdateSettingsRequest>())
+          if (r.settings.server != null) r.settings.server,
+      ];
+
+      await tapInView(tester, find.text('固定地址'));
+      expect(servers(), ['192.168.2.12'], reason: '用上次连上的地址');
+      expect(state.settings.server, '192.168.2.12');
+
+      await tester.enterText(find.bySemanticsLabel('控制端的地址').last, '192.168.2.12:24900');
+      await settle(tester, steps: 2);
+      await tapInView(tester, find.text('保存'));
+      expect(servers().last, '192.168.2.12:24900');
+
+      await tapInView(tester, find.text('自动寻找'));
+      expect(servers().last, '');
+      expect(find.text('保存'), findsNothing);
+    });
+
+    testWidgets('手机大小下设备页和对话框能正常显示', (tester) async {
+      final state = await launch(tester, const Size(375, 667), backend: DemoBackend(role: Role.client, animate: false));
+      state.go(SfPage.devices);
+      await settle(tester);
+      await tapInView(tester, find.text('按地址连接'));
+      await dial(tester, '9.9.9.9', '连接');
+      expect(find.text('连不上 9.9.9.9'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
   });

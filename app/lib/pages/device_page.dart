@@ -1,4 +1,4 @@
-// 一台设备的设置页（ADR 0009）：名字，鼠标，按键，切换与共享，恢复默认与移除。
+// 一台设备的设置页（ADR 0009）：名字，鼠标，按键，切换与共享，连接（ADR 0010），恢复默认与移除。
 // 鼠标、按键、防误切在本机控制它时生效（本机是服务端）。本机被控制时页面上方说明这一点，
 // 并可以请对方打开它的设置界面、翻到本机的设置页。
 
@@ -10,6 +10,7 @@ import '../state/app_scope.dart';
 import '../state/app_state.dart';
 import '../state/key_names.dart';
 import '../theme/tokens.dart';
+import '../widgets/address_dialog.dart';
 import '../widgets/controls.dart';
 import '../widgets/dpi_field.dart';
 import '../widgets/group.dart';
@@ -211,6 +212,8 @@ class DevicePage extends StatelessWidget {
             ),
           ],
         ),
+        const SectionTitle('连接'),
+        _Connection(peer: peer, server: state.settings.server),
         const SectionTitle('这台设备'),
         _Manage(peer: peer, settings: d),
       ],
@@ -703,6 +706,148 @@ class _Mappings extends StatelessWidget {
             ),
         ],
       ),
+    );
+  }
+}
+
+// ── 连接 ────────────────────────────────────
+
+/// 上次连上的地址。本机被控制时选怎么找到控制端；本机控制别人时可以邀请它连过来。
+class _Connection extends StatefulWidget {
+  const _Connection({required this.peer, required this.server});
+
+  final PeerInfo peer;
+
+  /// 打开页面时的“固定地址”，空表示自动寻找。
+  final String server;
+
+  @override
+  State<_Connection> createState() => _ConnectionState();
+}
+
+class _ConnectionState extends State<_Connection> {
+  late final _controller = TextEditingController(
+    text: widget.server.trim().isNotEmpty ? widget.server.trim() : widget.peer.addr,
+  );
+
+  /// 刚选了“固定地址”、还没填地址时为真。
+  bool _choosing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addListener(() => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _choose(AppState state, bool fixed) {
+    final text = _controller.text.trim();
+    setState(() => _choosing = fixed && text.isEmpty);
+    final next = fixed ? text : '';
+    if (next != state.settings.server.trim() && (next.isNotEmpty || !fixed)) {
+      state.updateSettings(SettingsPatch(server: next));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final state = AppScope.of(context);
+    final c = SfColors.of(context);
+    final peer = widget.peer;
+    final server = state.settings.server.trim();
+    final fixed = server.isNotEmpty || _choosing;
+    final text = _controller.text.trim();
+    const mono = TextStyle(
+      fontFamily: monoFont,
+      fontFamilyFallback: monoFallback,
+      fontSize: 15,
+      fontWeight: FontWeight.w600,
+    );
+    return SfGroup(
+      children: [
+        SfRow(
+          icon: Icons.history_rounded,
+          title: '上次连上的地址',
+          subtitle: state.isServer ? '它上次从这个地址连过来' : '局域网里找不到它时，先试这个地址',
+          trailing: peer.addr.isEmpty
+              ? Text('还没有', style: TextStyle(fontSize: 14, color: c.muted))
+              : SelectableText(peer.addr, style: mono),
+        ),
+        if (state.isServer)
+          SfRow(
+            icon: Icons.login_rounded,
+            title: '邀请它连过来',
+            subtitle: peer.online ? '它已经连着本机' : '它在局域网里找不到本机、身边又没有键盘鼠标时用',
+            trailing: SmallButton(
+              label: '邀请',
+              tone: PillTone.accent,
+              onPressed: state.online && !peer.online
+                  ? () => showAddressDialog(context, invite: true, initial: peer.addr)
+                  : null,
+            ),
+          )
+        else
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SfRow(
+                icon: Icons.route_rounded,
+                title: '连接方式',
+                subtitle: fixed ? '只连下面这个地址，不在局域网里找' : '在局域网里找控制端，找不到时用上次连上的地址',
+                trailing: SfSegmented<bool>(
+                  label: '连接方式',
+                  segments: const [(false, '自动寻找'), (true, '固定地址')],
+                  value: fixed,
+                  onChanged: state.online ? (v) => _choose(state, v) : null,
+                ),
+              ),
+              if (fixed)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Container(
+                          height: 40,
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          decoration: ShapeDecoration(color: c.card2, shape: continuous(12)),
+                          child: Semantics(
+                            label: '控制端的地址',
+                            child: TextField(
+                              controller: _controller,
+                              enabled: state.online,
+                              onSubmitted: (_) => _choose(state, true),
+                              style: mono,
+                              decoration: InputDecoration(
+                                isDense: true,
+                                border: InputBorder.none,
+                                hintText: '例如 192.168.2.12 或 192.168.2.12:24810',
+                                hintStyle: TextStyle(fontSize: 14, color: c.muted, fontWeight: FontWeight.w500),
+                                contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      SmallButton(
+                        label: '保存',
+                        tone: PillTone.accent,
+                        onPressed: state.online && text.isNotEmpty && text != server
+                            ? () => _choose(state, true)
+                            : null,
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+      ],
     );
   }
 }

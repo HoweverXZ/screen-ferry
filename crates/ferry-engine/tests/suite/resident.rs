@@ -80,6 +80,9 @@ impl Host for MockHost {
     fn listen_port(&self) -> u16 {
         self.port
     }
+    fn invite_port(&self) -> u16 {
+        0
+    }
 }
 
 /// 一份常驻后台，加上连着它的“设置界面”。
@@ -313,6 +316,7 @@ async fn first_pairing_is_confirmed_in_the_ui() {
             edge: EdgeFeed::none(),
             devices: Vec::new(),
             commands: None,
+            invite_port: None,
         },
         MockInject::new(),
         MockDisplays::new(vec![Display {
@@ -450,6 +454,7 @@ async fn pairing_with_no_ui_open_opens_the_settings() {
             edge: EdgeFeed::none(),
             devices: Vec::new(),
             commands: None,
+            invite_port: None,
         },
         MockInject::new(),
         MockDisplays::default(),

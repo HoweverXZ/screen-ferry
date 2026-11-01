@@ -10,10 +10,12 @@
 //! 本机对服务端的单独设置里关掉了剪贴板或拖文件时，相应地不同步、不显示拖放的边。
 //!
 //! 不指定地址时，每次连接前都在局域网里用 mDNS 寻找服务端（见 [`ferry_net::discovery`]），
-//! 对方换了 IP 也能找回来。
+//! 对方换了 IP 也能找回来。局域网里找不到时（有的网络不支持 mDNS），试已配对服务端上次连上时的地址。
+//! 用户也可以按地址连接一台服务端：只连这一次，不会把地址写死；连上之后断线重连时先试这个地址。
+//! 常驻后台还会在单独的端口上等服务端的邀请（见 [`crate::invite`]），收到就去连发邀请的那台。
 
 use std::convert::Infallible;
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -25,6 +27,7 @@ use ferry_proto::{Capabilities, Channel, Hello, Message, RejectReason};
 use ferry_store::Store;
 use ferry_trust::{Fingerprint, Peer};
 use ferry_types::{DeviceSettings, Display, InputEvent, LockKeys, Point, Side};
+use tokio::net::TcpListener;
 use tokio::sync::{mpsc, watch};
 use tokio::time::{MissedTickBehavior, interval, sleep, timeout};
 use tracing::{debug, info, warn};
@@ -32,11 +35,12 @@ use tracing::{debug, info, warn};
 use crate::clipboard::{self, ClipLimit, ClipboardTask, Reporter, SharedClipboard, Start};
 use crate::edge_drop::{Edge, EdgeFeed, gone};
 use crate::error::{Error, Result};
-use crate::events::{Event, Events, FoundServer};
+use crate::events::{DialError, Event, Events, FoundServer};
 use crate::files::{FileLink, Files, Opener};
+use crate::invite::{self, Invitation};
 use crate::link::{
-    CONNECT_TIMEOUT, DISPLAY_CHECK, HANDSHAKE_TIMEOUT, capabilities, frame_of, platform_of,
-    primary_scale, send,
+    CONNECT_TIMEOUT, DEFAULT_PORT, DISPLAY_CHECK, HANDSHAKE_TIMEOUT, capabilities, frame_of,
+    platform_of, primary_scale, send,
 };
 use crate::pairing::{self, ConfirmPairing, Outcome};
 
@@ -56,6 +60,8 @@ const RTT_INTERVAL: Duration = Duration::from_secs(1);
 pub enum ClientCommand {
     /// 请服务端打开它的设置界面，翻到本机的设置页。结果以 [`Event::PeerSettings`] 报告。
     OpenPeerSettings,
+    /// 按地址连接一台服务端：立即去连（正连着别的服务端时先断开），结果以 [`Event::Dialed`] 报告。
+    Connect(SocketAddr),
 }
 
 /// 服务端在哪里。
@@ -89,6 +95,9 @@ pub struct ClientConfig {
     pub devices: Vec<DeviceSettings>,
     /// 常驻后台的命令；命令行模式为 `None`。
     pub commands: Option<mpsc::UnboundedReceiver<ClientCommand>>,
+    /// 在这个端口上等服务端的邀请（0 由系统分配，实际端口以 [`Event::InviteListening`] 报告）；
+    /// `None` 表示不等邀请（命令行模式）。
+    pub invite_port: Option<u16>,
 }
 
 /// 运行客户端：连接服务端，断开后自动重连。
@@ -115,8 +124,37 @@ where
     };
     let identity = config.store.identity(&config.name)?;
     info!(fingerprint = %identity.fingerprint(), "本机身份");
+    let tls = Tls::new(&identity)?;
+    // 等邀请。端口被占用等原因开不了时只是不能被邀请，照常连接。
+    let current = Arc::new(Mutex::new(None));
+    let (invitations_tx, mut invitations) = mpsc::unbounded_channel();
+    let _invite_task = match config.invite_port {
+        Some(port) => match TcpListener::bind((Ipv4Addr::UNSPECIFIED, port)).await {
+            Ok(listener) => {
+                if let Ok(local) = listener.local_addr() {
+                    info!(port = local.port(), "等待服务端的邀请");
+                    config
+                        .events
+                        .emit(Event::InviteListening { port: local.port() });
+                }
+                Some(AbortOnDrop(tokio::spawn(invite::listen(
+                    listener,
+                    tls.clone(),
+                    config.name.clone(),
+                    current.clone(),
+                    invitations_tx,
+                ))))
+            }
+            Err(e) => {
+                warn!("无法在端口 {port} 上等待邀请：{e}");
+                None
+            }
+        },
+        None => None,
+    };
     let mut client = Client {
-        tls: Tls::new(&identity)?,
+        tls,
+        current,
         fingerprint: identity.fingerprint(),
         confirm,
         repair: false,
@@ -137,18 +175,48 @@ where
     };
     let mut searching = false;
     let mut seen = Vec::new();
+    // 轮流试已配对服务端上次连上时的地址。
+    let mut rotation = 0;
+    // 用户要求的下一次连接。
+    let mut next: Option<Target> = None;
+    // 用户按地址连上过的服务端：之后断线重连（包括刚配对完）先试它，连不上再回到局域网里找。
+    let mut sticky: Option<SocketAddr> = None;
     loop {
-        let target = match locate(&finder, &config, &mut searching, &mut seen).await {
-            Ok(Some(target)) => target,
-            Ok(None) => continue,
-            Err(e @ Error::AmbiguousServers(_)) => return Err(e),
-            Err(e) => {
-                warn!("{e}");
-                sleep(RETRY_DELAY).await;
-                continue;
+        let target = if let Some(target) = next.take() {
+            target
+        } else if let Some(addr) = sticky {
+            Target {
+                addrs: vec![addr],
+                expected: None,
+                via: Via::Sticky,
+            }
+        } else {
+            let found = tokio::select! {
+                found = locate(&finder, &config, &mut searching, &mut seen, &mut rotation) => found,
+                Some(command) = next_command(&mut client.commands) => {
+                    next = requested(command);
+                    continue;
+                }
+                Some(invitation) = invitations.recv() => {
+                    next = Some(Target::invited(invitation));
+                    continue;
+                }
+            };
+            match found {
+                Ok(Some(target)) => target,
+                Ok(None) => continue,
+                Err(e @ Error::AmbiguousServers(_)) => return Err(e),
+                Err(e) => {
+                    warn!("{e}");
+                    sleep(RETRY_DELAY).await;
+                    continue;
+                }
             }
         };
+        let via = target.via;
         let result = client.session(&config, &displays, &target).await;
+        *lock(&client.current) = None;
+        let ok = result.is_ok();
         client.peer_side = None;
         client.edge.reset();
         client.release_all();
@@ -162,20 +230,85 @@ where
         }
         match result {
             // 刚配对完，立即用新的信任关系重连。
-            Ok(Ended::Paired) => continue,
+            Ok(Ended::Paired) => {
+                if matches!(via, Via::Requested | Via::Invited) {
+                    sticky = target.addrs.first().copied();
+                }
+                continue;
+            }
+            Ok(Ended::Switch(addr)) => {
+                next = Some(Target::requested(addr));
+                continue;
+            }
             Ok(Ended::Session) => info!("连接已结束"),
             Err(e @ Error::PairingRejected) => return Err(e),
+            // 试上次的地址没连上是常事，不算故障。
+            Err(e) if via == Via::Remembered => debug!("上次的地址连不上：{e}"),
             Err(e) => warn!("连接中断：{e}"),
         }
-        sleep(RETRY_DELAY).await;
+        // 按地址连上过的（或者应邀连上的），之后先试它；连它失败了就回到局域网里找。
+        match (via, ok) {
+            (Via::Requested | Via::Invited, true) => sticky = target.addrs.first().copied(),
+            (Via::Sticky, false) => sticky = None,
+            _ => {}
+        }
+        // 等一会儿再连；其间用户要求按地址连接、或者收到邀请，就立即去连。
+        tokio::select! {
+            _ = sleep(RETRY_DELAY) => {}
+            Some(command) = next_command(&mut client.commands) => next = requested(command),
+            Some(invitation) = invitations.recv() => next = Some(Target::invited(invitation)),
+        }
+    }
+}
+
+/// 不在会话中时收到的命令：按地址连接就是下一次要连的；其余的只在会话中才有意义。
+fn requested(command: ClientCommand) -> Option<Target> {
+    match command {
+        ClientCommand::Connect(addr) => Some(Target::requested(addr)),
+        ClientCommand::OpenPeerSettings => None,
     }
 }
 
 /// 这一次要连的服务端。
 struct Target {
     addrs: Vec<SocketAddr>,
-    /// 局域网广播中对方自称的指纹，连上后必须与证书一致。
+    /// 局域网广播中对方自称的指纹（或者上次连上时的指纹），连上后必须与证书一致。
     expected: Option<Fingerprint>,
+    via: Via,
+}
+
+impl Target {
+    fn requested(addr: SocketAddr) -> Self {
+        Self {
+            addrs: vec![addr],
+            expected: None,
+            via: Via::Requested,
+        }
+    }
+
+    /// 应邀去连：连上的必须是发邀请的那台。
+    fn invited(invitation: Invitation) -> Self {
+        Self {
+            addrs: vec![invitation.addr],
+            expected: Some(invitation.peer),
+            via: Via::Invited,
+        }
+    }
+}
+
+/// 这一次要连的服务端是怎么来的。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Via {
+    /// 局域网里找到的，或者设置里固定的地址。
+    Found,
+    /// 局域网里找不到，试已配对服务端上次连上时的地址。连不上不算故障，也不显示“正在连接”。
+    Remembered,
+    /// 用户按地址连接：结果报告给用户。
+    Requested,
+    /// 用户按地址连上过的那台，断线后先试它。
+    Sticky,
+    /// 服务端邀请本机连过去。结果由服务端告诉它的用户。
+    Invited,
 }
 
 /// 找服务端的方式。
@@ -193,6 +326,7 @@ async fn locate(
     config: &ClientConfig,
     searching: &mut bool,
     seen: &mut Vec<FoundServer>,
+    rotation: &mut usize,
 ) -> Result<Option<Target>> {
     let store = &config.store;
     let browser = match finder {
@@ -201,6 +335,7 @@ async fn locate(
             return Ok(Some(Target {
                 addrs: vec![*addr],
                 expected: None,
+                via: Via::Found,
             }));
         }
         Finder::Discover(browser) => browser,
@@ -229,6 +364,7 @@ async fn locate(
                 return Ok(Some(Target {
                     addrs: server.addrs,
                     expected: Some(server.fingerprint),
+                    via: Via::Found,
                 }));
             }
             Lookup::Nothing { others } if Instant::now() >= deadline => {
@@ -255,10 +391,34 @@ async fn locate(
                         }
                     }
                 }
+                // 局域网里找不到（有的网络不支持 mDNS）：轮流试已配对服务端上次连上时的地址。
+                let remembered: Vec<(Fingerprint, SocketAddr)> = peers
+                    .iter()
+                    .filter_map(|p| p.addr.map(|addr| (p.fingerprint, with_port(addr))))
+                    .collect();
+                if !remembered.is_empty() {
+                    let (fingerprint, addr) = remembered[*rotation % remembered.len()];
+                    *rotation = rotation.wrapping_add(1);
+                    debug!(%addr, "局域网里找不到，试上次连上时的地址");
+                    return Ok(Some(Target {
+                        addrs: vec![addr],
+                        expected: Some(fingerprint),
+                        via: Via::Remembered,
+                    }));
+                }
                 return Ok(None);
             }
             Lookup::Nothing { .. } => sleep(Duration::from_millis(200)).await,
         }
+    }
+}
+
+/// 只知道 IP、不知道端口的地址用默认端口。
+fn with_port(addr: SocketAddr) -> SocketAddr {
+    if addr.port() == 0 {
+        SocketAddr::new(addr.ip(), DEFAULT_PORT)
+    } else {
+        addr
     }
 }
 
@@ -287,10 +447,14 @@ async fn connect_any(
 enum Ended {
     Session,
     Paired,
+    /// 用户要求改连另一个地址。
+    Switch(SocketAddr),
 }
 
 struct Client<I: InputInject, K, P> {
     tls: Tls,
+    /// 此刻连着的服务端，等邀请的任务据此判断忙不忙。
+    current: Arc<Mutex<Option<Fingerprint>>>,
     fingerprint: Fingerprint,
     confirm: P,
     /// 服务端说不认识本机：即使本机信任它，下次也要重新配对。
@@ -338,16 +502,37 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
         displays: &D,
         target: &Target,
     ) -> Result<Ended> {
-        if let Some(&addr) = target.addrs.first() {
+        let requested = target.via == Via::Requested;
+        // 用户按地址连接时，把结果告诉用户。
+        let report = |error: Option<DialError>| {
+            if let (true, Some(&addr)) = (requested, target.addrs.first()) {
+                self.events.emit(Event::Dialed {
+                    address: addr.to_string(),
+                    invite: false,
+                    error,
+                });
+            }
+        };
+        if target.via != Via::Remembered
+            && let Some(&addr) = target.addrs.first()
+        {
             self.events.emit(Event::Connecting { addr });
         }
         let (mut framed, server, addr) =
-            connect_any(&self.tls, &target.addrs, Channel::Input).await?;
+            match connect_any(&self.tls, &target.addrs, Channel::Input).await {
+                Ok(connected) => connected,
+                Err(e) => {
+                    report(Some(DialError::of(&e)));
+                    return Err(e);
+                }
+            };
         if target.expected.is_some_and(|expected| expected != server) {
             return Err(Error::AdvertisedMismatch);
         }
         if self.repair || !config.store.peers()?.contains(&server) {
             drop(framed);
+            // 连上了，接下来两边核对配对码。
+            report(None);
             self.pair(config, addr, server).await?;
             self.repair = false;
             return Ok(Ended::Paired);
@@ -364,19 +549,34 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
         let hello = Hello::new(Channel::Input, caps, 0, config.name.clone());
         let welcome =
             match timeout(HANDSHAKE_TIMEOUT, ferry_net::initiate(&mut framed, hello)).await {
-                Err(_) => return Err(Error::Timeout("握手")),
+                Err(_) => {
+                    report(Some(DialError::Unreachable));
+                    return Err(Error::Timeout("握手"));
+                }
                 Ok(Err(ferry_net::Error::Rejected(r))) if r.reason == RejectReason::NOT_PAIRED => {
                     warn!("服务端不再信任本机（可能删除了配对记录），将重新配对");
                     self.repair = true;
+                    report(None);
                     return Ok(Ended::Paired);
                 }
-                Ok(result) => result?,
+                Ok(Err(e)) => {
+                    let e = Error::from(e);
+                    report(Some(DialError::of(&e)));
+                    return Err(e);
+                }
+                Ok(Ok(welcome)) => welcome,
             };
+        report(None);
+        // 记下这次连上的地址：以后局域网里找不到它时用。记不下来只是少一个兜底。
+        if let Err(e) = crate::server::remember_addr(&config.store, server, addr) {
+            warn!("记下服务端的地址失败：{e}");
+        }
         let mut screens = displays.displays()?;
         send(&mut framed, &Message::Displays(screens.clone())).await?;
         info!(server = %welcome.name, fingerprint = %server, "已连接，等待光标进入");
         self.in_session = true;
         self.server = Some(server);
+        *lock(&self.current) = Some(server);
         // 刚连上时光标在服务端屏幕上。
         self.hide_cursor(true);
         // 本机是 Mac 时看得出对方是不是 Mac：交集里有 COMMAND_KEY 说明两边都是。
@@ -448,6 +648,18 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                                 send(&mut framed, &Message::OpenSettings).await?;
                             }
                             self.events.emit(Event::PeerSettings { peer: server, sent });
+                        }
+                        // 已经连着这个地址：就算成了。
+                        ClientCommand::Connect(to) if to == addr => {
+                            self.events.emit(Event::Dialed {
+                                address: to.to_string(),
+                                invite: false,
+                                error: None,
+                            });
+                        }
+                        ClientCommand::Connect(to) => {
+                            info!(%to, "按用户要求改连另一台服务端");
+                            return Ok(Ended::Switch(to));
                         }
                     }
                     continue;
@@ -575,6 +787,7 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                 peers.add(Peer {
                     name: name.clone(),
                     fingerprint: server,
+                    addr: Some(addr),
                 });
                 config.store.save_peers(&peers)?;
                 info!(server = %name, "配对成功，已记住这台设备");
@@ -743,5 +956,18 @@ async fn next_command(
     match commands {
         Some(commands) => commands.recv().await,
         None => std::future::pending().await,
+    }
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// 丢弃即停止的后台任务。
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
     }
 }

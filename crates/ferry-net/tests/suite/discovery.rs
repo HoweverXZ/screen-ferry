@@ -14,10 +14,7 @@ fn server(name: &str, seed: u8) -> Discovered {
 fn trusting(seeds: &[u8]) -> PeerList {
     seeds
         .iter()
-        .map(|&seed| Peer {
-            name: format!("设备 {seed}"),
-            fingerprint: Fingerprint::from_bytes([seed; 32]),
-        })
+        .map(|&seed| Peer::new(format!("设备 {seed}"), Fingerprint::from_bytes([seed; 32])))
         .collect()
 }
 

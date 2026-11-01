@@ -7,7 +7,7 @@ import 'dart:io';
 String? daemonLocation([String? executable]) {
   final exe = executable ?? Platform.resolvedExecutable;
   if (Platform.isMacOS || executable != null && exe.startsWith('/')) {
-    // …/ScreenFerry.app/Contents/Helpers/ScreenFerry Settings.app/Contents/MacOS/ScreenFerry
+    // …/ScreenFerry.app/Contents/Helpers/ScreenFerry.app/Contents/MacOS/ScreenFerry
     final parts = exe.split('/');
     final helpers = parts.lastIndexOf('Helpers');
     if (helpers < 2 || parts[helpers - 1] != 'Contents') return null;

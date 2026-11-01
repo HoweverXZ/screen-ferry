@@ -7,7 +7,7 @@
 //! ├─ Info.plist                      packaging/macos/Info.plist，填入版本号
 //! ├─ MacOS/screenferry               后台（主程序，不在程序坞里显示）
 //! ├─ Resources/AppIcon.icns          取自设置界面
-//! └─ Helpers/ScreenFerry Settings.app  Flutter 设置界面
+//! └─ Helpers/ScreenFerry.app      Flutter 设置界面（和外层同名：程序坞里显示的就是软件名）
 //! ```
 //!
 //! 签名：环境变量 `SCREENFERRY_SIGN_IDENTITY` 指定的证书优先，其次钥匙串里第一张
@@ -28,6 +28,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 type Result<T = ()> = std::result::Result<T, String>;
+
+/// 设置界面在应用里的位置。和外层同名，程序坞、切换器里显示的都是软件名。
+const HELPER: &str = "Helpers/ScreenFerry.app";
+/// 系统登记应用的工具，不在 PATH 里。
+const LSREGISTER: &str = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
 
 pub(crate) fn run() -> Result {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -111,10 +116,7 @@ fn macos(root: &Path) -> Result {
         "ditto",
         &[
             settings.to_str().ok_or("路径不是 UTF-8")?,
-            contents
-                .join("Helpers/ScreenFerry Settings.app")
-                .to_str()
-                .ok_or("路径不是 UTF-8")?,
+            contents.join(HELPER).to_str().ok_or("路径不是 UTF-8")?,
         ],
     )?;
 
@@ -133,7 +135,7 @@ fn macos(root: &Path) -> Result {
         &["--options", "runtime"]
     };
     // Flutter 产物里的 App.framework 签名后又被改过，严格校验通不过；先整体重签内层的设置界面。
-    let helper = contents.join("Helpers/ScreenFerry Settings.app");
+    let helper = contents.join(HELPER);
     let mut args = vec!["--force", "--deep", "--sign", identity.as_str()];
     args.extend_from_slice(runtime);
     args.push(helper.to_str().ok_or("路径不是 UTF-8")?);
@@ -160,6 +162,8 @@ fn macos(root: &Path) -> Result {
         ],
     )?;
 
+    refresh_icons(&root, &[&bundle, &helper]);
+
     println!("\n✓ {}", bundle.display());
     println!("  打开：open \"{}\"", bundle.display());
     println!("  安装：拖到“应用程序”文件夹。首次运行需要在系统设置里允许它控制键盘和鼠标。");
@@ -167,6 +171,19 @@ fn macos(root: &Path) -> Result {
         println!("        临时签名的应用每次重新打包后，可能要在“辅助功能”里关掉再打开一次。");
     }
     Ok(())
+}
+
+/// 访达和程序坞按路径缓存应用图标，原地重新打包后还显示旧图标。碰一下修改时间、重新登记，
+/// 让它们重新读。做不到不影响打包。
+fn refresh_icons(root: &Path, apps: &[&Path]) {
+    for app in apps {
+        let Some(path) = app.to_str() else { continue };
+        if run_in(root, "touch", &[path]).is_err()
+            || run_in(root, LSREGISTER, &["-f", path]).is_err()
+        {
+            eprintln!("提示：没能刷新 {path} 的图标缓存，可能要重新登录才显示新图标");
+        }
+    }
 }
 
 /// 选签名证书：环境变量指定的优先，其次钥匙串里第一张 Developer ID Application 证书，

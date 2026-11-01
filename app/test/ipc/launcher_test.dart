@@ -9,7 +9,7 @@ void main() {
   setUp(() => root = Directory.systemTemp.createTempSync('sf-launcher-'));
   tearDown(() => root.deleteSync(recursive: true));
 
-  String settingsExe(String app) => '$app/Contents/Helpers/ScreenFerry Settings.app/Contents/MacOS/ScreenFerry';
+  String settingsExe(String app) => '$app/Contents/Helpers/ScreenFerry.app/Contents/MacOS/ScreenFerry';
 
   test('装在 ScreenFerry.app 里时找到外层应用', () {
     final app = '${root.path}/ScreenFerry.app';

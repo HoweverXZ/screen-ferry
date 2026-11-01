@@ -5,15 +5,20 @@
 //!
 //! 后台是控制台程序，从资源管理器双击或登录时启动会带出一个黑色的控制台窗口；
 //! 创建事件循环时，如果这个控制台只属于本进程，就把它关掉。从终端运行时不受影响。
+//! 关掉之后原来的标准输入输出句柄就失效了，一并清空：启动子进程时默认要复制这几个句柄，
+//! 复制失效的句柄会让启动失败（设置界面打不开就是这个原因）。
 
 use ferry_platform::{Dispatcher, Error, EventLoop, MainTask, Result};
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
-use windows::Win32::System::Console::{FreeConsole, GetConsoleProcessList};
+use windows::Win32::Foundation::{HANDLE, HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::System::Console::{
+    FreeConsole, GetConsoleProcessList, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+    SetStdHandle,
+};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, HWND_MESSAGE, MSG,
-    PostMessageW, RegisterClassW, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP,
-    WNDCLASSW,
+    ASFW_ANY, AllowSetForegroundWindow, CreateWindowExW, DefWindowProcW, DispatchMessageW,
+    GetMessageW, HWND_MESSAGE, MSG, PostMessageW, RegisterClassW, TranslateMessage,
+    WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WNDCLASSW,
 };
 use windows::core::w;
 
@@ -119,9 +124,24 @@ fn detach_own_console() {
     // SAFETY: 缓冲区有效；返回值是连在这个控制台上的进程数。
     let attached = unsafe { GetConsoleProcessList(&mut processes) };
     if attached == 1 {
-        // SAFETY: 只是与控制台断开，之后写到标准输出的内容被丢弃（日志写到文件）。
-        let _ = unsafe { FreeConsole() };
+        // SAFETY: 只是与控制台断开，之后写到标准输出的内容被丢弃（日志写到文件）；
+        // 失效的句柄换成空句柄，子进程就不会继承到坏句柄。
+        unsafe {
+            let _ = FreeConsole();
+            for which in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+                let _ = SetStdHandle(which, HANDLE::default());
+            }
+        }
     }
+}
+
+/// 允许接下来启动的程序把自己的窗口放到最前面。
+///
+/// 从后台进程启动的窗口默认抢不到前台，只会在任务栏上闪一下。用户刚点过托盘时本进程有前台权限，
+/// 在启动设置界面之前把这个权限让出去。
+pub fn allow_foreground() {
+    // SAFETY: 简单的系统调用；没有权限时失败，不影响什么。
+    let _ = unsafe { AllowSetForegroundWindow(ASFW_ANY) };
 }
 
 fn os(call: &'static str, e: windows::core::Error) -> Error {

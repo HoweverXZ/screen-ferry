@@ -16,18 +16,33 @@ fn settings_app(candidates: &[PathBuf]) -> Option<PathBuf> {
 
 /// 登录时执行的命令：本程序加上 `--autostart`。
 fn autostart_command() -> Option<Vec<String>> {
-    let exe = std::env::current_exe().ok()?.canonicalize().ok()?;
+    let exe = exe_path()?;
     Some(vec![exe.display().to_string(), "--autostart".into()])
 }
 
 /// 可执行文件所在的目录。
 fn exe_dir() -> Option<PathBuf> {
-    std::env::current_exe()
-        .ok()?
-        .canonicalize()
-        .ok()?
-        .parent()
-        .map(PathBuf::from)
+    exe_path()?.parent().map(PathBuf::from)
+}
+
+/// 本程序的完整路径。
+fn exe_path() -> Option<PathBuf> {
+    Some(plain_path(
+        std::env::current_exe().ok()?.canonicalize().ok()?,
+    ))
+}
+
+/// Windows 上 `canonicalize` 得到的是 `\\?\C:\…` 这种扩展长度路径，写进注册表的启动项、
+/// 交给别的程序都可能认不出来，去掉这个前缀。其他系统上原样返回。
+fn plain_path(path: PathBuf) -> PathBuf {
+    let text = path.to_string_lossy();
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    if let Some(rest) = text.strip_prefix(r"\\?\") {
+        return PathBuf::from(rest);
+    }
+    path
 }
 
 #[cfg(target_os = "macos")]
@@ -136,7 +151,7 @@ mod mac {
                 .map(|dir| {
                     vec![
                         // 安装包：ScreenFerry.app/Contents/MacOS/screenferry 旁边的 Helpers。
-                        dir.join("../Helpers/ScreenFerry Settings.app"),
+                        dir.join("../Helpers/ScreenFerry.app"),
                         // 开发：target/<profile>/screenferry 与 app/ 的构建产物。
                         dir.join("../../app/build/macos/Build/Products/Release/ScreenFerry.app"),
                         dir.join("../../app/build/macos/Build/Products/Debug/ScreenFerry.app"),
@@ -173,7 +188,7 @@ pub(crate) use win::NativeHost;
 
 #[cfg(target_os = "windows")]
 mod win {
-    use std::process::Command;
+    use std::process::{Command, Stdio};
 
     use ferry_engine::resident::Host;
     use ferry_platform::{Autostart, Error, Permissions, Result};
@@ -181,7 +196,7 @@ mod win {
         WinAutostart, WinCapture, WinClipboard, WinDisplays, WinInject, WinOverlay, WinPermissions,
     };
     use ferry_types::Role;
-    use tracing::warn;
+    use tracing::{info, warn};
 
     use super::{autostart_command, exe_dir, settings_app};
 
@@ -253,16 +268,27 @@ mod win {
 
         fn open_settings(&self) {
             // 安装目录：screenferry.exe 旁边的 settings\screenferry_settings.exe。
+            // 设置界面自己保证只开一个窗口：已经开着时，新启动的那个把旧窗口带到最前面就退出。
             let candidates: Vec<_> = exe_dir()
                 .map(|dir| vec![dir.join("settings").join("screenferry_settings.exe")])
                 .unwrap_or_default();
-            match settings_app(&candidates) {
-                Some(exe) => {
-                    if let Err(e) = Command::new(exe).spawn() {
-                        warn!("打开设置界面失败：{e}");
-                    }
-                }
-                None => warn!("找不到设置界面，可以用环境变量 SCREENFERRY_SETTINGS_APP 指定"),
+            let Some(exe) = settings_app(&candidates) else {
+                warn!("找不到设置界面，可以用环境变量 SCREENFERRY_SETTINGS_APP 指定");
+                return;
+            };
+            info!(path = %exe.display(), "打开设置界面");
+            ferry_platform_windows::allow_foreground();
+            let mut command = Command::new(&exe);
+            // 后台已经没有控制台，标准输入输出都不交给它；工作目录设为它自己所在的目录。
+            command
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+            if let Some(dir) = exe.parent() {
+                command.current_dir(dir);
+            }
+            if let Err(e) = command.spawn() {
+                warn!("打开设置界面失败：{e}");
             }
         }
 

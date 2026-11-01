@@ -77,7 +77,7 @@ thread_local! {
 pub(crate) fn install(handle: Handle) -> Result<(), Box<dyn std::error::Error>> {
     let status = MenuItem::new("正在启动…", false, None);
     let toggle = MenuItem::with_id(TOGGLE, "暂停共享", true, None);
-    let open = MenuItem::with_id(OPEN, "打开设置…", true, None);
+    let open = MenuItem::with_id(OPEN, "打开设置", true, None);
     let quit = MenuItem::with_id(QUIT, "退出 ScreenFerry", true, None);
     let menu = Menu::new();
     menu.append_items(&[

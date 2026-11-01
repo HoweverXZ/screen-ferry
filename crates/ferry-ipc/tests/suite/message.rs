@@ -6,9 +6,9 @@
 use std::path::PathBuf;
 
 use ferry_ipc::{
-    ClipboardSync, FoundDevice, HourActivity, Link, LinkStatus, Local, LogEntry, LogIcon, LogKind,
-    Notice, PairingPrompt, PeerInfo, PeerRef, Problem, ProblemKind, Request, Settings,
-    SettingsPatch, State, VERSION,
+    ClipboardImage, ClipboardSync, FoundDevice, HourActivity, Link, LinkStatus, Local, LogEntry,
+    LogIcon, LogKind, Notice, PairingPrompt, PeerInfo, PeerRef, Problem, ProblemKind, Request,
+    Settings, SettingsPatch, State, VERSION,
 };
 use ferry_types::{Placement, Role, Side, Theme};
 use serde_json::{Value, json};
@@ -32,6 +32,7 @@ fn requests() -> Vec<Request> {
                 side: Some(Side::Left),
                 autostart: Some(true),
                 theme: Some(Theme::Light),
+                clipboard_limit_mb: Some(16),
                 ..SettingsPatch::default()
             },
         },
@@ -115,6 +116,14 @@ fn state() -> State {
             chars: Some(31),
             bytes: 93,
             preview: "周三例会纪要".into(),
+            rich: true,
+            image: Some(ClipboardImage {
+                width: 1920,
+                height: 1080,
+                path: Some(
+                    "/Users/me/Library/Application Support/ScreenFerry/blobs/ab/cdef".into(),
+                ),
+            }),
             at: 1_793_480_100_000,
         }),
         peers: vec![PeerInfo {
@@ -143,6 +152,7 @@ fn state() -> State {
             swap_cmd_ctrl: true,
             announce: true,
             clipboard: true,
+            clipboard_limit_mb: 32,
             server: String::new(),
             autostart: false,
             theme: Theme::Dark,

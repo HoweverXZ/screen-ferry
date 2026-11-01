@@ -28,7 +28,7 @@ use tokio::sync::watch;
 use tokio::time::{MissedTickBehavior, interval, sleep, timeout};
 use tracing::{debug, info, warn};
 
-use crate::clipboard::{self, ClipboardTask, Reporter, SharedClipboard, Start};
+use crate::clipboard::{self, ClipLimit, ClipboardTask, Reporter, SharedClipboard, Start};
 use crate::edge_drop::{Edge, EdgeFeed, gone};
 use crate::error::{Error, Result};
 use crate::events::{Event, Events, FoundServer};
@@ -64,6 +64,8 @@ pub struct ClientConfig {
     pub name: String,
     /// 是否同步剪贴板。
     pub clipboard: bool,
+    /// 剪贴板单项的大小上限，会话中途也能改。
+    pub clipboard_limit: ClipLimit,
     /// 本机的快捷键以 Command 键为主（macOS）。告诉服务端，由它决定要不要互换 Command 与 Ctrl。
     pub command_key: bool,
     /// 数据目录：本机身份和已信任的设备。
@@ -111,6 +113,7 @@ where
         pressed: Pressed::new(),
         cursor: Point::default(),
         events: config.events.clone(),
+        clip_limit: config.clipboard_limit.clone(),
         in_session: false,
         cursor_hidden: false,
         edge: config.edge.clone(),
@@ -284,6 +287,7 @@ struct Client<I: InputInject, K, P> {
     pressed: Pressed,
     cursor: Point,
     events: Events,
+    clip_limit: ClipLimit,
     /// 已建立会话、还没报告断开。
     in_session: bool,
     /// 本机光标是否被隐藏（光标在服务端屏幕上）。
@@ -558,6 +562,7 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
         let report = Reporter {
             peer: server,
             events: self.events.clone(),
+            limit: self.clip_limit.clone(),
         };
         clipboard::spawn(
             data,

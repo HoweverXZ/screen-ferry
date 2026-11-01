@@ -120,6 +120,15 @@
     握手能力新增 `COMMAND_KEY`（位 4），服务端看客户端自己声明的这一位决定；旧版客户端不声明，都是 Windows，行为不变。
   - 本机通信：`local.platform`（本机系统）、`update_settings` 可带 `role`；界面的图标、“⌘ 当作 Ctrl”（Windows 上是“Ctrl 当作 ⌘”）
     和回到本机的快捷键按本机系统显示。
+- 剪贴板同步图片和带格式的文字（ADR 0008）：
+  - 文字、HTML、RTF、图片都会同步：截图、网页里的图片复制过去就能粘贴，网页和文档里复制的内容保留粗体、链接等格式。
+  - Mac：只有 TIFF 时转成 PNG；在访达里复制文件时不把文件图标当成图片。Windows：读 `PNG` 注册格式或把 `CF_DIB` 位图转成 PNG，
+    写入时同时放 PNG 和位图；`HTML Format` 的文字头自动拼装和解析。转换在 `ferry-core::clip_format`，任何系统上都能测。
+  - 单项大小上限可以在设置里调（1–64 MB，缺省 32），会话中途改也立即生效；超过上限的不同步，日志里写明。
+    配置升到 `schema_version = 3`，新增 `clipboard_limit_mb`，旧文件读进来即等价。
+  - 发送方把一种格式发完就放掉它，大图片不长期占着内存。
+  - 总览的剪贴板卡片显示图片的缩略图和尺寸，带格式的文字标明“带格式”；预览图片按内容哈希存在 `blobs/`，只留最近一张。
+  - 本机通信：`settings.clipboard_limit_mb`，`clipboard.rich`、`clipboard.image`。
 - Windows 托盘：左键直接打开设置界面，右键弹出菜单。
 - Windows 设置界面：
   - 新增 `app/windows` 宿主工程：去掉系统标题栏（保留左、右、下边框的拖动缩放、贴边分屏和窗口阴影），Windows 11 圆角，最小 375×667，默认 1160×780 居中。

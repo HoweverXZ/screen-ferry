@@ -33,7 +33,7 @@ use tokio::task::JoinHandle;
 use tokio::time::{MissedTickBehavior, interval, timeout};
 use tracing::{debug, info, warn};
 
-use crate::clipboard::{self, ClipboardTask, Reporter, SharedClipboard, Start};
+use crate::clipboard::{self, ClipLimit, ClipboardTask, Reporter, SharedClipboard, Start};
 use crate::edge_drop::{Edge, EdgeFeed, gone};
 use crate::error::{Error, Result};
 use crate::events::{Event, Events};
@@ -52,6 +52,8 @@ pub struct ServerConfig {
     pub name: String,
     /// 是否同步剪贴板。
     pub clipboard: bool,
+    /// 剪贴板单项的大小上限，会话中途也能改。
+    pub clipboard_limit: ClipLimit,
     /// 本机的快捷键以 Command 键为主（macOS）。客户端与本机不同时，按键才按 `Live::remap` 重映射。
     pub command_key: bool,
     /// 数据目录：本机身份和已信任的设备。
@@ -457,6 +459,7 @@ where
         let report = Reporter {
             peer: keys.peer,
             events: self.config.events.clone(),
+            limit: self.config.clipboard_limit.clone(),
         };
         let files = keys
             .files

@@ -212,6 +212,7 @@ name = "ferry-core"
 version = "0.1.0"
 dependencies = [
  "ferry-types",
+ "png",
 ]
 
 [[package]]
@@ -312,6 +313,7 @@ dependencies = [
 name = "ferry-platform-windows"
 version = "0.1.0"
 dependencies = [
+ "ferry-core",
  "ferry-platform",
  "ferry-types",
  "windows",
@@ -334,6 +336,7 @@ version = "0.1.0"
 dependencies = [
  "ferry-trust",
  "ferry-types",
+ "ring",
  "serde",
  "thiserror",
  "toml",

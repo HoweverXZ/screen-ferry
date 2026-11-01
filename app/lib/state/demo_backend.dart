@@ -19,17 +19,20 @@ class DemoBackend implements Backend {
     this.startOnline = true,
     bool paired = true,
     this._problem,
+    ClipboardSync? clipboard,
   }) : platform = platform ?? (role == Role.server ? 'macos' : 'windows') {
     final now = DateTime.now();
     _since = now.subtract(const Duration(hours: 1, minutes: 12, seconds: 14));
-    _clip = ClipboardSync(
-      toPeer: true,
-      peer: _peerName,
-      chars: 31,
-      bytes: 93,
-      preview: '周三例会纪要：确认屏幕布局、配对流程，以及剪贴板图片支持的排期。',
-      at: now.subtract(const Duration(seconds: 12)),
-    );
+    _clip =
+        clipboard ??
+        ClipboardSync(
+          toPeer: true,
+          peer: _peerName,
+          chars: 31,
+          bytes: 93,
+          preview: '周三例会纪要：确认屏幕布局、配对流程，以及剪贴板图片支持的排期。',
+          at: now.subtract(const Duration(seconds: 12)),
+        );
     if (role == Role.server) {
       if (paired) {
         // 办公室 PC 和书房 PC 在右侧（书房 PC 没有单独安排，跟着默认的一侧排在后面），笔记本在左侧。

@@ -69,6 +69,11 @@ void main() {
     expect(s.clipboard!.toPeer, isTrue);
     expect(s.clipboard!.chars, 31);
     expect(s.clipboard!.preview, '周三例会纪要');
+    expect(s.clipboard!.rich, isTrue);
+    expect(s.clipboard!.image!.width, 1920);
+    expect(s.clipboard!.image!.height, 1080);
+    expect(s.clipboard!.image!.path, endsWith('blobs/ab/cdef'));
+    expect(s.settings.clipboardLimitMb, 32);
     expect(s.peers.single.online, isTrue);
     expect(s.peers.single.lastSeen, isNull);
     expect(s.peers.single.side, ScreenSide.left);
@@ -108,7 +113,9 @@ void main() {
     final ours = <Request>[
       HelloRequest('ab' * 32),
       const SetSharingRequest(false),
-      const UpdateSettingsRequest(SettingsPatch(side: ScreenSide.left, autostart: true, theme: UiTheme.light)),
+      const UpdateSettingsRequest(
+        SettingsPatch(side: ScreenSide.left, autostart: true, theme: UiTheme.light, clipboardLimitMb: 16),
+      ),
       const UpdateSettingsRequest(
         SettingsPatch(layout: [Placement(pc, ScreenSide.left), Placement(mac, ScreenSide.right)]),
       ),

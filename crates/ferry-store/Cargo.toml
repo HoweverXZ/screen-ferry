@@ -12,6 +12,7 @@ test = false
 [dependencies]
 ferry-trust.workspace = true
 ferry-types.workspace = true
+ring.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 toml.workspace = true

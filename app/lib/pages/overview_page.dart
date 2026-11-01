@@ -1,5 +1,7 @@
 // 仪表盘：主卡（连接信息 + 花朵）、延迟、剪贴板、快捷开关、设备、今日。
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../state/app_scope.dart';
@@ -402,7 +404,19 @@ class _ClipboardCard extends StatelessWidget {
       );
     }
     final (from, to) = clip.toPeer ? ('本机', clip.peer) : (clip.peer, '本机');
-    final meta = clip.chars != null ? '文本 · ${clip.chars} 字' : sizeText(clip.bytes);
+    final image = clip.image;
+    final meta = switch ((image, clip.chars)) {
+      (final i?, _) => '图片 · ${i.width}×${i.height} · ${sizeText(clip.bytes)}',
+      (null, final n?) when clip.rich => '带格式的文本 · $n 字',
+      (null, final n?) => '文本 · $n 字',
+      _ => sizeText(clip.bytes),
+    };
+    final preview = Text(
+      clip.preview.isEmpty ? (image != null ? '一张图片' : '（不是文字）') : clip.preview,
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(fontSize: 15, height: 1.55, color: clip.preview.isEmpty ? c.muted : null),
+    );
     return SfCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -420,16 +434,53 @@ class _ClipboardCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
-          Text(
-            clip.preview.isEmpty ? '（不是纯文本）' : clip.preview,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 15, height: 1.55, color: clip.preview.isEmpty ? c.muted : null),
-          ),
+          if (image != null)
+            Row(
+              children: [
+                _Thumbnail(image),
+                const SizedBox(width: 12),
+                Expanded(child: preview),
+              ],
+            )
+          else
+            preview,
           const SizedBox(height: 8),
           Text(meta, style: TextStyle(fontSize: 14, color: c.muted)),
         ],
       ),
+    );
+  }
+}
+
+/// 剪贴板图片的缩略图：和两行文字一样高。预览文件不在了就画一个图片图标。
+class _Thumbnail extends StatelessWidget {
+  const _Thumbnail(this.image);
+
+  final ClipboardImage image;
+
+  static const _size = Size(72, 48);
+
+  @override
+  Widget build(BuildContext context) {
+    final c = SfColors.of(context);
+    final ratio = MediaQuery.devicePixelRatioOf(context);
+    final placeholder = Icon(Icons.image_outlined, size: 22, color: c.muted);
+    final path = image.path;
+    return Container(
+      width: _size.width,
+      height: _size.height,
+      clipBehavior: Clip.antiAlias,
+      decoration: ShapeDecoration(color: c.card2, shape: continuous(12)),
+      child: path == null
+          ? placeholder
+          : Image.file(
+              File(path),
+              fit: BoxFit.cover,
+              // 只按缩略图的大小解码，不把整张截图读进内存。
+              cacheWidth: (_size.width * ratio).round(),
+              errorBuilder: (_, _, _) => placeholder,
+              semanticLabel: '剪贴板图片 ${image.width}×${image.height}',
+            ),
     );
   }
 }

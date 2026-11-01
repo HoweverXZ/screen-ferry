@@ -10,8 +10,8 @@ use std::time::Duration;
 
 use ferry_core::{KeyRemap, Side};
 use ferry_engine::{
-    ClientConfig, ConfirmPairing, EdgeFeed, Error, Events, Files, Live, PairingRequest, ServerAddr,
-    ServerConfig, connect, serve,
+    ClientConfig, ClipLimit, ConfirmPairing, EdgeFeed, Error, Event, Events, Files, Live,
+    PairingRequest, ServerAddr, ServerConfig, connect, serve,
 };
 use ferry_platform::CaptureEvent;
 use ferry_platform_mock::{MockCapture, MockClipboard, MockDisplays, MockInject};
@@ -96,6 +96,9 @@ pub struct Setup {
     /// 两端的快捷键是否以 Command 为主；默认服务端是 Mac、客户端是 PC。
     pub mac_command_key: bool,
     pub pc_command_key: bool,
+    /// 两端的剪贴板单项上限；默认 32 MB。
+    pub mac_clip_limit: ClipLimit,
+    pub pc_clip_limit: ClipLimit,
 }
 
 impl Default for Setup {
@@ -118,6 +121,8 @@ impl Default for Setup {
             pc_files: None,
             mac_command_key: true,
             pc_command_key: false,
+            mac_clip_limit: ClipLimit::default(),
+            pc_clip_limit: ClipLimit::default(),
         }
     }
 }
@@ -211,6 +216,8 @@ impl Rig {
                 }),
                 name: "mac".into(),
                 clipboard: true,
+
+                clipboard_limit: setup.mac_clip_limit.clone(),
                 command_key: setup.mac_command_key,
                 store: setup.mac.store.clone(),
                 announce: setup.discover,
@@ -273,6 +280,8 @@ impl Rig {
             },
             name: "pc".into(),
             clipboard: true,
+
+            clipboard_limit: setup.pc_clip_limit.clone(),
             command_key: setup.pc_command_key,
             store: setup.pc.store.clone(),
             events: setup.pc_events.clone(),
@@ -386,6 +395,8 @@ impl Rig {
             server: ServerAddr::Fixed(self.addr),
             name: name.into(),
             clipboard: true,
+
+            clipboard_limit: Default::default(),
             command_key: false,
             store: device.store.clone(),
             events,
@@ -405,7 +416,7 @@ impl Rig {
         });
         let connected = async {
             while let Some(event) = rx.recv().await {
-                if matches!(event, ferry_engine::Event::Connected { .. }) {
+                if matches!(event, Event::Connected { .. }) {
                     return;
                 }
             }
@@ -480,4 +491,33 @@ impl Drop for TempDir {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
     }
+}
+
+/// 把事件收集到一个列表里，供断言。
+pub fn collect() -> (Events, Arc<Mutex<Vec<Event>>>) {
+    let (events, mut rx) = Events::channel();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    tokio::spawn({
+        let seen = seen.clone();
+        async move {
+            while let Some(event) = rx.recv().await {
+                seen.lock().unwrap().push(event);
+            }
+        }
+    });
+    (events, seen)
+}
+
+pub fn has(seen: &Mutex<Vec<Event>>, pred: impl Fn(&Event) -> bool) -> bool {
+    seen.lock().unwrap().iter().any(pred)
+}
+
+/// 一段只有文件头像 PNG 的数据，后面补 `padding` 个字节。读尺寸只看文件头，同步时原样传过去。
+pub fn fake_png(width: u32, height: u32, padding: usize) -> Vec<u8> {
+    let mut png = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13];
+    png.extend_from_slice(b"IHDR");
+    png.extend_from_slice(&width.to_be_bytes());
+    png.extend_from_slice(&height.to_be_bytes());
+    png.resize(png.len() + padding, 0xAB);
+    png
 }

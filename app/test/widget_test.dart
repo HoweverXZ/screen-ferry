@@ -395,6 +395,53 @@ void main() {
     final patch = backend.sent.whereType<UpdateSettingsRequest>().last.settings;
     expect(patch.toJson(), {'clipboard': false});
   });
+  testWidgets('拖动剪贴板上限滑块，松手才把新上限发给后台', (tester) async {
+    final backend = DemoBackend(animate: false);
+    final state = await launch(tester, const Size(1160, 780), backend: backend);
+    state.go(SfPage.settings);
+    await settle(tester);
+    expect(find.text('32 MB'), findsOneWidget);
+
+    final before = backend.sent.whereType<UpdateSettingsRequest>().length;
+    final slider = find.byType(Slider);
+    await tester.ensureVisible(slider);
+    await settle(tester);
+    // 拖到最左边：1 MB。
+    await tester.drag(slider, const Offset(-400, 0));
+    await settle(tester);
+    expect(find.text('1 MB'), findsOneWidget);
+    final sent = backend.sent.whereType<UpdateSettingsRequest>().toList();
+    expect(sent.length, before + 1, reason: '整个拖动只发一次');
+    expect(sent.last.settings.toJson(), {'clipboard_limit_mb': 1});
+    expect(state.settings.clipboardLimitMb, 1);
+  });
+
+  for (final (name, path) in [('有预览文件', '/Users/me/blobs/ab/cdef'), ('没能存下预览', null)]) {
+    testWidgets('同步过来的是图片时，总览显示图片的尺寸（$name）', (tester) async {
+      final backend = DemoBackend(
+        animate: false,
+        clipboard: ClipboardSync(
+          toPeer: false,
+          peer: '办公室 PC',
+          chars: null,
+          bytes: 2400000,
+          preview: '',
+          image: ClipboardImage(width: 1920, height: 1080, path: path),
+          at: DateTime.now(),
+        ),
+      );
+      await launch(tester, const Size(1160, 780), backend: backend);
+      await settle(tester);
+      expect(find.text('一张图片'), findsOneWidget);
+      expect(find.textContaining('图片 · 1920×1080'), findsOneWidget);
+      if (path == null) {
+        expect(find.byIcon(Icons.image_outlined), findsOneWidget, reason: '没有预览就画图片图标');
+      } else {
+        expect(find.bySemanticsLabel('剪贴板图片 1920×1080'), findsOneWidget);
+      }
+    });
+  }
+
   testWidgets('在设置里切换角色，把新角色发给后台', (tester) async {
     final backend = DemoBackend(animate: false);
     final state = await launch(tester, const Size(1160, 780), backend: backend);

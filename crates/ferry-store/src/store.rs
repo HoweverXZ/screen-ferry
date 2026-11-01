@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use ferry_trust::{Identity, PeerList};
 use ferry_types::Config;
+use ring::digest::{SHA256, digest};
 
 use crate::config;
 use crate::dirs::{default_cache_dir, default_data_dir, default_downloads_dir};
@@ -116,6 +117,44 @@ impl Store {
     /// 收完的文件放在哪里：本机的“下载”文件夹；用 `--data-dir` 打开时为其中的 `received/`。
     pub fn downloads_dir(&self) -> PathBuf {
         self.downloads.clone()
+    }
+
+    /// 按内容存一份图片或文件，返回它的路径：数据目录下的 `blobs/ab/cdef…`，名字是内容的 SHA-256。
+    /// 同样的内容只存一份。
+    pub fn put_blob(&self, data: &[u8]) -> Result<PathBuf> {
+        let hash = digest(&SHA256, data);
+        let hex: String = hash.as_ref().iter().map(|b| format!("{b:02x}")).collect();
+        let path = self.blobs_dir().join(&hex[..2]).join(&hex[2..]);
+        if !path.exists() {
+            file::write(&path, data)?;
+        }
+        Ok(path)
+    }
+
+    /// 删除 [`put_blob`](Self::put_blob) 存的一份。已经不在时什么也不做；`blobs/` 以外的路径不碰。
+    pub fn remove_blob(&self, path: &Path) -> Result<()> {
+        if !path.starts_with(self.blobs_dir()) {
+            return Ok(());
+        }
+        match fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(io(path, e)),
+        }
+    }
+
+    /// 清空 `blobs/`。剪贴板历史做好之前，这里只放最近一次剪贴板图片的预览，启动时清掉上次留下的。
+    pub fn clear_blobs(&self) -> Result<()> {
+        let dir = self.blobs_dir();
+        match fs::remove_dir_all(&dir) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(io(&dir, e)),
+        }
+    }
+
+    fn blobs_dir(&self) -> PathBuf {
+        self.root.join("blobs")
     }
 
     fn config_path(&self) -> PathBuf {

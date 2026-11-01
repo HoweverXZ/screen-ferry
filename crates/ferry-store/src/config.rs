@@ -20,6 +20,7 @@ pub(crate) fn parse(path: &Path, data: &[u8]) -> Result<Config> {
         });
     }
     // 版本 1 → 2：只新增了 `layout`（缺省为空），`side` 原样沿用，读进来就是等价的版本 2。
+    // 版本 2 → 3：只新增了 `clipboard_limit_mb`（缺省 32，与之前固定的上限相同），读进来即等价。
     Ok(Config {
         schema_version: Config::SCHEMA_VERSION,
         ..config

@@ -127,6 +127,8 @@ pub(crate) fn run(options: Options) -> ExitCode {
                         .fixed(),
                         name: options.name,
                         clipboard: options.clipboard,
+
+                        clipboard_limit: Default::default(),
                         command_key: uses_command_key(),
                         store,
                         announce,
@@ -141,6 +143,8 @@ pub(crate) fn run(options: Options) -> ExitCode {
                         server: server.map_or(ServerAddr::Discover, ServerAddr::Fixed),
                         name: options.name,
                         clipboard: options.clipboard,
+
+                        clipboard_limit: Default::default(),
                         command_key: uses_command_key(),
                         store,
                         events: Events::none(),

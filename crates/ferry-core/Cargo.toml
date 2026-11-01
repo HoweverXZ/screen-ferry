@@ -11,6 +11,7 @@ test = false
 
 [dependencies]
 ferry-types.workspace = true
+png.workspace = true
 
 [lints]
 workspace = true

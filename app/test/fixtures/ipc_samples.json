@@ -18,8 +18,14 @@
           "at": 1793480100000,
           "bytes": 93,
           "chars": 31,
+          "image": {
+            "height": 1080,
+            "path": "/Users/me/Library/Application Support/ScreenFerry/blobs/ab/cdef",
+            "width": 1920
+          },
           "peer": "办公室 PC",
           "preview": "周三例会纪要",
+          "rich": true,
           "to_peer": true
         },
         "found": [
@@ -74,6 +80,7 @@
           "announce": true,
           "autostart": false,
           "clipboard": true,
+          "clipboard_limit_mb": 32,
           "layout": [
             {
               "fingerprint": "3f9a12c477e0b1d2aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55",
@@ -147,6 +154,7 @@
           "announce": true,
           "autostart": false,
           "clipboard": true,
+          "clipboard_limit_mb": 32,
           "layout": [
             {
               "fingerprint": "3f9a12c477e0b1d2aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55",
@@ -219,6 +227,7 @@
     {
       "settings": {
         "autostart": true,
+        "clipboard_limit_mb": 16,
         "side": "left",
         "theme": "light"
       },

@@ -1,28 +1,7 @@
-use std::sync::{Arc, Mutex};
+use ferry_engine::{ClipSummary, Event};
+use ferry_types::{ClipboardContent, ClipboardFormat, KeyAction, KeyCode};
 
-use ferry_engine::{ClipSummary, Event, Events};
-use ferry_types::{ClipboardContent, KeyAction, KeyCode};
-
-use crate::support::{Rig, Setup, eventually};
-
-/// 把事件收集到一个列表里，供断言。
-fn collect() -> (Events, Arc<Mutex<Vec<Event>>>) {
-    let (events, mut rx) = Events::channel();
-    let seen = Arc::new(Mutex::new(Vec::new()));
-    tokio::spawn({
-        let seen = seen.clone();
-        async move {
-            while let Some(event) = rx.recv().await {
-                seen.lock().unwrap().push(event);
-            }
-        }
-    });
-    (events, seen)
-}
-
-fn has(seen: &Mutex<Vec<Event>>, pred: impl Fn(&Event) -> bool) -> bool {
-    seen.lock().unwrap().iter().any(pred)
-}
+use crate::support::{Rig, Setup, collect, eventually, fake_png, has};
 
 #[tokio::test]
 async fn a_session_reports_its_lifecycle_on_both_sides() {
@@ -148,4 +127,26 @@ fn clipboard_summary_counts_characters_and_flattens_the_preview() {
             .count(),
         80
     );
+}
+
+#[test]
+fn clipboard_summary_describes_images_and_rich_text() {
+    let mut content = ClipboardContent::text("标题");
+    content.insert(
+        ClipboardFormat::HTML,
+        b"<h1>\xe6\xa0\x87\xe9\xa2\x98</h1>".to_vec(),
+    );
+    content.insert(ClipboardFormat::PNG, fake_png(1920, 1080, 100));
+    let s = ClipSummary::of(&content);
+    assert!(s.rich);
+    let image = s.image.expect("有图片");
+    assert_eq!((image.width, image.height), (1920, 1080));
+    assert_eq!(image.png.len(), fake_png(1920, 1080, 100).len());
+    assert!(
+        format!("{image:?}").contains("1920×1080"),
+        "调试输出不打印整张图片"
+    );
+
+    let plain = ClipSummary::of(&ClipboardContent::text("x"));
+    assert!(!plain.rich && plain.image.is_none());
 }

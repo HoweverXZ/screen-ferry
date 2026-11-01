@@ -9,12 +9,13 @@ use std::time::{Duration, Instant};
 
 use ferry_core::KeyRemap;
 use ferry_ipc::{
-    ClipboardSync, FoundDevice, Link, LinkStatus, Local, LogIcon, LogKind, Notice, PairingPrompt,
-    PeerInfo, PeerRef, Problem, ProblemKind, Request, Settings, SettingsPatch, State,
+    ClipboardImage, ClipboardSync, FoundDevice, Link, LinkStatus, Local, LogIcon, LogKind, Notice,
+    PairingPrompt, PeerInfo, PeerRef, Problem, ProblemKind, Request, Settings, SettingsPatch,
+    State,
 };
 use ferry_store::Store;
 use ferry_trust::{Fingerprint, PeerList};
-use ferry_types::{Config, Role, Side, uses_command_key};
+use ferry_types::{ClipboardFormat, Config, Role, Side, uses_command_key};
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
@@ -25,6 +26,7 @@ use super::record::{Activity, Log, Rtt, now_ms};
 use super::ui::UiEvent;
 use super::{Command, Host, Summary};
 use crate::client::{ClientConfig, ServerAddr, connect};
+use crate::clipboard::ClipLimit;
 use crate::edge_drop::EdgeDrop;
 use crate::error::{Error, Result};
 use crate::events::{Event, Events, FoundServer, TransferState, TransferUpdate};
@@ -89,6 +91,10 @@ pub(crate) struct Runtime<H> {
     /// 摘要里的那台，也是 `send_files` 不指定时发给的那台：光标最近去过的，否则最近连上的。
     focus: Option<Fingerprint>,
     clipboard: Option<ClipboardSync>,
+    /// 剪贴板单项的大小上限，交给引擎共用，改设置时立即生效。
+    clip_limit: ClipLimit,
+    /// 最近一次同步的剪贴板图片存在磁盘上的那份，给设置界面预览。
+    clip_preview: Option<PathBuf>,
     peers: PeerList,
     peers_read: Instant,
     last_seen: HashMap<Fingerprint, i64>,
@@ -120,6 +126,11 @@ impl<H: Host> Runtime<H> {
         let autostart = host.autostart();
         let files = Files::new(&store, events.clone());
         let edge = EdgeDrop::spawn(host.overlay(), files.clone(), accent_color(config.accent));
+        let clip_limit = ClipLimit::new(config.clipboard_limit_bytes());
+        // 上次留下的剪贴板图片预览。
+        if let Err(e) = store.clear_blobs() {
+            warn!("清理上次的剪贴板预览失败：{e}");
+        }
         let mut runtime = Self {
             store,
             host,
@@ -140,6 +151,8 @@ impl<H: Host> Runtime<H> {
             cursor: None,
             focus: None,
             clipboard: None,
+            clip_limit,
+            clip_preview: None,
             peers,
             peers_read: Instant::now(),
             last_seen: HashMap::new(),
@@ -202,6 +215,7 @@ impl<H: Host> Runtime<H> {
             live: live_rx,
             name: self.name.clone(),
             clipboard: self.config.clipboard,
+            clipboard_limit: self.clip_limit.clone(),
             command_key: uses_command_key(),
             store: self.store.clone(),
             announce: self.config.announce,
@@ -233,6 +247,7 @@ impl<H: Host> Runtime<H> {
             server,
             name: self.name.clone(),
             clipboard: self.config.clipboard,
+            clipboard_limit: self.clip_limit.clone(),
             command_key: uses_command_key(),
             store: self.store.clone(),
             events: self.events.clone(),
@@ -525,16 +540,30 @@ impl<H: Host> Runtime<H> {
             } => {
                 let peer = self.peer_name(&peer);
                 self.activity.clipped();
-                let detail = match summary.chars {
-                    Some(n) => format!("文本 · {n} 字"),
-                    None => format!("{} 字节", summary.bytes),
+                let detail = match (&summary.image, summary.chars) {
+                    (Some(image), _) => format!(
+                        "图片 · {}×{} · {}",
+                        image.width,
+                        image.height,
+                        size_text(image.png.len() as u64)
+                    ),
+                    (None, Some(n)) if summary.rich => format!("带格式的文本 · {n} 字"),
+                    (None, Some(n)) => format!("文本 · {n} 字"),
+                    (None, None) => size_text(summary.bytes),
                 };
+                let image = summary.image.map(|image| ClipboardImage {
+                    width: image.width,
+                    height: image.height,
+                    path: self.save_preview(&image.png),
+                });
                 self.clipboard = Some(ClipboardSync {
                     to_peer,
                     peer: peer.clone(),
                     chars: summary.chars,
                     bytes: summary.bytes,
                     preview: summary.preview,
+                    rich: summary.rich,
+                    image,
                     at: now_ms(),
                 });
                 let text = if to_peer {
@@ -543,6 +572,31 @@ impl<H: Host> Runtime<H> {
                     "剪贴板同步到本机".to_owned()
                 };
                 self.log(LogKind::Clip, LogIcon::Clipboard, text, detail);
+            }
+            Event::ClipboardSkipped {
+                peer,
+                to_peer,
+                format,
+                bytes,
+                limit,
+            } => {
+                let peer = self.peer_name(&peer);
+                let what = match format {
+                    ClipboardFormat::PNG => "图片",
+                    ClipboardFormat::TEXT => "文本",
+                    _ => "带格式的内容",
+                };
+                let text = if to_peer {
+                    format!("剪贴板里的{what}太大，没有同步到 {peer}")
+                } else {
+                    format!("{peer} 剪贴板里的{what}太大，没有同步过来")
+                };
+                let detail = format!(
+                    "{}，超过了 {} 的上限 · 可以在设置里调大",
+                    size_text(bytes),
+                    size_text(limit)
+                );
+                self.log(LogKind::Clip, LogIcon::Warning, text, detail);
             }
             Event::Paired { name, fingerprint } => {
                 self.refresh_peers();
@@ -657,6 +711,24 @@ impl<H: Host> Runtime<H> {
         }
     }
 
+    /// 把剪贴板图片存一份给设置界面预览，换掉上一份。存不下来时界面只显示尺寸。
+    fn save_preview(&mut self, png: &[u8]) -> Option<String> {
+        let saved = match self.store.put_blob(png) {
+            Ok(path) => path,
+            Err(e) => {
+                warn!("保存剪贴板图片的预览失败：{e}");
+                return None;
+            }
+        };
+        if let Some(old) = self.clip_preview.replace(saved.clone())
+            && old != saved
+            && let Err(e) = self.store.remove_blob(&old)
+        {
+            warn!("删除上一张剪贴板预览失败：{e}");
+        }
+        Some(saved.display().to_string())
+    }
+
     /// 发给 `to`（证书指纹）；不指定时发给光标最近去过的那台，只连着一台时就是它。
     async fn send_files(&mut self, paths: Vec<String>, to: Option<String>) {
         let paths = paths.into_iter().map(PathBuf::from).collect();
@@ -766,6 +838,10 @@ impl<H: Host> Runtime<H> {
             restart |= clipboard != next.clipboard;
             next.clipboard = clipboard;
         }
+        if let Some(mb) = patch.clipboard_limit_mb {
+            let range = Config::CLIPBOARD_LIMIT_MB;
+            next.clipboard_limit_mb = mb.clamp(*range.start(), *range.end());
+        }
         if let Some(server) = patch.server {
             restart |= server != next.server;
             next.server = server;
@@ -802,6 +878,7 @@ impl<H: Host> Runtime<H> {
                 return;
             }
             self.config = next;
+            self.clip_limit.set(self.config.clipboard_limit_bytes());
             self.dirty = true;
         }
         if arranged {
@@ -1066,6 +1143,7 @@ impl<H: Host> Runtime<H> {
                 swap_cmd_ctrl: self.config.swap_cmd_ctrl,
                 announce: self.config.announce,
                 clipboard: self.config.clipboard,
+                clipboard_limit_mb: self.config.clipboard_limit_mb,
                 server: self.config.server.clone(),
                 autostart: self.autostart,
                 theme: self.config.theme,

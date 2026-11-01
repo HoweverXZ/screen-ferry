@@ -17,7 +17,7 @@ pub use connection::{Connection, Incoming, Listener, Reader, Writer, connect};
 pub use endpoint::Endpoint;
 pub use error::{Error, Result};
 pub use message::{
-    ClipboardSync, FoundDevice, HourActivity, Link, LinkStatus, Local, LogEntry, LogIcon, LogKind,
-    MAX_LINE, Notice, PairingPrompt, PeerInfo, PeerRef, Problem, ProblemKind, Request, Settings,
-    SettingsPatch, State, VERSION,
+    ClipboardImage, ClipboardSync, FoundDevice, HourActivity, Link, LinkStatus, Local, LogEntry,
+    LogIcon, LogKind, MAX_LINE, Notice, PairingPrompt, PeerInfo, PeerRef, Problem, ProblemKind,
+    Request, Settings, SettingsPatch, State, VERSION,
 };

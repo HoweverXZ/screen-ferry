@@ -2,12 +2,15 @@
 //!
 //! 常驻后台用它们拼出给设置界面看的状态；命令行模式不关心，传 [`Events::none`]。
 
+use std::fmt;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
+use ferry_core::clip_format::png_size;
 use ferry_trust::Fingerprint;
-use ferry_types::{ClipboardContent, TransferId};
+use ferry_types::{ClipboardContent, ClipboardFormat, TransferId};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 /// 一件发生了的事。
@@ -46,6 +49,15 @@ pub enum Event {
         peer: Fingerprint,
         to_peer: bool,
         summary: ClipSummary,
+    },
+    /// 剪贴板里有一种格式超过了大小上限 `limit`，没有和 `peer` 同步。
+    /// `to_peer` 为真表示是本机的内容没有发出去，否则是对方的内容没有拉过来。
+    ClipboardSkipped {
+        peer: Fingerprint,
+        to_peer: bool,
+        format: ClipboardFormat,
+        bytes: u64,
+        limit: u64,
     },
     /// 配对成功，已记住对方。
     Paired {
@@ -112,11 +124,36 @@ pub struct FoundServer {
 /// 一份剪贴板内容的摘要，用于显示。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClipSummary {
-    /// 是纯文本时的字符数。
+    /// 有文字时的字符数。
     pub chars: Option<u32>,
     pub bytes: u64,
-    /// 纯文本的开头一段，换行替换为空格。
+    /// 文字的开头一段，换行替换为空格。
     pub preview: String,
+    /// 带格式：有 HTML 或 RTF。
+    pub rich: bool,
+    /// 有图片时的那张图片。
+    pub image: Option<ClipImage>,
+}
+
+/// 剪贴板里的一张图片。
+#[derive(Clone, PartialEq, Eq)]
+pub struct ClipImage {
+    pub width: u32,
+    pub height: u32,
+    /// PNG 数据。常驻后台存一份到磁盘给设置界面预览，之后就丢掉。
+    pub png: Arc<[u8]>,
+}
+
+impl fmt::Debug for ClipImage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "ClipImage({}×{}, {} 字节)",
+            self.width,
+            self.height,
+            self.png.len()
+        )
+    }
 }
 
 impl ClipSummary {
@@ -125,7 +162,18 @@ impl ClipSummary {
 
     pub fn of(content: &ClipboardContent) -> Self {
         let text = content.as_text();
+        let image = content.get(ClipboardFormat::PNG).and_then(|png| {
+            let (width, height) = png_size(png)?;
+            Some(ClipImage {
+                width,
+                height,
+                png: Arc::from(png),
+            })
+        });
         Self {
+            rich: content.get(ClipboardFormat::HTML).is_some()
+                || content.get(ClipboardFormat::RTF).is_some(),
+            image,
             chars: text.map(|t| u32::try_from(t.chars().count()).unwrap_or(u32::MAX)),
             bytes: content.total_len() as u64,
             preview: text

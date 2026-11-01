@@ -59,6 +59,8 @@ pub struct Config {
     pub announce: bool,
     /// 同步剪贴板。
     pub clipboard: bool,
+    /// 剪贴板单项（一种格式）的大小上限，单位 MB，1–64。超过的不同步。
+    pub clipboard_limit_mb: u32,
     /// 客户端：服务端地址，空为在局域网里寻找。
     pub server: String,
     /// 设置界面的配色。
@@ -77,7 +79,17 @@ impl Config {
     ///
     /// - 1：第一版。
     /// - 2：新增 `layout`；`side` 改为“没有单独安排的设备放在哪一侧”，只有一台设备时与版本 1 等价。
-    pub const SCHEMA_VERSION: u32 = 2;
+    /// - 3：新增 `clipboard_limit_mb`（缺省 32，与之前固定的上限相同）。
+    pub const SCHEMA_VERSION: u32 = 3;
+
+    /// 剪贴板单项大小上限的取值范围（MB）。
+    pub const CLIPBOARD_LIMIT_MB: std::ops::RangeInclusive<u32> = 1..=64;
+
+    /// 剪贴板单项的大小上限（字节），超出范围的值收进范围内。
+    pub fn clipboard_limit_bytes(&self) -> u64 {
+        let range = Self::CLIPBOARD_LIMIT_MB;
+        u64::from(self.clipboard_limit_mb.clamp(*range.start(), *range.end())) * 1024 * 1024
+    }
 }
 
 /// 一台设备放在服务端的哪一侧。
@@ -98,6 +110,7 @@ impl Default for Config {
             swap_cmd_ctrl: true,
             announce: true,
             clipboard: true,
+            clipboard_limit_mb: 32,
             server: String::new(),
             theme: Theme::System,
             accent: 0,

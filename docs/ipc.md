@@ -58,12 +58,13 @@ problem   null | { kind(permission|port_in_use|other), message }
 link      status(paused|starting|waiting|searching|connecting|connected|stopped)
           peer(null | { name, fingerprint, short, addr }) · since · cursor_on_peer · rtt_ms[]
           连着几台时是摘要：指光标所在（否则最近连上）的那台；每台是否连着见 peers
-clipboard null | { to_peer, peer, chars, bytes, preview, at }
+clipboard null | { to_peer, peer, chars, bytes, preview, rich（带格式）, at,
+                 image（null | { width, height, path（预览用的 PNG 文件，存不下来时为 null）}） }
 peers[]   { name, fingerprint, short, online, last_seen,
             side（服务端：在本机哪一侧；客户端为 null）, cursor（光标正在它上面） }
 found[]   { name, fingerprint, short, addr, paired }        只有客户端会有
-settings  { name, side(left|right|top|bottom), layout[], swap_cmd_ctrl, announce, clipboard, server,
-            autostart, theme(system|light|dark), accent }
+settings  { name, side(left|right|top|bottom), layout[], swap_cmd_ctrl, announce, clipboard,
+            clipboard_limit_mb（剪贴板单项上限，1–64）, server, autostart, theme(system|light|dark), accent }
           layout[] { fingerprint, side }：单独安排过位置的设备，按先后排列，同一侧的几台按这个先后
           平分那条边（左右两侧从上到下，上下两侧从左到右）；side 是没有列出的设备放的那一侧
 activity[] { hour, switches, clips, connected_secs }         最近 48 小时，只列有活动的小时

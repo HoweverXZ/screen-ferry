@@ -12,6 +12,7 @@
 //! 写入后记下剪贴板的变化计数，自己写入的内容不会再被当作新复制通告回去。
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -37,8 +38,32 @@ use crate::link::send;
 /// 活动端检查本机剪贴板的间隔。
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
 
-/// 单个格式的大小上限，超过的不通告也不拉取。
-pub(crate) const MAX_ITEM_SIZE: u64 = 32 * 1024 * 1024;
+/// 单个格式缺省的大小上限：32 MB。
+pub const DEFAULT_CLIP_LIMIT: u64 = 32 * 1024 * 1024;
+
+/// 剪贴板单个格式的大小上限，超过的不通告也不拉取。克隆后共用同一个值，会话中途也能改。
+#[derive(Clone, Debug)]
+pub struct ClipLimit(Arc<AtomicU64>);
+
+impl ClipLimit {
+    pub fn new(bytes: u64) -> Self {
+        Self(Arc::new(AtomicU64::new(bytes)))
+    }
+
+    pub fn get(&self) -> u64 {
+        self.0.load(Ordering::Relaxed)
+    }
+
+    pub fn set(&self, bytes: u64) {
+        self.0.store(bytes, Ordering::Relaxed);
+    }
+}
+
+impl Default for ClipLimit {
+    fn default() -> Self {
+        Self::new(DEFAULT_CLIP_LIMIT)
+    }
+}
 
 /// 服务端与客户端各持有一份，会话之间复用。
 pub(crate) type SharedClipboard<C> = Arc<Mutex<C>>;
@@ -61,10 +86,23 @@ pub(crate) enum Start {
     Quiet,
 }
 
-/// 和哪台设备同步，结果报告给谁。
+/// 和哪台设备同步，结果报告给谁，单项多大以内才同步。
 pub(crate) struct Reporter {
     pub(crate) peer: Fingerprint,
     pub(crate) events: Events,
+    pub(crate) limit: ClipLimit,
+}
+
+impl Reporter {
+    fn skipped(&self, to_peer: bool, format: ClipboardFormat, bytes: u64, limit: u64) {
+        self.events.emit(Event::ClipboardSkipped {
+            peer: self.peer,
+            to_peer,
+            format,
+            bytes,
+            limit,
+        });
+    }
 }
 
 /// 在数据连接上启动剪贴板同步。`active` 表示对这台设备而言本机是不是活动端：
@@ -101,7 +139,7 @@ struct ClipboardSync<S, C> {
     active: watch::Receiver<bool>,
     /// 最近一次看到的本机剪贴板变化计数。
     seen: u64,
-    /// 最近一次通告出去的本机内容，等对方来拉取。
+    /// 最近一次通告出去的本机内容，等对方来拉取。拉走一种格式就放掉一种，大图片不长期占着内存。
     offered: Option<(u32, ClipboardContent)>,
     next_seq: u32,
     /// 对方最近一次通告、还没拉取的内容。
@@ -250,6 +288,19 @@ where
 
         let seq = self.next_seq;
         self.next_seq = self.next_seq.wrapping_add(1);
+        // 太大的格式不通告，也不留在内存里。
+        let limit = self.report.limit.get();
+        let mut content = content;
+        let too_large: Vec<(ClipboardFormat, u64)> = content
+            .iter()
+            .map(|(format, data)| (format, data.len() as u64))
+            .filter(|&(_, size)| size > limit)
+            .collect();
+        for &(format, size) in &too_large {
+            content.remove(format);
+            info!(?format, size, limit, "剪贴板内容超过大小上限，没有通告");
+            self.report.skipped(true, format, size, limit);
+        }
         // 没有可共享的格式也照样通告（空列表），让对方丢掉之前的旧通告。
         let items = content
             .iter()
@@ -257,7 +308,6 @@ where
                 format,
                 size: data.len() as u64,
             })
-            .filter(|item| item.size <= MAX_ITEM_SIZE)
             .collect();
         let offer = ClipboardOffer { seq, items };
         debug!(seq, items = ?offer.items, "通告本机剪贴板");
@@ -274,13 +324,19 @@ where
             return Ok(());
         };
         let supported = self.lock().formats();
+        let limit = self.report.limit.get();
         let mut fetch = Fetch {
             seq: offer.seq,
             pending: HashMap::new(),
             done: ClipboardContent::new(),
         };
         for item in offer.items {
-            if !supported.contains(&item.format) || item.size > MAX_ITEM_SIZE {
+            if !supported.contains(&item.format) {
+                continue;
+            }
+            if item.size > limit {
+                info!(format = ?item.format, size = item.size, limit, "对方的剪贴板内容超过大小上限，没有拉取");
+                self.report.skipped(false, item.format, item.size, limit);
                 continue;
             }
             let transfer = self.next_transfer;
@@ -301,10 +357,23 @@ where
         Ok(())
     }
 
-    /// 回应对方的拉取：按块发出内容。过期的请求回 `Cancel(STALE)`。
+    /// 回应对方的拉取：按块发出内容，发完就放掉这种格式。过期的请求回 `Cancel(STALE)`。
     async fn serve(&mut self, request: ClipboardRequest) -> Result<()> {
-        let data = match &self.offered {
-            Some((seq, content)) if *seq == request.seq => content.get(request.format),
+        let current = matches!(&self.offered, Some((seq, _)) if *seq == request.seq);
+        if current
+            && self.reported != Some(request.seq)
+            && let Some((_, content)) = &self.offered
+        {
+            // 对方一次请求全部格式，第一个请求到的时候内容还是完整的。
+            self.reported = Some(request.seq);
+            self.report.events.emit(Event::Clipboard {
+                peer: self.report.peer,
+                to_peer: true,
+                summary: ClipSummary::of(content),
+            });
+        }
+        let data = match &mut self.offered {
+            Some((_, content)) if current => content.remove(request.format),
             _ => None,
         };
         let Some(data) = data else {
@@ -328,16 +397,6 @@ where
                 data: part.to_vec(),
             };
             send(&mut self.framed, &Message::Chunk(chunk)).await?;
-        }
-        if self.reported != Some(request.seq)
-            && let Some((_, content)) = &self.offered
-        {
-            self.reported = Some(request.seq);
-            self.report.events.emit(Event::Clipboard {
-                peer: self.report.peer,
-                to_peer: true,
-                summary: ClipSummary::of(content),
-            });
         }
         Ok(())
     }

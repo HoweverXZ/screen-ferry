@@ -44,6 +44,11 @@ impl ClipboardContent {
         self.items.get(&format).map(Vec::as_slice)
     }
 
+    /// 取出一种格式。
+    pub fn remove(&mut self, format: ClipboardFormat) -> Option<Vec<u8>> {
+        self.items.remove(&format)
+    }
+
     /// 纯文本格式的内容；没有或不是合法 UTF-8 时为 `None`。
     pub fn as_text(&self) -> Option<&str> {
         std::str::from_utf8(self.get(ClipboardFormat::TEXT)?).ok()

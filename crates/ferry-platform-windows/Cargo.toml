@@ -10,6 +10,7 @@ publish.workspace = true
 test = false
 
 [dependencies]
+ferry-core.workspace = true
 ferry-platform.workspace = true
 ferry-types.workspace = true
 

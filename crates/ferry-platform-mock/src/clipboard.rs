@@ -47,7 +47,12 @@ impl MockClipboard {
 
 impl Clipboard for MockClipboard {
     fn formats(&self) -> &'static [ClipboardFormat] {
-        &[ClipboardFormat::TEXT, ClipboardFormat::HTML]
+        &[
+            ClipboardFormat::TEXT,
+            ClipboardFormat::HTML,
+            ClipboardFormat::RTF,
+            ClipboardFormat::PNG,
+        ]
     }
 
     fn change_count(&mut self) -> u64 {

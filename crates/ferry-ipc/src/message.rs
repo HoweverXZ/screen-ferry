@@ -169,10 +169,30 @@ pub struct ClipboardSync {
     /// 是纯文本时为字符数，否则为 `null`。
     pub chars: Option<u32>,
     pub bytes: u64,
-    /// 纯文本的开头一段，用于显示；其他内容为空。
+    /// 文字的开头一段，用于显示；没有文字时为空。
     pub preview: String,
+    /// 带格式（HTML 或 RTF）。
+    #[serde(default)]
+    pub rich: bool,
+    /// 有图片时的尺寸和预览；没有图片为 `null`。
+    #[serde(default)]
+    pub image: Option<ClipboardImage>,
     /// Unix 毫秒。
     pub at: i64,
+}
+
+/// 剪贴板里的一张图片。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClipboardImage {
+    pub width: u32,
+    pub height: u32,
+    /// 预览用的 PNG 文件（本机绝对路径）；没能存下来时为 `null`。
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
+fn default_clipboard_limit() -> u32 {
+    32
 }
 
 /// 一台已配对的设备。
@@ -216,6 +236,9 @@ pub struct Settings {
     pub swap_cmd_ctrl: bool,
     pub announce: bool,
     pub clipboard: bool,
+    /// 剪贴板单项（一种格式）的大小上限，单位 MB，1–64。
+    #[serde(default = "default_clipboard_limit")]
+    pub clipboard_limit_mb: u32,
     pub server: String,
     /// 登录时启动。以系统中的登记为准。
     pub autostart: bool,
@@ -244,6 +267,9 @@ pub struct SettingsPatch {
     pub announce: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub clipboard: Option<bool>,
+    /// 1–64，超出的收进范围内。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub clipboard_limit_mb: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

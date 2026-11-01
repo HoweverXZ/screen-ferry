@@ -188,6 +188,8 @@ class ClipboardSync {
     required this.chars,
     required this.bytes,
     required this.preview,
+    this.rich = false,
+    this.image,
     required this.at,
   });
 
@@ -197,17 +199,42 @@ class ClipboardSync {
     chars: j['chars'] is num ? _int(j['chars']) : null,
     bytes: _int(j['bytes']),
     preview: _str(j['preview']),
+    rich: _bool(j['rich']),
+    image: j['image'] is Json ? ClipboardImage.fromJson(j['image'] as Json) : null,
     at: _time(j['at']) ?? DateTime.fromMillisecondsSinceEpoch(0),
   );
 
   final bool toPeer;
   final String peer;
 
-  /// 纯文本的字符数；不是纯文本时为 null。
+  /// 文字的字符数；没有文字时为 null。
   final int? chars;
   final int bytes;
   final String preview;
+
+  /// 带格式（HTML 或 RTF）。
+  final bool rich;
+
+  /// 有图片时的尺寸和预览。
+  final ClipboardImage? image;
   final DateTime at;
+}
+
+/// 剪贴板里的一张图片。
+class ClipboardImage {
+  const ClipboardImage({required this.width, required this.height, this.path});
+
+  factory ClipboardImage.fromJson(Json j) => ClipboardImage(
+    width: _int(j['width']),
+    height: _int(j['height']),
+    path: j['path'] is String ? j['path'] as String : null,
+  );
+
+  final int width;
+  final int height;
+
+  /// 预览用的 PNG 文件；后台没能存下来时为 null。
+  final String? path;
 }
 
 class PeerInfo {
@@ -303,11 +330,15 @@ class DaemonSettings {
     required this.swapCmdCtrl,
     required this.announce,
     required this.clipboard,
+    this.clipboardLimitMb = 32,
     required this.server,
     required this.autostart,
     required this.theme,
     required this.accent,
   });
+
+  /// 剪贴板单项大小上限的取值范围（MB）。
+  static const clipboardLimitRange = (min: 1, max: 64);
 
   factory DaemonSettings.fromJson(Json j) => DaemonSettings(
     name: _str(j['name']),
@@ -316,6 +347,7 @@ class DaemonSettings {
     swapCmdCtrl: _bool(j['swap_cmd_ctrl']),
     announce: _bool(j['announce']),
     clipboard: _bool(j['clipboard']),
+    clipboardLimitMb: j['clipboard_limit_mb'] is num ? _int(j['clipboard_limit_mb']) : 32,
     server: _str(j['server']),
     autostart: _bool(j['autostart']),
     theme: _enum(UiTheme.values, j['theme'], UiTheme.system),
@@ -333,6 +365,9 @@ class DaemonSettings {
   final bool swapCmdCtrl;
   final bool announce;
   final bool clipboard;
+
+  /// 剪贴板单项（一种格式）的大小上限，单位 MB。
+  final int clipboardLimitMb;
   final String server;
   final bool autostart;
   final UiTheme theme;
@@ -346,6 +381,7 @@ class DaemonSettings {
     swapCmdCtrl: p.swapCmdCtrl ?? swapCmdCtrl,
     announce: p.announce ?? announce,
     clipboard: p.clipboard ?? clipboard,
+    clipboardLimitMb: p.clipboardLimitMb ?? clipboardLimitMb,
     server: p.server ?? server,
     autostart: p.autostart ?? autostart,
     theme: p.theme ?? theme,
@@ -583,6 +619,7 @@ class SettingsPatch {
     this.swapCmdCtrl,
     this.announce,
     this.clipboard,
+    this.clipboardLimitMb,
     this.server,
     this.autostart,
     this.theme,
@@ -600,6 +637,7 @@ class SettingsPatch {
   final bool? swapCmdCtrl;
   final bool? announce;
   final bool? clipboard;
+  final int? clipboardLimitMb;
   final String? server;
   final bool? autostart;
   final UiTheme? theme;
@@ -613,6 +651,7 @@ class SettingsPatch {
     'swap_cmd_ctrl': ?swapCmdCtrl,
     'announce': ?announce,
     'clipboard': ?clipboard,
+    'clipboard_limit_mb': ?clipboardLimitMb,
     'server': ?server,
     'autostart': ?autostart,
     'theme': ?theme?.name,
@@ -628,6 +667,7 @@ class SettingsPatch {
     swapCmdCtrl: o.swapCmdCtrl ?? swapCmdCtrl,
     announce: o.announce ?? announce,
     clipboard: o.clipboard ?? clipboard,
+    clipboardLimitMb: o.clipboardLimitMb ?? clipboardLimitMb,
     server: o.server ?? server,
     autostart: o.autostart ?? autostart,
     theme: o.theme ?? theme,
@@ -647,6 +687,7 @@ class SettingsPatch {
     swapCmdCtrl: swapCmdCtrl == s.swapCmdCtrl ? null : swapCmdCtrl,
     announce: announce == s.announce ? null : announce,
     clipboard: clipboard == s.clipboard ? null : clipboard,
+    clipboardLimitMb: clipboardLimitMb == s.clipboardLimitMb ? null : clipboardLimitMb,
     server: server == s.server ? null : server,
     autostart: autostart == s.autostart ? null : autostart,
     theme: theme == s.theme ? null : theme,

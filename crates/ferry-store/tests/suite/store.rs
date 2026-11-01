@@ -112,7 +112,7 @@ fn config_defaults_until_saved_then_round_trips() {
     store.save_config(&config).unwrap();
     let text = fs::read_to_string(dir.path().join("config.toml")).unwrap();
     assert!(
-        text.starts_with("schema_version = 2\n"),
+        text.starts_with("schema_version = 3\n"),
         "第一行必须是 schema_version：{text}"
     );
     assert_eq!(store.config().unwrap(), config);
@@ -136,10 +136,10 @@ fn config_tolerates_missing_and_unknown_fields() {
 fn config_from_a_newer_version_is_refused() {
     let dir = TempDir::new();
     let store = Store::open(dir.path()).unwrap();
-    fs::write(dir.path().join("config.toml"), "schema_version = 3\n").unwrap();
+    fs::write(dir.path().join("config.toml"), "schema_version = 4\n").unwrap();
     assert!(matches!(
         store.config(),
-        Err(Error::TooNew { found: 3, .. })
+        Err(Error::TooNew { found: 4, .. })
     ));
 }
 
@@ -180,7 +180,7 @@ fn a_version_1_config_reads_as_version_2_with_an_empty_layout() {
     };
     store.save_config(&config).unwrap();
     let text = fs::read_to_string(dir.path().join("config.toml")).unwrap();
-    assert!(text.starts_with("schema_version = 2\n"), "{text}");
+    assert!(text.starts_with("schema_version = 3\n"), "{text}");
     assert!(text.contains("[[layout]]"), "{text}");
     assert_eq!(store.config().unwrap(), config);
 }
@@ -198,4 +198,54 @@ fn a_custom_data_dir_keeps_received_files_inside_it() {
     let store = Store::open(dir.path()).unwrap();
     assert_eq!(store.downloads_dir(), dir.path().join("received"));
     assert_eq!(store.partial_dir(), dir.path().join("partial"));
+}
+
+#[test]
+fn a_version_2_config_reads_as_version_3_with_the_old_clipboard_limit() {
+    use ferry_types::Config;
+
+    let dir = TempDir::new();
+    let store = Store::open(dir.path()).unwrap();
+    fs::write(
+        dir.path().join("config.toml"),
+        "schema_version = 2\nclipboard = true\n",
+    )
+    .unwrap();
+    let config = store.config().unwrap();
+    assert_eq!(config.schema_version, 3);
+    assert_eq!(config.clipboard_limit_mb, 32, "与之前固定的上限相同");
+    assert_eq!(config.clipboard_limit_bytes(), 32 * 1024 * 1024);
+
+    let wild = Config {
+        clipboard_limit_mb: 1000,
+        ..Config::default()
+    };
+    assert_eq!(wild.clipboard_limit_bytes(), 64 * 1024 * 1024, "收进范围内");
+}
+
+#[test]
+fn blobs_are_stored_by_content_and_can_be_removed() {
+    let dir = TempDir::new();
+    let store = Store::open(dir.path()).unwrap();
+    let a = store.put_blob(b"picture").unwrap();
+    assert_eq!(store.put_blob(b"picture").unwrap(), a, "同样的内容只存一份");
+    assert_eq!(fs::read(&a).unwrap(), b"picture");
+    assert!(a.starts_with(dir.path().join("blobs")));
+    let name = a.file_name().unwrap().to_str().unwrap();
+    let shard = a.parent().unwrap().file_name().unwrap().to_str().unwrap();
+    assert_eq!(shard.len() + name.len(), 64, "名字是 SHA-256 的十六进制");
+
+    let b = store.put_blob(b"another").unwrap();
+    store.remove_blob(&a).unwrap();
+    assert!(!a.exists());
+    store.remove_blob(&a).unwrap();
+
+    let outside = dir.path().join("config.toml");
+    fs::write(&outside, "x").unwrap();
+    store.remove_blob(&outside).unwrap();
+    assert!(outside.exists(), "blobs/ 以外的文件不碰");
+
+    store.clear_blobs().unwrap();
+    assert!(!b.exists());
+    store.clear_blobs().unwrap();
 }

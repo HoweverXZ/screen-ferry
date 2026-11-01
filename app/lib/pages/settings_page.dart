@@ -104,23 +104,10 @@ class SettingsPage extends StatelessWidget {
             SfRow(
               icon: Icons.storage_rounded,
               title: '单项大小上限',
-              subtitle: '超过的内容不同步 · 即将支持',
-              trailing: Opacity(
-                opacity: 0.5,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const SizedBox(width: 180, child: Slider(value: 32, min: 1, max: 64, onChanged: null)),
-                    SizedBox(
-                      width: 56,
-                      child: Text(
-                        '32 MB',
-                        textAlign: TextAlign.end,
-                        style: TextStyle(fontFeatures: tabular, color: c.muted),
-                      ),
-                    ),
-                  ],
-                ),
+              subtitle: '图片、文字等每一项超过这么大就不同步',
+              trailing: _LimitSlider(
+                value: s.clipboardLimitMb,
+                onChanged: state.online ? (mb) => state.updateSettings(SettingsPatch(clipboardLimitMb: mb)) : null,
               ),
             ),
           ],
@@ -157,6 +144,59 @@ class SettingsPage extends StatelessWidget {
               onTap: () => state.go(SfPage.about),
             ),
           ],
+        ),
+      ],
+    );
+  }
+}
+
+/// 剪贴板单项上限的滑块：拖动时只改显示，松手才发给后台。
+class _LimitSlider extends StatefulWidget {
+  const _LimitSlider({required this.value, required this.onChanged});
+
+  final int value;
+  final ValueChanged<int>? onChanged;
+
+  @override
+  State<_LimitSlider> createState() => _LimitSliderState();
+}
+
+class _LimitSliderState extends State<_LimitSlider> {
+  double? _dragging;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = SfColors.of(context);
+    const range = DaemonSettings.clipboardLimitRange;
+    final onChanged = widget.onChanged;
+    final shown = (_dragging ?? widget.value.toDouble()).clamp(range.min.toDouble(), range.max.toDouble());
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(
+          width: 180,
+          child: Slider(
+            value: shown,
+            min: range.min.toDouble(),
+            max: range.max.toDouble(),
+            divisions: range.max - range.min,
+            semanticFormatterCallback: (v) => '${v.round()} MB',
+            onChanged: onChanged == null ? null : (v) => setState(() => _dragging = v),
+            onChangeEnd: onChanged == null
+                ? null
+                : (v) {
+                    setState(() => _dragging = null);
+                    if (v.round() != widget.value) onChanged(v.round());
+                  },
+          ),
+        ),
+        SizedBox(
+          width: 56,
+          child: Text(
+            '${shown.round()} MB',
+            textAlign: TextAlign.end,
+            style: TextStyle(fontFeatures: tabular, color: c.muted),
+          ),
         ),
       ],
     );

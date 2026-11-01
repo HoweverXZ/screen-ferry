@@ -251,6 +251,8 @@ async fn first_pairing_is_confirmed_in_the_ui() {
             server: ServerAddr::Fixed(([127, 0, 0, 1], port).into()),
             name: "pc".into(),
             clipboard: true,
+
+            clipboard_limit: Default::default(),
             command_key: false,
             store: pc.store.clone(),
             events: Events::none(),
@@ -384,6 +386,8 @@ async fn pairing_with_no_ui_open_opens_the_settings() {
             server: ServerAddr::Fixed(([127, 0, 0, 1], port).into()),
             name: "pc".into(),
             clipboard: false,
+
+            clipboard_limit: Default::default(),
             command_key: false,
             store: pc.store.clone(),
             events: Events::none(),

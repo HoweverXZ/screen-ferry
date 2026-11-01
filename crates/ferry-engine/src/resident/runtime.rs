@@ -110,6 +110,8 @@ pub(crate) struct Runtime<H> {
     pending: BTreeMap<u64, Pending>,
     next_prompt: u64,
     dirty: bool,
+    /// 上次要打开设置界面的时刻，界面连上时据此记下启动用了多久。
+    settings_opened: Option<Instant>,
 }
 
 impl<H: Host> Runtime<H> {
@@ -166,6 +168,7 @@ impl<H: Host> Runtime<H> {
             pending: BTreeMap::new(),
             next_prompt: 1,
             dirty: true,
+            settings_opened: None,
         };
         let role = match runtime.config.role {
             Role::Server => "键鼠在本机",
@@ -683,6 +686,15 @@ impl<H: Host> Runtime<H> {
                     }
                 }
                 self.clients.insert(id, outbox);
+                // 超过一分钟的不算：多半是那次没打开，这次是界面自己重连。
+                if let Some(ms) = self
+                    .settings_opened
+                    .take()
+                    .map(|at| at.elapsed().as_millis())
+                    .filter(|&ms| ms < 60_000)
+                {
+                    info!(ms, "设置界面从打开到连上后台用了 {ms} 毫秒");
+                }
             }
             UiEvent::Request(request) => self.on_request(request).await,
             UiEvent::Left { id } => {
@@ -706,7 +718,7 @@ impl<H: Host> Runtime<H> {
                     entries: Vec::new(),
                 });
             }
-            Request::OpenSettings => self.host.open_settings(),
+            Request::OpenSettings => self.open_settings(),
             Request::SendFiles { paths, to } => self.send_files(paths, to).await,
         }
     }
@@ -790,10 +802,15 @@ impl<H: Host> Runtime<H> {
         self.log(LogKind::File, LogIcon::File, text, detail);
     }
 
+    fn open_settings(&mut self) {
+        self.settings_opened = Some(Instant::now());
+        self.host.open_settings();
+    }
+
     pub(crate) async fn on_command(&mut self, command: Command) {
         match command {
             Command::SetSharing(on) => self.set_sharing(on).await,
-            Command::OpenSettings => self.host.open_settings(),
+            Command::OpenSettings => self.open_settings(),
             Command::Quit => {}
         }
     }

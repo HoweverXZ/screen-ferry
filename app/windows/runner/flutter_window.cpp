@@ -88,6 +88,10 @@ bool FlutterWindow::OnCreate() {
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
+    if (first_frame_callback_) {
+      first_frame_callback_();
+      first_frame_callback_ = nullptr;
+    }
   });
 
   // Flutter can complete the first frame before the "show window" callback is

@@ -103,9 +103,12 @@ class HomeShell extends StatelessWidget {
         shell,
         // Windows：窗口按钮与拖动区域盖在最上面，占的正是 macOS 红绿灯那一行。
         if (windowFrame ?? drawsWindowFrame) const Positioned(left: 0, top: 0, right: 0, child: WindowFrame()),
-        // 光标在另一台电脑上时，本机的光标由后台藏起来。界面刷新时会按悬停的位置重新设置光标的样子，
-        // 前台应用的设置优先，会把藏起的光标又显示出来，所以这时界面自己也把光标设成隐藏。
-        if (state.cursorOnPeer) const Positioned.fill(child: MouseRegion(cursor: SystemMouseCursors.none)),
+        // 本机控制别的电脑、光标切过去之后，本机的光标由后台藏起来。界面刷新时会按悬停的位置重新设置
+        // 光标的样子，前台应用的设置优先，会把藏起的光标又显示出来，所以这时界面自己也把光标设成隐藏。
+        // 只在本机是控制端时这样做：被控制的一方，本机的人随时可能用自己的鼠标操作界面。
+        // 不拦截点击（opaque: false），点击照常落到下面的界面上。
+        if (state.isServer && state.cursorOnPeer)
+          const Positioned.fill(child: MouseRegion(opaque: false, cursor: SystemMouseCursors.none)),
       ],
     );
   }

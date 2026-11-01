@@ -6,7 +6,9 @@
 #include <flutter/flutter_view_controller.h>
 #include <flutter/method_channel.h>
 
+#include <functional>
 #include <memory>
+#include <utility>
 
 #include "win32_window.h"
 
@@ -17,6 +19,11 @@ class FlutterWindow : public Win32Window {
   // Creates a new FlutterWindow hosting a Flutter view running |project|.
   explicit FlutterWindow(const flutter::DartProject& project);
   virtual ~FlutterWindow();
+
+  // 第一帧画好、窗口显示出来之后调用一次。要在 Create 之前设置。
+  void SetFirstFrameCallback(std::function<void()> callback) {
+    first_frame_callback_ = std::move(callback);
+  }
 
  protected:
   // Win32Window:
@@ -37,6 +44,8 @@ class FlutterWindow : public Win32Window {
 
   // 上次告诉 Flutter 的最大化状态。
   bool maximized_ = false;
+
+  std::function<void()> first_frame_callback_;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

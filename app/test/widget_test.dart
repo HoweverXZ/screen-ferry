@@ -592,6 +592,30 @@ void main() {
     expect(hiding(), findsNothing);
   });
 
+  testWidgets('被控制的一方不隐藏光标，本机的鼠标照常能点界面', (tester) async {
+    final backend = DemoBackend(role: Role.client, animate: false);
+    final state = await launch(tester, const Size(1160, 780), backend: backend);
+    backend.cursor = state.peers.first.fingerprint;
+    await settle(tester);
+    expect(state.cursorOnPeer, isTrue, reason: '光标在服务端那边');
+    expect(find.byWidgetPredicate((w) => w is MouseRegion && w.cursor == SystemMouseCursors.none), findsNothing);
+    // 本机的鼠标照常能点侧栏切换页面。
+    await tester.tap(find.text('设置').first);
+    await settle(tester);
+    expect(state.page, SfPage.settings);
+  });
+
+  testWidgets('控制端光标切走时，隐藏光标的那层不挡点击', (tester) async {
+    final backend = DemoBackend(animate: false);
+    final state = await launch(tester, const Size(1160, 780), backend: backend);
+    backend.cursor = state.peers.first.fingerprint;
+    await settle(tester);
+    expect(state.cursorOnPeer, isTrue);
+    await tester.tap(find.text('设置').first);
+    await settle(tester);
+    expect(state.page, SfPage.settings);
+  });
+
   testWidgets('只有一台设备时说明它在哪一侧，没有设备时提示去配对', (tester) async {
     final state = await launch(tester, const Size(1160, 780));
     final (_, study, notebook) = await openLayout(tester, state);

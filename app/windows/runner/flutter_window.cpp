@@ -6,6 +6,7 @@
 #include <optional>
 
 #include "flutter/generated_plugin_registrant.h"
+#include "resource.h"
 
 namespace {
 
@@ -19,6 +20,43 @@ constexpr int kMinHeight = 667;
 #endif
 constexpr int kCornerRound = 2;
 
+// 等第一帧时窗口中间的应用图标边长（逻辑像素）。
+constexpr int kLoadingIconSide = 72;
+
+// 系统是不是深色模式，与界面第一帧“跟随系统”时的选择一致。
+bool PrefersDark() {
+  DWORD light = 1;
+  DWORD size = sizeof(light);
+  const LSTATUS result = RegGetValueW(
+      HKEY_CURRENT_USER,
+      L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+      L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &light, &size);
+  return result == ERROR_SUCCESS && light == 0;
+}
+
+// 等第一帧时的窗口内容：界面的底色（app/lib/theme/tokens.dart 里的 bg），中间是应用图标。
+void PaintLoading(HWND hwnd) {
+  PAINTSTRUCT paint;
+  HDC dc = BeginPaint(hwnd, &paint);
+  RECT client;
+  GetClientRect(hwnd, &client);
+  HBRUSH brush = CreateSolidBrush(PrefersDark() ? RGB(0x14, 0x13, 0x16)
+                                                : RGB(0xEF, 0xED, 0xF0));
+  FillRect(dc, &client, brush);
+  DeleteObject(brush);
+  const int side = MulDiv(kLoadingIconSide,
+                          static_cast<int>(GetDpiForWindow(hwnd)), 96);
+  HICON icon = static_cast<HICON>(
+      LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_APP_ICON),
+                 IMAGE_ICON, side, side, LR_DEFAULTCOLOR));
+  if (icon != nullptr) {
+    DrawIconEx(dc, (client.right - side) / 2, (client.bottom - side) / 2, icon,
+               side, side, 0, nullptr, DI_NORMAL);
+    DestroyIcon(icon);
+  }
+  EndPaint(hwnd, &paint);
+}
+
 }  // namespace
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
@@ -31,19 +69,6 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
 
-  RECT frame = GetClientArea();
-
-  // The size here must match the window dimensions to avoid unnecessary surface
-  // creation / destruction in the startup path.
-  flutter_controller_ = std::make_unique<flutter::FlutterViewController>(
-      frame.right - frame.left, frame.bottom - frame.top, project_);
-  // Ensure that basic setup of the controller was successful.
-  if (!flutter_controller_->engine() || !flutter_controller_->view()) {
-    return false;
-  }
-  RegisterPlugins(flutter_controller_->engine());
-  SetChildContent(flutter_controller_->view()->GetNativeWindow());
-
   HWND hwnd = GetHandle();
   // 顶部向客户区延伸 1 像素，去掉标题栏后仍保留系统阴影；Windows 11 上用圆角。
   const MARGINS margins = {0, 0, 1, 0};
@@ -55,6 +80,27 @@ bool FlutterWindow::OnCreate() {
   SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
                SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
                    SWP_NOACTIVATE);
+
+  // 和 macOS 一样，先把窗口显示出来：Flutter 引擎启动、画出第一帧要一会儿，这段时间窗口里是
+  // 界面的底色和应用图标（见 WM_PAINT），第一帧画好后内容直接出现在这个窗口里，不用换窗口。
+  Show();
+  UpdateWindow(hwnd);
+
+  RECT frame = GetClientArea();
+
+  // The size here must match the window dimensions to avoid unnecessary surface
+  // creation / destruction in the startup path.
+  flutter_controller_ = std::make_unique<flutter::FlutterViewController>(
+      frame.right - frame.left, frame.bottom - frame.top, project_);
+  // Ensure that basic setup of the controller was successful.
+  if (!flutter_controller_->engine() || !flutter_controller_->view()) {
+    return false;
+  }
+  RegisterPlugins(flutter_controller_->engine());
+  // Flutter 的视图先藏着，第一帧画好再露出来，免得先闪一块空白。
+  HWND content = flutter_controller_->view()->GetNativeWindow();
+  ShowWindow(content, SW_HIDE);
+  SetChildContent(content);
 
   window_channel_ =
       std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
@@ -86,20 +132,29 @@ bool FlutterWindow::OnCreate() {
         result->Success();
       });
 
-  flutter_controller_->engine()->SetNextFrameCallback([&]() {
-    this->Show();
-    if (first_frame_callback_) {
-      first_frame_callback_();
-      first_frame_callback_ = nullptr;
-    }
-  });
+  flutter_controller_->engine()->SetNextFrameCallback([this]() { ShowContent(); });
 
-  // Flutter can complete the first frame before the "show window" callback is
+  // Flutter can complete the first frame before the "show content" callback is
   // registered. The following call ensures a frame is pending to ensure the
-  // window is shown. It is a no-op if the first frame hasn't completed yet.
+  // content is shown. It is a no-op if the first frame hasn't completed yet.
   flutter_controller_->ForceRedraw();
 
   return true;
+}
+
+void FlutterWindow::ShowContent() {
+  if (content_shown_ || !flutter_controller_) {
+    return;
+  }
+  content_shown_ = true;
+  HWND content = flutter_controller_->view()->GetNativeWindow();
+  ShowWindow(content, SW_SHOWNA);
+  // 窗口出来时视图还藏着、拿不到键盘焦点，这里补上。
+  if (GetForegroundWindow() == GetHandle()) {
+    SetFocus(content);
+  }
+  // 再画一帧：视图藏着时画好的那一帧不一定显示得出来。
+  flutter_controller_->ForceRedraw();
 }
 
 void FlutterWindow::OnDestroy() {
@@ -116,6 +171,22 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
   switch (message) {
+    case WM_ERASEBKGND:
+      // 不擦成别的颜色，等第一帧时由 WM_PAINT 一次画好。
+      return 1;
+    case WM_PAINT:
+      if (!content_shown_) {
+        PaintLoading(hwnd);
+        return 0;
+      }
+      break;
+    case WM_SETCURSOR:
+      // 等第一帧时显示“正在启动”的光标。
+      if (!content_shown_ && LOWORD(lparam) == HTCLIENT) {
+        SetCursor(LoadCursor(nullptr, IDC_APPSTARTING));
+        return TRUE;
+      }
+      break;
     case WM_NCCALCSIZE:
       if (wparam != 0) {
         // 去掉标题栏：先让系统算出左、右、下的边框（保留拖动改大小），再把顶部还原到窗口顶端。
@@ -167,7 +238,9 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
 
   switch (message) {
     case WM_FONTCHANGE:
-      flutter_controller_->engine()->ReloadSystemFonts();
+      if (flutter_controller_) {
+        flutter_controller_->engine()->ReloadSystemFonts();
+      }
       break;
   }
 

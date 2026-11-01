@@ -50,7 +50,7 @@ class AboutPage extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 6),
-                Text('在 Mac 与 Windows 之间共享一套键盘鼠标，同步剪贴板。全程加密，配对后才互相信任。', style: TextStyle(color: c.muted, height: 1.5)),
+                Text('在 Mac 与 Windows 之间共享一套键盘鼠标', style: TextStyle(color: c.muted, height: 1.5)),
               ],
             ),
             trailing: PillButton(

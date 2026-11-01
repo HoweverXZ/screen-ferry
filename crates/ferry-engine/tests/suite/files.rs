@@ -99,7 +99,11 @@ async fn a_folder_goes_from_the_server_to_the_client() {
     let root = source.path().join("设计稿");
     write(&root.join("首页.png"), &pattern(70_000));
     write(&root.join("空文件.txt"), b"");
-    write(&root.join("图标/a:b.svg"), b"<svg/>");
+    // Windows 本身不允许文件名里有冒号，那边造不出这个源文件；清洗规则另有单元测试。
+    let colon = std::env::consts::OS != "windows";
+    if colon {
+        write(&root.join("图标/a:b.svg"), b"<svg/>");
+    }
     write(&root.join("图标/深/层/说明.md"), "层层叠叠".as_bytes());
     write(&root.join(".DS_Store"), b"junk");
     fs::create_dir_all(root.join("空文件夹")).unwrap();
@@ -116,11 +120,13 @@ async fn a_folder_goes_from_the_server_to_the_client() {
     let folder = got.join("设计稿");
     assert_eq!(fs::read(folder.join("首页.png")).unwrap(), pattern(70_000));
     assert_eq!(fs::read(folder.join("空文件.txt")).unwrap(), b"");
-    assert_eq!(
-        fs::read(folder.join("图标/a_b.svg")).unwrap(),
-        b"<svg/>",
-        "冒号在 Windows 上不能用"
-    );
+    if colon {
+        assert_eq!(
+            fs::read(folder.join("图标/a_b.svg")).unwrap(),
+            b"<svg/>",
+            "冒号在 Windows 上不能用"
+        );
+    }
     assert_eq!(
         fs::read_to_string(folder.join("图标/深/层/说明.md")).unwrap(),
         "层层叠叠"

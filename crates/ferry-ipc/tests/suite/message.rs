@@ -10,7 +10,7 @@ use ferry_ipc::{
     Notice, PairingPrompt, PeerInfo, PeerRef, Problem, ProblemKind, Request, Settings,
     SettingsPatch, State, VERSION,
 };
-use ferry_types::{Role, Side, Theme};
+use ferry_types::{Placement, Role, Side, Theme};
 use serde_json::{Value, json};
 
 const FP_PC: &str = "3f9a12c477e0b1d2aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55";
@@ -35,6 +35,21 @@ fn requests() -> Vec<Request> {
                 ..SettingsPatch::default()
             },
         },
+        Request::UpdateSettings {
+            settings: SettingsPatch {
+                layout: Some(vec![
+                    Placement {
+                        fingerprint: FP_PC.into(),
+                        side: Side::Left,
+                    },
+                    Placement {
+                        fingerprint: FP_MAC.into(),
+                        side: Side::Right,
+                    },
+                ]),
+                ..SettingsPatch::default()
+            },
+        },
         Request::Forget {
             fingerprint: FP_PC.into(),
         },
@@ -53,6 +68,11 @@ fn requests() -> Vec<Request> {
                 "/Users/me/Desktop/证书.p12".into(),
                 "/Users/me/Desktop/设计稿".into(),
             ],
+            to: None,
+        },
+        Request::SendFiles {
+            paths: vec!["/Users/me/Desktop/证书.p12".into()],
+            to: Some(FP_PC.into()),
         },
     ]
 }
@@ -96,6 +116,8 @@ fn state() -> State {
             short: "3F9A-12C4-77E0-B1D2".into(),
             online: true,
             last_seen: None,
+            side: Some(Side::Left),
+            cursor: true,
         }],
         found: vec![FoundDevice {
             name: "会议室 Mac".into(),
@@ -107,6 +129,10 @@ fn state() -> State {
         settings: Settings {
             name: String::new(),
             side: Side::Right,
+            layout: vec![Placement {
+                fingerprint: FP_PC.into(),
+                side: Side::Left,
+            }],
             swap_cmd_ctrl: true,
             announce: true,
             clipboard: true,

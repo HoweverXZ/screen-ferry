@@ -33,7 +33,11 @@ fn reached(seen: &Mutex<Vec<TransferUpdate>>, pred: impl Fn(&TransferState) -> b
 /// 连上之后再发：刚启动时数据连接可能还没建好。
 async fn send_when_ready(files: &Files, paths: Vec<PathBuf>) -> TransferId {
     for _ in 0..300 {
-        match files.send(paths.clone()).await {
+        let Some(peer) = files.connected().first().copied() else {
+            sleep(Duration::from_millis(10)).await;
+            continue;
+        };
+        match files.send(peer, paths.clone()).await {
             Ok(id) => return id,
             Err(Error::NotConnected) => sleep(Duration::from_millis(10)).await,
             Err(e) => panic!("发送失败：{e}"),
@@ -198,7 +202,9 @@ async fn sending_without_a_connection_says_so() {
     let file = source.path().join("a.txt");
     write(&file, b"a");
     assert!(matches!(
-        files.send(vec![file]).await,
+        files
+            .send("00".repeat(32).parse().unwrap(), vec![file])
+            .await,
         Err(Error::NotConnected)
     ));
 }

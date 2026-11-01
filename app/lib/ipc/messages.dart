@@ -7,16 +7,20 @@ const ipcVersion = 1;
 
 typedef Json = Map<String, Object?>;
 
-T _enum<T extends Enum>(List<T> values, Object? name, T fallback) {
+T _enum<T extends Enum>(List<T> values, Object? name, T fallback) => _enumOrNull(values, name) ?? fallback;
+
+T? _enumOrNull<T extends Enum>(List<T> values, Object? name) {
   for (final v in values) {
     if (v.name == name) return v;
   }
-  return fallback;
+  return null;
 }
 
 String _str(Object? v) => v is String ? v : '';
 int _int(Object? v) => v is num ? v.toInt() : 0;
 bool _bool(Object? v) => v == true;
+bool _sameList<T>(List<T> a, List<T> b) =>
+    a.length == b.length && [for (var i = 0; i < a.length; i++) a[i] == b[i]].every((x) => x);
 DateTime? _time(Object? v) => v is num ? DateTime.fromMillisecondsSinceEpoch(v.toInt()) : null;
 List<Json> _list(Object? v) => v is List ? v.whereType<Json>().toList() : const [];
 
@@ -208,6 +212,8 @@ class PeerInfo {
     required this.short,
     required this.online,
     required this.lastSeen,
+    this.side,
+    this.cursor = false,
   });
 
   factory PeerInfo.fromJson(Json j) => PeerInfo(
@@ -216,6 +222,8 @@ class PeerInfo {
     short: _str(j['short']),
     online: _bool(j['online']),
     lastSeen: _time(j['last_seen']),
+    side: _enumOrNull(ScreenSide.values, j['side']),
+    cursor: _bool(j['cursor']),
   );
 
   final String name;
@@ -225,6 +233,35 @@ class PeerInfo {
 
   /// 本次运行中最后一次断开的时刻；没连过为 null。
   final DateTime? lastSeen;
+
+  /// 服务端：这台设备实际在本机哪一侧；客户端为 null。
+  final ScreenSide? side;
+
+  /// 光标正在这台设备上。
+  final bool cursor;
+}
+
+/// 单独安排过位置的一台设备：放在本机哪一侧。
+class Placement {
+  const Placement(this.fingerprint, this.side);
+
+  factory Placement.fromJson(Json j) =>
+      Placement(_str(j['fingerprint']), _enum(ScreenSide.values, j['side'], ScreenSide.right));
+
+  /// 设备的证书指纹，64 位十六进制。
+  final String fingerprint;
+  final ScreenSide side;
+
+  Json toJson() => {'fingerprint': fingerprint, 'side': side.name};
+
+  @override
+  bool operator ==(Object other) => other is Placement && other.fingerprint == fingerprint && other.side == side;
+
+  @override
+  int get hashCode => Object.hash(fingerprint, side);
+
+  @override
+  String toString() => 'Placement($fingerprint, ${side.name})';
 }
 
 /// 局域网里发现的一台服务端。
@@ -257,6 +294,7 @@ class DaemonSettings {
   const DaemonSettings({
     required this.name,
     required this.side,
+    this.layout = const [],
     required this.swapCmdCtrl,
     required this.announce,
     required this.clipboard,
@@ -269,6 +307,7 @@ class DaemonSettings {
   factory DaemonSettings.fromJson(Json j) => DaemonSettings(
     name: _str(j['name']),
     side: _enum(ScreenSide.values, j['side'], ScreenSide.right),
+    layout: [for (final p in _list(j['layout'])) Placement.fromJson(p)],
     swapCmdCtrl: _bool(j['swap_cmd_ctrl']),
     announce: _bool(j['announce']),
     clipboard: _bool(j['clipboard']),
@@ -279,7 +318,13 @@ class DaemonSettings {
   );
 
   final String name;
+
+  /// 没有在 [layout] 里单独安排的设备放在本机哪一侧，排在已安排的后面。
   final ScreenSide side;
+
+  /// 单独安排过位置的设备，按先后排列：同一侧的几台按这个先后平分那条边
+  /// （左右两侧从上到下，上下两侧从左到右）。
+  final List<Placement> layout;
   final bool swapCmdCtrl;
   final bool announce;
   final bool clipboard;
@@ -292,6 +337,7 @@ class DaemonSettings {
   DaemonSettings apply(SettingsPatch p) => DaemonSettings(
     name: p.name ?? name,
     side: p.side ?? side,
+    layout: p.layout ?? layout,
     swapCmdCtrl: p.swapCmdCtrl ?? swapCmdCtrl,
     announce: p.announce ?? announce,
     clipboard: p.clipboard ?? clipboard,
@@ -511,13 +557,15 @@ class OpenSettingsRequest extends Request {
   Json toJson() => {'type': 'open_settings'};
 }
 
-/// 把这些文件和文件夹（本机绝对路径）发给当前连着的对方。
+/// 把这些文件和文件夹（本机绝对路径）发给连着的设备 [to]（证书指纹）；
+/// 不指定时后台发给光标最近去过的那台。
 class SendFilesRequest extends Request {
-  const SendFilesRequest(this.paths);
+  const SendFilesRequest(this.paths, {this.to});
   final List<String> paths;
+  final String? to;
 
   @override
-  Json toJson() => {'type': 'send_files', 'paths': paths};
+  Json toJson() => {'type': 'send_files', 'paths': paths, 'to': ?to};
 }
 
 /// 要修改的设置；为 null 的字段不变，也不会发出去。
@@ -525,6 +573,7 @@ class SettingsPatch {
   const SettingsPatch({
     this.name,
     this.side,
+    this.layout,
     this.swapCmdCtrl,
     this.announce,
     this.clipboard,
@@ -536,6 +585,9 @@ class SettingsPatch {
 
   final String? name;
   final ScreenSide? side;
+
+  /// 给出时整份替换。
+  final List<Placement>? layout;
   final bool? swapCmdCtrl;
   final bool? announce;
   final bool? clipboard;
@@ -547,6 +599,7 @@ class SettingsPatch {
   Json toJson() => {
     'name': ?name,
     'side': ?side?.name,
+    'layout': ?layout?.map((p) => p.toJson()).toList(),
     'swap_cmd_ctrl': ?swapCmdCtrl,
     'announce': ?announce,
     'clipboard': ?clipboard,
@@ -560,6 +613,7 @@ class SettingsPatch {
   SettingsPatch merge(SettingsPatch o) => SettingsPatch(
     name: o.name ?? name,
     side: o.side ?? side,
+    layout: o.layout ?? layout,
     swapCmdCtrl: o.swapCmdCtrl ?? swapCmdCtrl,
     announce: o.announce ?? announce,
     clipboard: o.clipboard ?? clipboard,
@@ -573,6 +627,10 @@ class SettingsPatch {
   SettingsPatch without(DaemonSettings s) => SettingsPatch(
     name: name == s.name ? null : name,
     side: side == s.side ? null : side,
+    layout: switch (layout) {
+      final l? when !_sameList(l, s.layout) => l,
+      _ => null,
+    },
     swapCmdCtrl: swapCmdCtrl == s.swapCmdCtrl ? null : swapCmdCtrl,
     announce: announce == s.announce ? null : announce,
     clipboard: clipboard == s.clipboard ? null : clipboard,

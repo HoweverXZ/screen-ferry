@@ -52,6 +52,15 @@ struct Pending {
     reply: oneshot::Sender<bool>,
 }
 
+/// 一台连着的设备。
+struct LinkInfo {
+    fingerprint: Fingerprint,
+    peer: PeerRef,
+    /// 连上的时刻（Unix 毫秒）。
+    since: i64,
+    rtt: Rtt,
+}
+
 pub(crate) struct Runtime<H> {
     store: Store,
     host: H,
@@ -73,11 +82,12 @@ pub(crate) struct Runtime<H> {
     status: LinkStatus,
     /// 服务端正在监听的端口。
     port: Option<u16>,
-    peer: Option<PeerRef>,
-    peer_fingerprint: Option<Fingerprint>,
-    since: Option<i64>,
-    cursor_on_peer: bool,
-    rtt: Rtt,
+    /// 连着的设备，按连上的先后。
+    links: Vec<LinkInfo>,
+    /// 光标所在的那台；客户端上，光标不在本机时是服务端。
+    cursor: Option<Fingerprint>,
+    /// 摘要里的那台，也是 `send_files` 不指定时发给的那台：光标最近去过的，否则最近连上的。
+    focus: Option<Fingerprint>,
     clipboard: Option<ClipboardSync>,
     peers: PeerList,
     peers_read: Instant,
@@ -126,11 +136,9 @@ impl<H: Host> Runtime<H> {
             problem: None,
             status: LinkStatus::Starting,
             port: None,
-            peer: None,
-            peer_fingerprint: None,
-            since: None,
-            cursor_on_peer: false,
-            rtt: Rtt::default(),
+            links: Vec::new(),
+            cursor: None,
+            focus: None,
             clipboard: None,
             peers,
             peers_read: Instant::now(),
@@ -323,6 +331,7 @@ impl<H: Host> Runtime<H> {
     fn live(&self) -> Live {
         Live {
             side: self.config.side,
+            layout: self.config.layout.clone(),
             remap: if self.config.swap_cmd_ctrl {
                 KeyRemap::swap_command_control()
             } else {
@@ -331,25 +340,51 @@ impl<H: Host> Runtime<H> {
         }
     }
 
-    /// 连接没了：记下对方最后在线的时刻，清空与连接有关的状态。
+    /// 连接全没了（引擎停下）：记下各台设备最后在线的时刻，清空与连接有关的状态。
     fn drop_link(&mut self) {
         if self.engine.is_none() {
             self.port = None;
         }
-        if let Some(fingerprint) = self.peer_fingerprint.take() {
-            self.last_seen.insert(fingerprint, now_ms());
+        let now = now_ms();
+        for link in self.links.drain(..) {
+            self.last_seen.insert(link.fingerprint, now);
         }
-        self.peer = None;
-        self.since = None;
-        self.cursor_on_peer = false;
-        self.rtt.clear();
+        self.cursor = None;
+        self.focus = None;
         self.dirty = true;
     }
 
-    fn peer_name(&self) -> String {
-        self.peer
-            .as_ref()
-            .map_or_else(|| "对方".to_owned(), |p| p.name.clone())
+    fn link_mut(&mut self, fingerprint: &Fingerprint) -> Option<&mut LinkInfo> {
+        self.links
+            .iter_mut()
+            .find(|l| l.fingerprint == *fingerprint)
+    }
+
+    /// 摘要里的那台连着的设备。
+    fn focus_link(&self) -> Option<&LinkInfo> {
+        self.focus
+            .and_then(|f| self.links.iter().find(|l| l.fingerprint == f))
+            .or(self.links.last())
+    }
+
+    /// 一台设备的名字：连着时用它报的名字，否则用配对时记下的。
+    fn peer_name(&self, fingerprint: &Fingerprint) -> String {
+        self.links
+            .iter()
+            .find(|l| l.fingerprint == *fingerprint)
+            .map(|l| l.peer.name.clone())
+            .or_else(|| self.peers.get(fingerprint).map(|p| p.name.clone()))
+            .unwrap_or_else(|| "对方".to_owned())
+    }
+
+    /// 服务端：一台设备在本机哪一侧。
+    fn side_of(&self, fingerprint: &Fingerprint) -> Side {
+        let hex = fingerprint.to_hex();
+        self.config
+            .layout
+            .iter()
+            .find(|p| p.fingerprint == hex)
+            .map_or(self.config.side, |p| p.side)
     }
 
     // ── 引擎事件 ─────────────────────────────────
@@ -362,7 +397,7 @@ impl<H: Host> Runtime<H> {
                 ..
             })
         );
-        if !matches!(event, Event::Rtt(_)) && !progress {
+        if !matches!(event, Event::Rtt { .. }) && !progress {
             self.dirty = true;
         }
         match event {
@@ -378,14 +413,14 @@ impl<H: Host> Runtime<H> {
                 self.log(LogKind::Link, LogIcon::Power, "已开始共享", detail);
             }
             Event::Searching => {
-                if self.peer.is_none() {
+                if self.links.is_empty() {
                     self.status = LinkStatus::Searching;
                 }
                 self.clear_problem();
             }
             Event::Found(list) => self.found = list,
             Event::Connecting { .. } => {
-                if self.peer.is_none() {
+                if self.links.is_empty() {
                     self.status = LinkStatus::Connecting;
                 }
             }
@@ -396,17 +431,23 @@ impl<H: Host> Runtime<H> {
             } => {
                 self.status = LinkStatus::Connected;
                 self.clear_problem();
-                self.peer = Some(PeerRef {
-                    name: name.clone(),
-                    fingerprint: fingerprint.to_hex(),
-                    short: fingerprint.short(),
-                    addr: addr.ip().to_string(),
+                self.links.retain(|l| l.fingerprint != fingerprint);
+                self.links.push(LinkInfo {
+                    fingerprint,
+                    peer: PeerRef {
+                        name: name.clone(),
+                        fingerprint: fingerprint.to_hex(),
+                        short: fingerprint.short(),
+                        addr: addr.ip().to_string(),
+                    },
+                    since: now_ms(),
+                    rtt: Rtt::default(),
                 });
-                self.peer_fingerprint = Some(fingerprint);
-                self.since = Some(now_ms());
+                self.focus = Some(fingerprint);
                 // 刚连上时光标总在服务端。
-                self.cursor_on_peer = self.config.role == Role::Client;
-                self.rtt.clear();
+                if self.config.role == Role::Client {
+                    self.cursor = Some(fingerprint);
+                }
                 self.refresh_peers();
                 self.log(
                     LogKind::Link,
@@ -415,12 +456,20 @@ impl<H: Host> Runtime<H> {
                     format!("TLS 1.3 · {}", addr.ip()),
                 );
             }
-            Event::Disconnected { reason } => {
-                let name = self.peer_name();
-                self.drop_link();
-                self.status = match self.config.role {
-                    Role::Server => LinkStatus::Waiting,
-                    Role::Client => LinkStatus::Searching,
+            Event::Disconnected { peer, reason } => {
+                let name = self.peer_name(&peer);
+                self.links.retain(|l| l.fingerprint != peer);
+                self.last_seen.insert(peer, now_ms());
+                if self.cursor == Some(peer) {
+                    self.cursor = None;
+                }
+                if self.focus == Some(peer) {
+                    self.focus = self.links.last().map(|l| l.fingerprint);
+                }
+                self.status = match (self.links.is_empty(), self.config.role) {
+                    (false, _) => LinkStatus::Connected,
+                    (true, Role::Server) => LinkStatus::Waiting,
+                    (true, Role::Client) => LinkStatus::Searching,
                 };
                 self.log(
                     LogKind::Link,
@@ -429,17 +478,25 @@ impl<H: Host> Runtime<H> {
                     reason.unwrap_or_else(|| "对方已断开".into()),
                 );
             }
-            Event::Rtt(rtt) => self.rtt.record(rtt),
+            Event::Rtt { peer, rtt } => {
+                if let Some(link) = self.link_mut(&peer) {
+                    link.rtt.record(rtt);
+                }
+            }
             Event::Transfer(update) => self.on_transfer(update),
-            Event::Cursor { here, hotkey } => {
-                self.cursor_on_peer = !here;
-                let peer = self.peer_name();
+            Event::Cursor { here, hotkey, peer } => {
+                self.cursor = (!here).then_some(peer);
+                if !here {
+                    self.focus = Some(peer);
+                }
+                let side = self.side_of(&peer);
+                let peer = self.peer_name(&peer);
                 let (text, detail) = match (self.config.role, here) {
                     (Role::Server, false) => {
                         self.activity.switched();
                         (
                             format!("光标切到 {peer}"),
-                            format!("从本机{}边缘", side_label(self.config.side)),
+                            format!("从本机{}边缘", side_label(side)),
                         )
                     }
                     (Role::Server, true) => (
@@ -459,8 +516,12 @@ impl<H: Host> Runtime<H> {
                 };
                 self.log(LogKind::Cursor, LogIcon::Cursor, text, detail);
             }
-            Event::Clipboard { to_peer, summary } => {
-                let peer = self.peer_name();
+            Event::Clipboard {
+                peer,
+                to_peer,
+                summary,
+            } => {
+                let peer = self.peer_name(&peer);
                 self.activity.clipped();
                 let detail = match summary.chars {
                     Some(n) => format!("文本 · {n} 字"),
@@ -590,16 +651,24 @@ impl<H: Host> Runtime<H> {
                 });
             }
             Request::OpenSettings => self.host.open_settings(),
-            Request::SendFiles { paths } => self.send_files(paths).await,
+            Request::SendFiles { paths, to } => self.send_files(paths, to).await,
         }
     }
 
-    async fn send_files(&mut self, paths: Vec<String>) {
+    /// 发给 `to`（证书指纹）；不指定时发给光标最近去过的那台，只连着一台时就是它。
+    async fn send_files(&mut self, paths: Vec<String>, to: Option<String>) {
         let paths = paths.into_iter().map(PathBuf::from).collect();
-        match self.files.send(paths).await {
+        let target = match to {
+            Some(hex) => hex.parse::<Fingerprint>().ok(),
+            None => self.focus_link().map(|l| l.fingerprint),
+        };
+        let Some(peer) = target else {
+            return self.toast(Error::NotConnected.to_string());
+        };
+        match self.files.send(peer, paths).await {
             Ok(_) => {
-                let peer = self.peer_name();
-                self.toast(format!("开始发给 {peer}"));
+                let name = self.peer_name(&peer);
+                self.toast(format!("开始发给 {name}"));
             }
             Err(e) => self.toast(e.to_string()),
         }
@@ -608,7 +677,7 @@ impl<H: Host> Runtime<H> {
     /// 文件传输有了进展：开始、结束、中断都记进日志，过程中的进度不记。
     fn on_transfer(&mut self, update: TransferUpdate) {
         self.edge.transfer(update.clone());
-        let peer = self.peer_name();
+        let peer = self.peer_name(&update.peer);
         let what = if update.items > 1 {
             format!("{} 等 {} 项", update.name, update.items)
         } else {
@@ -698,6 +767,10 @@ impl<H: Host> Runtime<H> {
         if let Some(side) = patch.side {
             next.side = side;
         }
+        let arranged = patch.layout.as_ref().is_some_and(|l| *l != next.layout);
+        if let Some(layout) = patch.layout {
+            next.layout = layout;
+        }
         if let Some(swap) = patch.swap_cmd_ctrl {
             next.swap_cmd_ctrl = swap;
         }
@@ -724,8 +797,18 @@ impl<H: Host> Runtime<H> {
             self.config = next;
             self.dirty = true;
         }
-        if let Some(side) = moved {
-            let peer = self.peer_name();
+        if arranged {
+            self.log(
+                LogKind::Link,
+                LogIcon::Layout,
+                "调整了设备的位置",
+                "布局已保存",
+            );
+        } else if let Some(side) = moved {
+            let peer = match self.links.as_slice() {
+                [only] => only.peer.name.clone(),
+                _ => "其他设备".to_owned(),
+            };
             self.log(
                 LogKind::Link,
                 LogIcon::Layout,
@@ -762,6 +845,16 @@ impl<H: Host> Runtime<H> {
             return self.toast(format!("移除失败：{e}"));
         }
         self.refresh_peers();
+        // 它的位置安排也不再需要。
+        let hex = fingerprint.to_hex();
+        if self.config.layout.iter().any(|p| p.fingerprint == hex) {
+            let mut next = self.config.clone();
+            next.layout.retain(|p| p.fingerprint != hex);
+            match self.store.save_config(&next) {
+                Ok(()) => self.config = next,
+                Err(e) => warn!("保存设置失败：{e}"),
+            }
+        }
         self.log(
             LogKind::Link,
             LogIcon::Unlink,
@@ -770,7 +863,7 @@ impl<H: Host> Runtime<H> {
         );
         self.toast(format!("已移除 {name}"));
         // 正连着这台：断开它，它下次来要重新配对。
-        if self.peer_fingerprint == Some(fingerprint) {
+        if self.links.iter().any(|l| l.fingerprint == fingerprint) {
             self.restart_engine().await;
         }
     }
@@ -805,10 +898,12 @@ impl<H: Host> Runtime<H> {
         let now = Instant::now();
         if now.duration_since(self.last_second) >= Duration::from_secs(1) {
             self.last_second = now;
-            if self.rtt.roll() {
-                self.dirty = true;
+            for link in &mut self.links {
+                if link.rtt.roll() {
+                    self.dirty = true;
+                }
             }
-            if self.peer.is_some() {
+            if !self.links.is_empty() {
                 self.activity.connected_for(1);
             }
         }
@@ -885,13 +980,20 @@ impl<H: Host> Runtime<H> {
     pub(crate) fn summary(&self) -> Summary {
         Summary {
             sharing: !self.paused,
-            connected_to: self.peer.as_ref().map(|p| p.name.clone()),
+            connected_to: (!self.links.is_empty()).then(|| {
+                self.links
+                    .iter()
+                    .map(|l| l.peer.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join("、")
+            }),
             problem: self.problem.as_ref().map(|p| p.message.clone()),
         }
     }
 
     pub(crate) fn snapshot(&self) -> State {
-        let online = self.peer_fingerprint;
+        let focus = self.focus_link();
+        let server = self.config.role == Role::Server;
         State {
             local: Local {
                 name: self.name.clone(),
@@ -906,10 +1008,10 @@ impl<H: Host> Runtime<H> {
             problem: self.problem.clone(),
             link: Link {
                 status: self.status,
-                peer: self.peer.clone(),
-                since: self.since,
-                cursor_on_peer: self.cursor_on_peer,
-                rtt_ms: self.rtt.history(),
+                peer: focus.map(|l| l.peer.clone()),
+                since: focus.map(|l| l.since),
+                cursor_on_peer: self.cursor.is_some(),
+                rtt_ms: focus.map_or_else(Vec::new, |l| l.rtt.history()),
             },
             clipboard: self.clipboard.clone(),
             peers: self
@@ -919,8 +1021,10 @@ impl<H: Host> Runtime<H> {
                     name: p.name.clone(),
                     fingerprint: p.fingerprint.to_hex(),
                     short: p.fingerprint.short(),
-                    online: online == Some(p.fingerprint),
+                    online: self.links.iter().any(|l| l.fingerprint == p.fingerprint),
                     last_seen: self.last_seen.get(&p.fingerprint).copied(),
+                    side: server.then(|| self.side_of(&p.fingerprint)),
+                    cursor: self.cursor == Some(p.fingerprint),
                 })
                 .collect(),
             found: self
@@ -941,6 +1045,7 @@ impl<H: Host> Runtime<H> {
             settings: Settings {
                 name: self.config.name.clone(),
                 side: self.config.side,
+                layout: self.config.layout.clone(),
                 swap_cmd_ctrl: self.config.swap_cmd_ctrl,
                 announce: self.config.announce,
                 clipboard: self.config.clipboard,

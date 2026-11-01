@@ -27,14 +27,26 @@ pub enum Event {
         fingerprint: Fingerprint,
         addr: SocketAddr,
     },
-    /// 会话结束。`reason` 为 `None` 表示对方正常断开。
-    Disconnected { reason: Option<String> },
-    /// 一次往返延迟。
-    Rtt(Duration),
-    /// 光标是否在本机。`hotkey` 表示是按快捷键回来的。
-    Cursor { here: bool, hotkey: bool },
-    /// 剪贴板同步完成。`to_peer` 为真表示对方拉走了本机的内容。
-    Clipboard { to_peer: bool, summary: ClipSummary },
+    /// 与 `peer` 的会话结束。`reason` 为 `None` 表示对方正常断开。
+    Disconnected {
+        peer: Fingerprint,
+        reason: Option<String>,
+    },
+    /// 与 `peer` 的一次往返延迟。
+    Rtt { peer: Fingerprint, rtt: Duration },
+    /// 光标是否在本机。不在时它在 `peer` 上；回到本机时 `peer` 是它刚离开的那台。
+    /// `hotkey` 表示是按快捷键回来的。
+    Cursor {
+        here: bool,
+        hotkey: bool,
+        peer: Fingerprint,
+    },
+    /// 与 `peer` 的剪贴板同步完成。`to_peer` 为真表示对方拉走了本机的内容。
+    Clipboard {
+        peer: Fingerprint,
+        to_peer: bool,
+        summary: ClipSummary,
+    },
     /// 配对成功，已记住对方。
     Paired {
         name: String,
@@ -50,6 +62,8 @@ pub enum Event {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TransferUpdate {
     pub id: TransferId,
+    /// 对方。
+    pub peer: Fingerprint,
     /// 本机是发送方。
     pub outgoing: bool,
     /// 显示用的名字：只有一项时是它的名字，多项时是第一项的名字。

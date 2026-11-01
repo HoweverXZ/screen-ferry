@@ -199,6 +199,7 @@ impl Rig {
                 live: setup.live.clone().unwrap_or_else(|| {
                     Live {
                         side: Side::Right,
+                        layout: Vec::new(),
                         remap: KeyRemap::swap_command_control(),
                     }
                     .fixed()
@@ -344,6 +345,98 @@ impl Rig {
             false
         })
         .await;
+    }
+}
+
+/// 同一台服务端上再连的一台客户端（1920×1080，150%），用来测同时连着几台设备。
+pub struct Extra {
+    pub name: String,
+    pub device: Device,
+    pub inject: MockInject,
+    pub client: JoinHandle<Error>,
+}
+
+impl Extra {
+    /// 它的证书指纹（十六进制）。连上之后才有。
+    pub fn fingerprint(&self) -> String {
+        self.device
+            .store
+            .identity(&self.name)
+            .unwrap()
+            .fingerprint()
+            .to_hex()
+    }
+}
+
+impl Rig {
+    /// 再连上一台叫 `name` 的客户端，等它和服务端建好会话再返回。
+    pub async fn add_client(&self, name: &str, edge: EdgeFeed) -> Extra {
+        let device = Device::new();
+        let (events, mut rx) = Events::channel();
+        let files = Files::new(&device.store, events.clone());
+        let inject = MockInject::new();
+        let config = ClientConfig {
+            server: ServerAddr::Fixed(self.addr),
+            name: name.into(),
+            clipboard: true,
+            store: device.store.clone(),
+            events,
+            files,
+            edge,
+        };
+        let client = tokio::spawn({
+            let inject = inject.clone();
+            let displays = MockDisplays::new(vec![display(1920, 1080, 150)]);
+            async move {
+                let confirm = AutoConfirm::answering(true);
+                match connect(config, inject, displays, MockClipboard::new(), confirm).await {
+                    Ok(never) => match never {},
+                    Err(e) => e,
+                }
+            }
+        });
+        let connected = async {
+            while let Some(event) = rx.recv().await {
+                if matches!(event, ferry_engine::Event::Connected { .. }) {
+                    return;
+                }
+            }
+        };
+        tokio::time::timeout(Duration::from_secs(5), connected)
+            .await
+            .expect("新的客户端 5 秒内没有连上");
+        // 之后的事件不关心，免得积压。
+        tokio::spawn(async move { while rx.recv().await.is_some() {} });
+        let extra = Extra {
+            name: name.into(),
+            device,
+            inject,
+            client,
+        };
+        // 客户端报告连上时，服务端可能还没登记这个会话；等服务端也连上它的数据连接。
+        let fingerprint = extra.fingerprint();
+        eventually("服务端登记了新的客户端", || {
+            self.mac_files
+                .connected()
+                .iter()
+                .any(|f| f.to_hex() == fingerprint)
+        })
+        .await;
+        extra
+    }
+
+    /// 主客户端 `pc` 的证书指纹（十六进制）。
+    pub fn pc_fingerprint(&self) -> String {
+        self.pc.store.identity("pc").unwrap().fingerprint().to_hex()
+    }
+
+    /// 本机光标停在 `(x, y)`，再朝外推 `(dx, dy)`。
+    pub fn push_at(&self, x: i32, y: i32, dx: i32, dy: i32) {
+        self.capture.emit(CaptureEvent::Pointer {
+            position: Point::new(x, y),
+            dx,
+            dy,
+        });
     }
 }
 

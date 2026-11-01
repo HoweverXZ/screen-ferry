@@ -275,6 +275,7 @@ async fn changing_side_mid_session_takes_effect_without_reconnecting() {
 
     let (tx, rx) = watch::channel(Live {
         side: Side::Right,
+        layout: Vec::new(),
         remap: KeyRemap::none(),
     });
     let rig = Rig::with(Setup {
@@ -306,4 +307,142 @@ async fn changing_side_mid_session_takes_effect_without_reconnecting() {
         false
     })
     .await;
+}
+
+mod several_clients {
+    use ferry_core::{KeyRemap, Side};
+    use ferry_engine::{EdgeFeed, Live};
+    use ferry_types::Placement;
+    use tokio::sync::watch;
+
+    use crate::support::{Rig, Setup, eventually};
+
+    /// 服务端（1000×800）连着 pc，`live` 由测试掌握。
+    async fn rig() -> (Rig, watch::Sender<Live>) {
+        let (tx, rx) = watch::channel(Live {
+            side: Side::Right,
+            layout: Vec::new(),
+            remap: KeyRemap::none(),
+        });
+        let rig = Rig::with(Setup {
+            live: Some(rx),
+            ..Setup::default()
+        })
+        .await;
+        rig.enter().await;
+        rig.leave().await;
+        (rig, tx)
+    }
+
+    /// 在 `(x, y)` 朝 `(dx, dy)` 往外推，直到进入某台客户端。
+    async fn enter_at(rig: &Rig, x: i32, y: i32, dx: i32, dy: i32) {
+        eventually("进入一台客户端", || {
+            if rig.capture.is_grabbed() {
+                return true;
+            }
+            rig.push_at(x, y, dx, dy);
+            false
+        })
+        .await;
+    }
+
+    /// 朝 `dx` 方向一直推，直到回到本机。
+    async fn come_back(rig: &Rig, dx: i32) {
+        eventually("回到本机", || {
+            if !rig.capture.is_grabbed() {
+                return true;
+            }
+            rig.push_at(500, 400, dx, 0);
+            false
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn each_client_gets_the_edge_it_is_placed_on() {
+        let (rig, live) = rig().await;
+        let laptop = rig.add_client("laptop", EdgeFeed::none()).await;
+        let fingerprint = laptop.fingerprint();
+        live.send_modify(|l| {
+            l.layout = vec![Placement {
+                fingerprint,
+                side: Side::Left,
+            }]
+        });
+
+        // 左边缘进 laptop，pc 收不到任何东西。
+        let pc_before = rig.inject.events().len();
+        enter_at(&rig, 0, 400, -4, 0).await;
+        eventually("laptop 收到进入", || !laptop.inject.events().is_empty()).await;
+        assert_eq!(rig.inject.events().len(), pc_before, "pc 没有收到");
+        come_back(&rig, 50).await;
+
+        // 右边缘仍然是 pc。
+        let laptop_before = laptop.inject.events().len();
+        enter_at(&rig, 999, 400, 4, 0).await;
+        eventually("pc 收到进入", || rig.inject.events().len() > pc_before).await;
+        assert_eq!(
+            laptop.inject.events().len(),
+            laptop_before,
+            "laptop 没有收到"
+        );
+    }
+
+    #[tokio::test]
+    async fn clients_on_the_same_side_share_the_edge_and_one_leaving_frees_its_part() {
+        let (rig, live) = rig().await;
+        let laptop = rig.add_client("laptop", EdgeFeed::none()).await;
+        // 都在右边：pc 在上半段，laptop 在下半段。
+        let (pc, lp) = (rig.pc_fingerprint(), laptop.fingerprint());
+        live.send_modify(|l| {
+            l.layout = vec![
+                Placement {
+                    fingerprint: pc,
+                    side: Side::Right,
+                },
+                Placement {
+                    fingerprint: lp,
+                    side: Side::Right,
+                },
+            ]
+        });
+
+        enter_at(&rig, 999, 700, 4, 0).await;
+        eventually("下半段进 laptop", || !laptop.inject.events().is_empty()).await;
+        come_back(&rig, -50).await;
+
+        let pc_before = rig.inject.events().len();
+        enter_at(&rig, 999, 100, 4, 0).await;
+        eventually("上半段进 pc", || rig.inject.events().len() > pc_before).await;
+        come_back(&rig, -50).await;
+
+        // laptop 断开：右边整条都归 pc。
+        laptop.client.abort();
+        let pc_before = rig.inject.events().len();
+        eventually("下半段也进 pc", || {
+            if rig.capture.is_grabbed() {
+                return rig.inject.events().len() > pc_before;
+            }
+            rig.push_at(999, 700, 4, 0);
+            false
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn moving_the_client_under_the_cursor_brings_the_cursor_back_first() {
+        let (rig, live) = rig().await;
+        let _laptop = rig.add_client("laptop", EdgeFeed::none()).await;
+        let pc = rig.pc_fingerprint();
+        enter_at(&rig, 999, 100, 4, 0).await;
+
+        live.send_modify(|l| {
+            l.layout = vec![Placement {
+                fingerprint: pc,
+                side: Side::Top,
+            }]
+        });
+        eventually("先回到本机", || !rig.capture.is_grabbed()).await;
+        enter_at(&rig, 500, 0, 0, -4).await;
+    }
 }

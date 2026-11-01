@@ -56,15 +56,23 @@ async fn a_session_reports_its_lifecycle_on_both_sides() {
     rig.enter().await;
     eventually("光标过去了", || {
         has(&mac, |e| {
-            *e == Event::Cursor {
-                here: false,
-                hotkey: false,
-            }
+            matches!(
+                e,
+                Event::Cursor {
+                    here: false,
+                    hotkey: false,
+                    ..
+                }
+            )
         }) && has(&pc, |e| {
-            *e == Event::Cursor {
-                here: true,
-                hotkey: false,
-            }
+            matches!(
+                e,
+                Event::Cursor {
+                    here: true,
+                    hotkey: false,
+                    ..
+                }
+            )
         })
     })
     .await;
@@ -75,21 +83,30 @@ async fn a_session_reports_its_lifecycle_on_both_sides() {
     rig.key(KeyCode::ESCAPE, KeyAction::Down);
     eventually("按快捷键回到本机", || {
         has(&mac, |e| {
-            *e == Event::Cursor {
-                here: true,
-                hotkey: true,
-            }
+            matches!(
+                e,
+                Event::Cursor {
+                    here: true,
+                    hotkey: true,
+                    ..
+                }
+            )
         }) && has(&pc, |e| {
-            *e == Event::Cursor {
-                here: false,
-                hotkey: false,
-            }
+            matches!(
+                e,
+                Event::Cursor {
+                    here: false,
+                    hotkey: false,
+                    ..
+                }
+            )
         })
     })
     .await;
 
     eventually("两边都测到往返延迟", || {
-        has(&mac, |e| matches!(e, Event::Rtt(_))) && has(&pc, |e| matches!(e, Event::Rtt(_)))
+        has(&mac, |e| matches!(e, Event::Rtt { .. }))
+            && has(&pc, |e| matches!(e, Event::Rtt { .. }))
     })
     .await;
 

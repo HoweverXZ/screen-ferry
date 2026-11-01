@@ -28,7 +28,7 @@ use tokio::sync::watch;
 use tokio::time::{MissedTickBehavior, interval, sleep, timeout};
 use tracing::{debug, info, warn};
 
-use crate::clipboard::{self, ClipboardTask, SharedClipboard, Start};
+use crate::clipboard::{self, ClipboardTask, Reporter, SharedClipboard, Start};
 use crate::edge_drop::{Edge, EdgeFeed, gone};
 use crate::error::{Error, Result};
 use crate::events::{Event, Events, FoundServer};
@@ -113,6 +113,7 @@ where
         cursor_hidden: false,
         edge: config.edge.clone(),
         peer_side: None,
+        server: None,
     };
     let mut searching = false;
     let mut seen = Vec::new();
@@ -129,15 +130,15 @@ where
         };
         let result = client.session(&config, &displays, &target).await;
         client.peer_side = None;
-        client.edge.edge(None);
-        client.edge.remote(None);
-        client.edge.pointer(|p| p.here = false);
+        client.edge.reset();
         client.release_all();
         client.hide_cursor(false);
         client.active.send_replace(false);
-        if std::mem::take(&mut client.in_session) {
+        if std::mem::take(&mut client.in_session)
+            && let Some(peer) = client.server
+        {
             let reason = result.as_ref().err().map(ToString::to_string);
-            config.events.emit(Event::Disconnected { reason });
+            config.events.emit(Event::Disconnected { peer, reason });
         }
         match result {
             // 刚配对完，立即用新的信任关系重连。
@@ -289,6 +290,8 @@ struct Client<I: InputInject, K, P> {
     edge: EdgeFeed,
     /// 服务端在本机的哪一侧；服务端说了才知道。
     peer_side: Option<Side>,
+    /// 最近一次会话的服务端。
+    server: Option<Fingerprint>,
 }
 
 /// 无论因为什么停下（包括整个引擎被关掉），都松开对方按着的键、让本机光标重新出现。
@@ -341,6 +344,7 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
         send(&mut framed, &Message::Displays(screens.clone())).await?;
         info!(server = %welcome.name, fingerprint = %server, "已连接，等待光标进入");
         self.in_session = true;
+        self.server = Some(server);
         // 刚连上时光标在服务端屏幕上。
         self.hide_cursor(true);
         self.events.emit(Event::Connected {
@@ -365,8 +369,8 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
             match link.connect(Channel::Data).await {
                 Ok(data) => {
                     info!("数据连接已建立");
-                    let files = files.then(|| config.files.attach(Some(link.opener())));
-                    Some(self.start_data(data, clipboard, files))
+                    let files = files.then(|| config.files.attach(server, Some(link.opener())));
+                    Some(self.start_data(data, server, clipboard, files))
                 }
                 Err(e) => {
                     warn!("数据连接失败，本次不同步剪贴板、不能传文件：{e}");
@@ -394,7 +398,8 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                 changed = hints.changed(), if edge_drop => {
                     if changed.is_ok() {
                         let hint = hints.borrow_and_update().clone();
-                        send(&mut framed, &Message::DropHint(hint.unwrap_or_else(gone))).await?;
+                        let hint = hint.map_or_else(gone, |(_, hint)| hint);
+                        send(&mut framed, &Message::DropHint(hint)).await?;
                     }
                     continue;
                 }
@@ -435,7 +440,10 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                     let sent = epoch + Duration::from_micros(nonce);
                     let now = Instant::now();
                     if sent <= now {
-                        self.events.emit(Event::Rtt(now - sent));
+                        self.events.emit(Event::Rtt {
+                            peer: server,
+                            rtt: now - sent,
+                        });
                     }
                 }
                 Some(Message::Enter(enter)) => {
@@ -452,6 +460,7 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                     self.events.emit(Event::Cursor {
                         here: true,
                         hotkey: false,
+                        peer: server,
                     });
                 }
                 Some(Message::Leave { .. }) => {
@@ -463,6 +472,7 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                     self.events.emit(Event::Cursor {
                         here: false,
                         hotkey: false,
+                        peer: server,
                     });
                 }
                 Some(Message::Input(event)) => self.apply(event),
@@ -470,7 +480,7 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                     info!(?side, "服务端在本机的这一侧");
                     self.publish_edge(side, &screens, &welcome.name);
                 }
-                Some(Message::DropHint(hint)) => self.edge.remote(Some(hint)),
+                Some(Message::DropHint(hint)) => self.edge.remote(server, Some(hint)),
                 Some(Message::Displays(_)) => {}
                 Some(other) => debug!(?other, "忽略消息"),
             }
@@ -539,15 +549,20 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
     fn start_data(
         &self,
         data: Framed<ClientStream>,
+        server: Fingerprint,
         sync: bool,
         files: Option<FileLink>,
     ) -> ClipboardTask {
+        let report = Reporter {
+            peer: server,
+            events: self.events.clone(),
+        };
         clipboard::spawn(
             data,
             self.clipboard.clone(),
             self.active.subscribe(),
             Start::Quiet,
-            self.events.clone(),
+            report,
             sync,
             files,
         )
@@ -582,16 +597,17 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
     /// 告诉边缘投递：朝向服务端的是哪条边、本机屏幕多大。
     fn publish_edge(&mut self, side: Side, screens: &[Display], peer: &str) {
         self.peer_side = Some(side);
-        let Some(rect) = bounds(screens) else {
+        let (Some(rect), Some(id)) = (bounds(screens), self.server) else {
             return;
         };
-        self.edge.edge(Some(Edge {
+        self.edge.edges(vec![Edge {
+            id,
             side,
             screen: frame_of(rect),
             scale: f32::from(primary_scale(screens)) / 100.0,
             peer: peer.to_owned(),
             online: true,
-        }));
+        }]);
     }
 
     /// 光标在服务端屏幕上时隐藏本机光标，回到本机时重新显示。失败只影响显示，不影响控制。

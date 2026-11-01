@@ -148,9 +148,12 @@ class _HeroCard extends StatelessWidget {
                             tone: PillTone.good,
                           ),
                         Pill(
-                          state.cursorOnPeer ? '光标在 ${peer?.name ?? state.peerName}' : '光标在本机',
+                          state.cursorOnPeer || state.cursorPeer != null
+                              ? '光标在 ${state.cursorPeer?.name ?? peer?.name ?? state.peerName}'
+                              : '光标在本机',
                           icon: Icons.near_me_rounded,
                         ),
+                        if (state.onlineCount > 1) Pill('已连接 ${state.onlineCount} 台', icon: Icons.devices_rounded),
                       ],
                     ),
                 ],

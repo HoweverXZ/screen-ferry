@@ -19,6 +19,9 @@ bool sameJson(Object? a, Object? b) {
   return a == b;
 }
 
+const pc = '3f9a12c477e0b1d2aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55';
+const mac = '7ab05cb238fbd60311223344556677889900aabbccddeeff0011223344556677';
+
 void main() {
   final samples = jsonDecode(File('test/fixtures/ipc_samples.json').readAsStringSync()) as Map<String, Object?>;
   final notices = (samples['notices']! as List).cast<Map<String, Object?>>();
@@ -67,8 +70,11 @@ void main() {
     expect(s.clipboard!.preview, '周三例会纪要');
     expect(s.peers.single.online, isTrue);
     expect(s.peers.single.lastSeen, isNull);
+    expect(s.peers.single.side, ScreenSide.left);
+    expect(s.peers.single.cursor, isTrue);
     expect(s.found.single.paired, isFalse);
     expect(s.settings.side, ScreenSide.right);
+    expect(s.settings.layout, [const Placement(pc, ScreenSide.left)]);
     expect(s.settings.theme, UiTheme.dark);
     expect(s.settings.accent, 2);
     expect(s.activity.single.switches, 12);
@@ -98,12 +104,13 @@ void main() {
   });
 
   test('Dart 编码的命令与样例一致', () {
-    const pc = '3f9a12c477e0b1d2aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55';
-    const mac = '7ab05cb238fbd60311223344556677889900aabbccddeeff0011223344556677';
     final ours = <Request>[
       HelloRequest('ab' * 32),
       const SetSharingRequest(false),
       const UpdateSettingsRequest(SettingsPatch(side: ScreenSide.left, autostart: true, theme: UiTheme.light)),
+      const UpdateSettingsRequest(
+        SettingsPatch(layout: [Placement(pc, ScreenSide.left), Placement(mac, ScreenSide.right)]),
+      ),
       const ForgetRequest(pc),
       const PairReplyRequest(3, accept: true),
       const ConnectRequest(mac),
@@ -111,6 +118,7 @@ void main() {
       const ClearLogRequest(),
       const OpenSettingsRequest(),
       const SendFilesRequest(['/Users/me/Desktop/证书.p12', '/Users/me/Desktop/设计稿']),
+      const SendFilesRequest(['/Users/me/Desktop/证书.p12'], to: pc),
     ];
     expect(ours, hasLength(requests.length));
     for (var i = 0; i < ours.length; i++) {
@@ -130,8 +138,31 @@ void main() {
     expect(Problem.fromJson({'kind': 'port_in_use', 'message': ''}).kind, ProblemKind.portInUse);
   });
 
+  test('旧版后台的数据缺少多设备字段时取缺省值', () {
+    final peer = PeerInfo.fromJson({'name': '办公室 PC', 'fingerprint': pc, 'short': '', 'online': true});
+    expect(peer.side, isNull);
+    expect(peer.cursor, isFalse);
+    expect(PeerInfo.fromJson({'side': 'diagonal'}).side, isNull, reason: '不认识的取值当作不知道');
+    final settings = DaemonSettings.fromJson({'name': '', 'side': 'left'});
+    expect(settings.side, ScreenSide.left);
+    expect(settings.layout, isEmpty);
+  });
+
   test('设置补丁只发出改了的字段', () {
     expect(const SettingsPatch(clipboard: false).toJson(), {'clipboard': false});
     expect(const SettingsPatch().isEmpty, isTrue);
+    expect(const SettingsPatch(layout: []).toJson(), {'layout': <Object?>[]}, reason: '空的 layout 也要发出去');
+  });
+
+  test('后台确认了同样的布局后，补丁里不再带 layout', () {
+    const layout = [Placement(pc, ScreenSide.left), Placement(mac, ScreenSide.right)];
+    final confirmed = DaemonSettings.fromJson({
+      'side': 'right',
+      'layout': [for (final p in layout) p.toJson()],
+    });
+    expect(const SettingsPatch(layout: layout).without(confirmed).isEmpty, isTrue);
+    final other = DaemonSettings.fromJson({'side': 'right'});
+    expect(const SettingsPatch(layout: layout).without(other).layout, layout);
+    expect(other.apply(const SettingsPatch(layout: layout)).layout, layout);
   });
 }

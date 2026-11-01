@@ -6,6 +6,9 @@
 //!
 //! 收到的卡片上可以直接把文件拖到任意文件夹；拖出去的过程中卡片一直留着，放下后收起。
 //!
+//! 服务端可能同时连着几台设备，每台占朝向它的那一段边（ADR 0006）：拖到哪一段就发给哪台，
+//! 进度、提示和卡片也出现在那台设备那一段。
+//!
 //! 两端联动：本机拖着文件靠近边缘时，经引擎把提示（`DropHint`）发给对方；对方在相邻边上
 //! 同一位置提前滑出接收胶囊，放下后接收进度也出现在那里。
 
@@ -16,10 +19,12 @@ use ferry_core::Side;
 use ferry_core::capsule::{Action, Avatar, Capsule, Glyph, Look, Tile, hit, place};
 use ferry_platform::{Overlay, OverlayEvent};
 use ferry_proto::{DropHint, HintState};
-use ferry_types::{Frame, Rgba, TransferId};
+use ferry_types::{Frame, Rgba};
 use tokio::sync::{mpsc, watch};
 use tokio::time::{Instant, sleep_until};
 use tracing::warn;
+
+use ferry_trust::Fingerprint;
 
 use crate::events::{TransferState, TransferUpdate};
 use crate::files::Files;
@@ -60,29 +65,36 @@ pub struct Pointer {
     pub here: bool,
 }
 
-/// 朝向对方的那条边。
+/// 朝向一台对方设备的那一段边。
 #[derive(Clone, Debug, PartialEq)]
 pub struct Edge {
+    /// 对方。
+    pub id: Fingerprint,
     /// 对方在本机的哪一侧。
     pub side: Side,
-    /// 本机屏幕的范围（桌面坐标）。
+    /// 本机朝向对方的那一段（桌面坐标）：贴着 `side` 那条边、与本机屏幕同宽或同高的矩形。
+    /// 只有一台设备在这一侧时就是整个屏幕。
     pub screen: Frame,
     /// 每个点对应多少桌面单位。
     pub scale: f32,
+    /// 对方的设备名。
     pub peer: String,
-    /// 是否连着对方。断开后仍保留这条边，拖文件过来时显示“未连接”。
+    /// 是否连着对方。一台都没连着时保留最后那些边，拖文件过来时显示“未连接”。
     pub online: bool,
 }
+
+/// 对方发来的拖动提示：哪台设备，提示内容；内容为 `None` 表示它的会话结束了。
+type Incoming = Option<(Fingerprint, Option<DropHint>)>;
 
 /// 引擎往边缘投递报告光标和边的地方。克隆后共用；没有边缘投递时什么也不做。
 #[derive(Clone)]
 pub struct EdgeFeed {
     pointer: watch::Sender<Pointer>,
-    edge: watch::Sender<Option<Edge>>,
-    /// 本机拖动中的提示，由引擎发给对方。`None` 表示没有在拖（对方应收起）。
-    outgoing: watch::Sender<Option<DropHint>>,
+    edges: watch::Sender<Vec<Edge>>,
+    /// 本机拖动中的提示和要发给哪台设备，由引擎发出。`None` 表示没有在拖（对方应收起）。
+    outgoing: watch::Sender<Option<(Fingerprint, DropHint)>>,
     /// 对方发来的拖动提示。
-    incoming: watch::Sender<Option<DropHint>>,
+    incoming: watch::Sender<Incoming>,
 }
 
 impl EdgeFeed {
@@ -90,25 +102,25 @@ impl EdgeFeed {
     pub fn none() -> Self {
         Self {
             pointer: watch::channel(Pointer::default()).0,
-            edge: watch::channel(None).0,
+            edges: watch::channel(Vec::new()).0,
             outgoing: watch::channel(None).0,
             incoming: watch::channel(None).0,
         }
     }
 
     /// 本机要发给对方的拖动提示，变了就发。
-    pub(crate) fn hints(&self) -> watch::Receiver<Option<DropHint>> {
+    pub(crate) fn hints(&self) -> watch::Receiver<Option<(Fingerprint, DropHint)>> {
         self.outgoing.subscribe()
     }
 
-    /// 对方发来一条拖动提示；`None` 表示会话结束。
-    pub(crate) fn remote(&self, hint: Option<DropHint>) {
-        self.incoming.send_replace(hint);
+    /// `peer` 发来一条拖动提示；`None` 表示和它的会话结束了。
+    pub(crate) fn remote(&self, peer: Fingerprint, hint: Option<DropHint>) {
+        self.incoming.send_replace(Some((peer, hint)));
     }
 
-    /// 引擎停下了（暂停共享、重启）：忘掉那条边、对方的提示和光标，胶囊随之收起。
+    /// 引擎停下了（暂停共享、重启）：忘掉那些边、对方的提示和光标，胶囊随之收起。
     pub(crate) fn reset(&self) {
-        self.edge.send_replace(None);
+        self.edges.send_replace(Vec::new());
         self.incoming.send_replace(None);
         self.pointer.send_replace(Pointer::default());
     }
@@ -122,11 +134,11 @@ impl EdgeFeed {
         });
     }
 
-    /// 朝向对方的边变了；没有连着能收文件的对方时为 `None`。
-    pub(crate) fn edge(&self, edge: Option<Edge>) {
-        self.edge.send_if_modified(|e| {
-            let changed = *e != edge;
-            *e = edge;
+    /// 朝向各台对方设备的边变了；没有能收文件的对方时为空。
+    pub(crate) fn edges(&self, edges: Vec<Edge>) {
+        self.edges.send_if_modified(|e| {
+            let changed = *e != edges;
+            *e = edges;
             changed
         });
     }
@@ -150,7 +162,7 @@ impl EdgeDrop {
     /// 在后台启动边缘投递。放下的文件交给 `files` 发送。
     pub fn spawn<O: Overlay + 'static>(mut overlay: O, files: Files, accent: Rgba) -> Self {
         let (pointer, pointer_rx) = watch::channel(Pointer::default());
-        let (edge, edge_rx) = watch::channel(None);
+        let (edges, edges_rx) = watch::channel(Vec::new());
         let (outgoing, _) = watch::channel(None);
         let (incoming, incoming_rx) = watch::channel(None);
         let (transfers, transfers_rx) = mpsc::unbounded_channel();
@@ -166,7 +178,7 @@ impl EdgeDrop {
             overlay,
             files,
             pointer: pointer_rx,
-            edge: edge_rx,
+            edges: edges_rx,
             outgoing: outgoing.clone(),
             incoming: incoming_rx,
             transfers: transfers_rx,
@@ -178,6 +190,9 @@ impl EdgeDrop {
             brief: None,
             card: None,
             target: None,
+            side: Side::Left,
+            scale: 1.0,
+            drag_target: None,
             pending_along: None,
             watching: None,
             remote: None,
@@ -193,7 +208,7 @@ impl EdgeDrop {
         Self {
             feed: EdgeFeed {
                 pointer,
-                edge,
+                edges,
                 outgoing,
                 incoming,
             },
@@ -233,6 +248,7 @@ struct Drag {
 
 /// 对方正在拖过来的东西。
 struct Remote {
+    peer: Fingerprint,
     hint: DropHint,
     /// 对方说“离开了”之后，接收胶囊留到什么时候。
     until: Option<Instant>,
@@ -245,8 +261,18 @@ struct Job {
     along: f32,
 }
 
+/// 一闪而过的提示。
+struct Brief {
+    look: Look,
+    along: f32,
+    until: Instant,
+    /// 关于哪台设备，决定贴在哪一段边上。
+    peer: Option<Fingerprint>,
+}
+
 /// 收到后的卡片。
 struct Card {
+    peer: Fingerprint,
     saved: Vec<PathBuf>,
     look: Look,
     along: f32,
@@ -257,20 +283,24 @@ struct Worker<O> {
     overlay: O,
     files: Files,
     pointer: watch::Receiver<Pointer>,
-    edge: watch::Receiver<Option<Edge>>,
-    outgoing: watch::Sender<Option<DropHint>>,
-    incoming: watch::Receiver<Option<DropHint>>,
+    edges: watch::Receiver<Vec<Edge>>,
+    outgoing: watch::Sender<Option<(Fingerprint, DropHint)>>,
+    incoming: watch::Receiver<Incoming>,
     transfers: mpsc::UnboundedReceiver<TransferUpdate>,
     events: mpsc::UnboundedReceiver<OverlayEvent>,
     accent: watch::Receiver<Rgba>,
     capsule: Capsule,
     drag: Option<Drag>,
     job: Option<Job>,
-    /// 一闪而过的提示：样子、位置、到什么时候。
-    brief: Option<(Look, f32, Instant)>,
+    brief: Option<Brief>,
     card: Option<Card>,
     /// 上一次要求胶囊显示成的样子和位置。
     target: Option<(Look, Frame)>,
+    /// 胶囊现在贴着的那一段边在哪一侧、每点多少桌面单位。
+    side: Side,
+    scale: f32,
+    /// 本机拖动正朝着哪台设备：放下时发给它。
+    drag_target: Option<Fingerprint>,
     /// 刚放下文件、进度还没来时，胶囊的位置。
     pending_along: Option<f32>,
     /// 正在请平台留意的贴边区域。
@@ -282,7 +312,7 @@ struct Worker<O> {
     /// 正在把卡片里的文件拖出去。
     dragging_out: bool,
     /// 最近一次发给对方的提示，和发出的时刻。
-    sent: Option<DropHint>,
+    sent: Option<(Fingerprint, DropHint)>,
     sent_at: Instant,
     /// 有一点小变化还没发，等到这个时刻再发。
     hint_due: Option<Instant>,
@@ -310,7 +340,7 @@ impl<O: Overlay> Worker<O> {
                     }
                     self.on_pointer();
                 }
-                changed = self.edge.changed() => {
+                changed = self.edges.changed() => {
                     if changed.is_err() {
                         return;
                     }
@@ -340,7 +370,7 @@ impl<O: Overlay> Worker<O> {
 
     /// 下一个到期的提示或卡片。
     fn deadline(&self) -> Option<Instant> {
-        let brief = self.brief.as_ref().map(|(_, _, until)| *until);
+        let brief = self.brief.as_ref().map(|b| b.until);
         let card = self.card.as_ref().map(|c| c.until);
         let remote = self.remote.as_ref().and_then(|r| r.until);
         brief
@@ -352,11 +382,7 @@ impl<O: Overlay> Worker<O> {
     }
 
     fn expire(&mut self, now: Instant) {
-        if self
-            .brief
-            .as_ref()
-            .is_some_and(|(_, _, until)| *until <= now)
-        {
+        if self.brief.as_ref().is_some_and(|b| b.until <= now) {
             self.brief = None;
         }
         // 正拖着卡片里的文件时，卡片不能自己收起。
@@ -374,11 +400,18 @@ impl<O: Overlay> Worker<O> {
     }
 
     fn on_remote(&mut self) {
-        let hint = self.incoming.borrow_and_update().clone();
-        match hint {
+        let incoming = self.incoming.borrow_and_update().clone();
+        let from = |remote: &Option<Remote>, peer| remote.as_ref().is_some_and(|r| r.peer == peer);
+        match incoming {
             None => self.remote = None,
-            Some(hint) if hint.state == HintState::Gone => {
+            Some((peer, None)) => {
+                if from(&self.remote, peer) {
+                    self.remote = None;
+                }
+            }
+            Some((peer, Some(hint))) if hint.state == HintState::Gone => {
                 if let Some(remote) = &mut self.remote
+                    && remote.peer == peer
                     && remote.until.is_none()
                 {
                     let linger = if remote.hint.state == HintState::Over {
@@ -389,7 +422,13 @@ impl<O: Overlay> Worker<O> {
                     remote.until = Some(Instant::now() + linger);
                 }
             }
-            Some(hint) => self.remote = Some(Remote { hint, until: None }),
+            Some((peer, Some(hint))) => {
+                self.remote = Some(Remote {
+                    peer,
+                    hint,
+                    until: None,
+                });
+            }
         }
     }
 
@@ -407,10 +446,7 @@ impl<O: Overlay> Worker<O> {
             (Some(_), false) => self.drag = None,
             (Some(drag), true) => {
                 // 靠近边缘时才去看拖的是什么，平时不打扰。
-                let near = self
-                    .edge
-                    .borrow()
-                    .as_ref()
+                let near = edge_at(&self.edges.borrow(), &pointer)
                     .is_some_and(|edge| distance(edge, &pointer) <= NEAR);
                 if near && drag.files.is_none() && self.overlay.drag_count() != drag.count {
                     let files = not_ours(self.overlay.dragged_files(), &self.offered);
@@ -451,7 +487,15 @@ impl<O: Overlay> Worker<O> {
             OverlayEvent::Dropped { paths } => {
                 let along = self.along();
                 self.drag = None;
-                match self.files.send(paths).await {
+                let target = self.drag_target.take().or_else(|| {
+                    let pointer = *self.pointer.borrow();
+                    edge_at(&self.edges.borrow(), &pointer).map(|e| e.id)
+                });
+                let sent = match target {
+                    Some(peer) => self.files.send(peer, paths).await,
+                    None => Err(crate::error::Error::NotConnected),
+                };
+                match sent {
                     Ok(_) => {
                         // 进度到来之前先占住位置，免得胶囊收起又弹出来。
                         self.brief = None;
@@ -461,7 +505,12 @@ impl<O: Overlay> Worker<O> {
                     Err(e) => {
                         let look =
                             wide(Avatar::Warn, ["发不出去", &e.to_string(), ""], Action::None);
-                        self.brief = Some((look, along, Instant::now() + NOTICE));
+                        self.brief = Some(Brief {
+                            look,
+                            along,
+                            until: Instant::now() + NOTICE,
+                            peer: target,
+                        });
                     }
                 }
             }
@@ -521,9 +570,18 @@ impl<O: Overlay> Worker<O> {
     }
 
     fn on_transfer(&mut self, update: TransferUpdate) {
-        let along = self.transfer_along(update.id);
+        let along = self.transfer_along(&update);
         let what = name_of(&update);
-        let peer = self.peer();
+        let id = update.peer;
+        let peer = self.peer_name(&id);
+        let brief = |look, until| {
+            Some(Brief {
+                look,
+                along,
+                until: Instant::now() + until,
+                peer: Some(id),
+            })
+        };
         match &update.state {
             TransferState::Waiting | TransferState::Running => {
                 self.card = None;
@@ -544,6 +602,7 @@ impl<O: Overlay> Worker<O> {
                     chip: true,
                 };
                 self.card = Some(Card {
+                    peer: id,
                     saved: saved.clone(),
                     look,
                     along,
@@ -556,7 +615,7 @@ impl<O: Overlay> Worker<O> {
                     ["已发送", &format!("到 {peer}"), ""],
                     Action::None,
                 );
-                self.brief = Some((look, along, Instant::now() + BRIEF));
+                self.brief = brief(look, BRIEF);
             }
             TransferState::Interrupted => {
                 let look = wide(
@@ -564,7 +623,7 @@ impl<O: Overlay> Worker<O> {
                     ["传输中断", &what, "重新连上后接着传"],
                     Action::None,
                 );
-                self.brief = Some((look, along, Instant::now() + NOTICE));
+                self.brief = brief(look, NOTICE);
             }
             TransferState::Cancelled { .. } => {
                 let detail = if update.outgoing {
@@ -573,11 +632,11 @@ impl<O: Overlay> Worker<O> {
                     "临时文件已删除"
                 };
                 let look = wide(Avatar::Cross, ["已取消", detail, ""], Action::None);
-                self.brief = Some((look, along, Instant::now() + BRIEF));
+                self.brief = brief(look, BRIEF);
             }
             TransferState::Failed { reason } => {
                 let look = wide(Avatar::Warn, ["传输失败", &what, reason], Action::None);
-                self.brief = Some((look, along, Instant::now() + NOTICE));
+                self.brief = brief(look, NOTICE);
             }
         }
         if self
@@ -592,7 +651,7 @@ impl<O: Overlay> Worker<O> {
     /// 拖着还不知道是什么的东西靠近边缘时，请平台在贴边留意；知道了或离开了就不再留意。
     fn watch(&mut self) {
         let pointer = *self.pointer.borrow();
-        let edge = self.edge.borrow().clone();
+        let edge = edge_at(&self.edges.borrow(), &pointer).cloned();
         let wanted = match (&self.drag, &edge) {
             (Some(drag), Some(edge))
                 if pointer.here && drag.files.is_none() && distance(edge, &pointer) <= NEAR =>
@@ -607,47 +666,55 @@ impl<O: Overlay> Worker<O> {
         }
     }
 
-    /// 根据现状决定胶囊该显示成什么样子、放在哪里。
+    /// 根据现状决定胶囊该显示成什么样子、贴在哪一段边的哪里。
     fn decide(&mut self) {
-        let edge = self.edge.borrow().clone();
-        let Some(edge) = edge else {
+        let edges = self.edges.borrow().clone();
+        if edges.is_empty() {
+            self.drag_target = None;
             self.retarget(None);
             return;
-        };
+        }
         let pointer = *self.pointer.borrow();
-        let wanted = self
-            .dragging(&edge, &pointer)
+        // 关于某台设备的东西贴在它那一段；它已经不在了，就贴在还在的第一段。
+        let of = |peer: Option<Fingerprint>| -> Option<Edge> {
+            peer.and_then(|id| edges.iter().find(|e| e.id == id))
+                .or(edges.first())
+                .cloned()
+        };
+        let dragging = self.dragging(&edges, &pointer);
+        self.drag_target = dragging.as_ref().map(|(_, _, edge)| edge.id);
+        let wanted = dragging
             .or_else(|| {
-                self.job
-                    .as_ref()
-                    .map(|job| (progress(&job.update), job.along))
+                let job = self.job.as_ref()?;
+                Some((progress(&job.update), job.along, of(Some(job.update.peer))?))
             })
-            .or_else(|| self.receiving(&edge))
+            .or_else(|| self.receiving(&edges))
             .or_else(|| {
-                self.brief
-                    .as_ref()
-                    .map(|(look, along, _)| (look.clone(), *along))
+                let brief = self.brief.as_ref()?;
+                Some((brief.look.clone(), brief.along, of(brief.peer)?))
             })
             .or_else(|| {
-                self.card
-                    .as_ref()
-                    .map(|card| (card.look.clone(), card.along))
+                let card = self.card.as_ref()?;
+                Some((card.look.clone(), card.along, of(Some(card.peer))?))
             });
-        let target = wanted.map(|(look, along)| {
+        let target = wanted.map(|(look, along, edge)| {
             let frame = place(&look, edge.side, edge.screen, along, edge.scale);
+            self.side = edge.side;
+            self.scale = edge.scale;
             (look, frame)
         });
         self.retarget(target);
     }
 
-    /// 拖着文件靠近边缘时的样子。
-    fn dragging(&self, edge: &Edge, pointer: &Pointer) -> Option<(Look, f32)> {
+    /// 拖着文件靠近某一段边时的样子，以及那一段。
+    fn dragging(&self, edges: &[Edge], pointer: &Pointer) -> Option<(Look, f32, Edge)> {
         let drag = self.drag.as_ref()?;
         let files = drag.files.as_ref().filter(|f| !f.is_empty())?;
         if !pointer.here {
             return None;
         }
-        let along = along_of(edge, pointer);
+        let edge = edge_at(edges, pointer)?.clone();
+        let along = along_of(&edge, pointer);
         let offline = !edge.online;
         if drag.over {
             let lines = if offline {
@@ -662,9 +729,9 @@ impl<O: Overlay> Worker<O> {
                 offline,
                 action: Action::None,
             };
-            return Some((look, along));
+            return Some((look, along, edge));
         }
-        let d = distance(edge, pointer);
+        let d = distance(&edge, pointer);
         if d > NEAR {
             return None;
         }
@@ -675,13 +742,15 @@ impl<O: Overlay> Worker<O> {
             offline,
             closeness,
         };
-        Some((look, along))
+        Some((look, along, edge))
     }
 
-    /// 对方正在拖过来时的接收胶囊。
-    fn receiving(&self, edge: &Edge) -> Option<(Look, f32)> {
-        let hint = &self.remote.as_ref()?.hint;
-        let along = along_from(edge, hint.along);
+    /// 对方正在拖过来时的接收胶囊，贴在那台设备那一段。
+    fn receiving(&self, edges: &[Edge]) -> Option<(Look, f32, Edge)> {
+        let remote = self.remote.as_ref()?;
+        let edge = edges.iter().find(|e| e.id == remote.peer)?.clone();
+        let hint = &remote.hint;
+        let along = along_from(&edge, hint.along);
         let look = match hint.state {
             HintState::Over => {
                 let what = if hint.items > 1 {
@@ -709,14 +778,16 @@ impl<O: Overlay> Worker<O> {
                 closeness: f32::from(hint.closeness) / 100.0,
             },
         };
-        Some((look, along))
+        Some((look, along, edge))
     }
 
-    /// 把本机拖动的现状告诉对方。只在有明显变化时更新，免得占用输入连接。
+    /// 把本机拖动的现状告诉拖向的那台设备。只在有明显变化时更新，免得占用输入连接。
     fn publish_hint(&mut self) {
-        let edge = self.edge.borrow().clone();
         let pointer = *self.pointer.borrow();
-        let hint = edge.filter(|e| e.online).and_then(|edge| {
+        let edge = edge_at(&self.edges.borrow(), &pointer)
+            .filter(|e| e.online)
+            .cloned();
+        let hint = edge.and_then(|edge| {
             let drag = self.drag.as_ref()?;
             let (name, items, bytes) = drag.summary.clone()?;
             if !pointer.here {
@@ -731,20 +802,21 @@ impl<O: Overlay> Worker<O> {
             } else {
                 return None;
             };
-            Some(DropHint {
+            let hint = DropHint {
                 state,
                 along: fraction_of(&edge, &pointer),
                 closeness,
                 name,
                 items,
                 bytes,
-            })
+            };
+            Some((edge.id, hint))
         });
-        // 状态变了马上发；只是挪了一点，攒够间隔再发。
+        // 状态变了、换了设备马上发；只是挪了一点，攒够间隔再发。
         let (changed, urgent) = match (&self.sent, &hint) {
             (None, None) => (false, false),
-            (Some(a), Some(b)) => {
-                let urgent = a.state != b.state || a.name != b.name;
+            (Some((pa, a)), Some((pb, b))) => {
+                let urgent = pa != pb || a.state != b.state || a.name != b.name;
                 let moved =
                     a.closeness.abs_diff(b.closeness) >= 5 || a.along.abs_diff(b.along) >= 50;
                 (urgent || moved, urgent)
@@ -771,9 +843,8 @@ impl<O: Overlay> Worker<O> {
         if target == self.target {
             return;
         }
-        let side = self.edge.borrow().as_ref().map_or(Side::Left, |e| e.side);
         match &target {
-            Some((look, frame)) => self.capsule.show(look.clone(), side, *frame),
+            Some((look, frame)) => self.capsule.show(look.clone(), self.side, *frame),
             None => self.capsule.hide(),
         }
         self.target = target;
@@ -786,7 +857,7 @@ impl<O: Overlay> Worker<O> {
         let push = moving || self.dirty || !self.shown;
         self.moving = moving;
         self.dirty = false;
-        let scale = self.edge.borrow().as_ref().map_or(1.0, |e| e.scale);
+        let scale = self.scale;
         let accent = *self.accent.borrow();
         match self.capsule.render(scale, accent) {
             Some((window, scene)) => {
@@ -803,43 +874,56 @@ impl<O: Overlay> Worker<O> {
         }
     }
 
+    /// 光标沿着它靠近的那一段边的位置。
     fn along(&self) -> f32 {
         let pointer = *self.pointer.borrow();
-        self.edge
-            .borrow()
-            .as_ref()
-            .map_or(pointer.y, |edge| along_of(edge, &pointer))
+        edge_at(&self.edges.borrow(), &pointer).map_or(pointer.y, |edge| along_of(edge, &pointer))
     }
 
-    /// 一次传输的胶囊放在哪里：沿用已有的位置，新的接收放在屏幕中间。
-    fn transfer_along(&mut self, id: TransferId) -> f32 {
-        if let Some(job) = self.job.as_ref().filter(|j| j.update.id == id) {
+    /// 一次传输的胶囊放在哪里：沿用已有的位置，对方拖过来的放在拖过来的地方，
+    /// 其余放在那台设备那一段的中间。
+    fn transfer_along(&mut self, update: &TransferUpdate) -> f32 {
+        if let Some(job) = self.job.as_ref().filter(|j| j.update.id == update.id) {
             return job.along;
         }
         if let Some(along) = self.pending_along.take() {
             return along;
         }
-        // 对方刚才拖过来的位置。
-        if let Some(remote) = &self.remote
-            && let Some(edge) = self.edge.borrow().as_ref()
-        {
+        let edges = self.edges.borrow();
+        let Some(edge) = edges.iter().find(|e| e.id == update.peer).or(edges.first()) else {
+            return 0.0;
+        };
+        if let Some(remote) = self.remote.as_ref().filter(|r| r.peer == update.peer) {
             return along_from(edge, remote.hint.along);
         }
-        self.edge
-            .borrow()
-            .as_ref()
-            .map_or(0.0, |edge| match edge.side {
-                Side::Left | Side::Right => edge.screen.y + edge.screen.h / 2.0,
-                Side::Top | Side::Bottom => edge.screen.x + edge.screen.w / 2.0,
-            })
+        match edge.side {
+            Side::Left | Side::Right => edge.screen.y + edge.screen.h / 2.0,
+            Side::Top | Side::Bottom => edge.screen.x + edge.screen.w / 2.0,
+        }
     }
 
-    fn peer(&self) -> String {
-        self.edge
+    /// 设备名，用于显示。
+    fn peer_name(&self, peer: &Fingerprint) -> String {
+        self.edges
             .borrow()
-            .as_ref()
+            .iter()
+            .find(|e| e.id == *peer)
             .map_or_else(|| "对方".to_owned(), |e| e.peer.clone())
     }
+}
+
+/// 光标沿边落在哪一段：落在里面的几段中离光标最近的那一段。
+fn edge_at<'a>(edges: &'a [Edge], p: &Pointer) -> Option<&'a Edge> {
+    edges
+        .iter()
+        .filter(|edge| {
+            let s = edge.screen;
+            match edge.side {
+                Side::Left | Side::Right => p.y >= s.y && p.y < s.bottom(),
+                Side::Top | Side::Bottom => p.x >= s.x && p.x < s.right(),
+            }
+        })
+        .min_by(|a, b| distance(a, p).total_cmp(&distance(b, p)))
 }
 
 /// 光标离朝向对方的那条边多远（点）。

@@ -21,6 +21,7 @@ use ferry_proto::limits::MAX_CHUNK_LEN;
 use ferry_proto::{
     Cancel, CancelReason, Chunk, ClipboardItem, ClipboardOffer, ClipboardRequest, Message,
 };
+use ferry_trust::Fingerprint;
 use ferry_types::{ClipboardContent, ClipboardFormat};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::watch;
@@ -60,7 +61,14 @@ pub(crate) enum Start {
     Quiet,
 }
 
-/// 在数据连接上启动剪贴板同步。`active` 表示光标是否在本机。
+/// 和哪台设备同步，结果报告给谁。
+pub(crate) struct Reporter {
+    pub(crate) peer: Fingerprint,
+    pub(crate) events: Events,
+}
+
+/// 在数据连接上启动剪贴板同步。`active` 表示对这台设备而言本机是不是活动端：
+/// 客户端上是光标是否在本机，服务端上是光标是否不在这台设备上。
 ///
 /// 数据连接比输入连接晚建立，期间光标可能已经切走，
 /// 所以连上时是否通告由 `start` 决定，而不看这一刻谁是活动端。
@@ -70,7 +78,7 @@ pub(crate) fn spawn<S, C>(
     clipboard: SharedClipboard<C>,
     active: watch::Receiver<bool>,
     start: Start,
-    events: Events,
+    report: Reporter,
     sync: bool,
     files: Option<FileLink>,
 ) -> ClipboardTask
@@ -79,7 +87,7 @@ where
     C: Clipboard,
 {
     ClipboardTask(tokio::spawn(async move {
-        let mut sync = ClipboardSync::new(framed, clipboard, active, events, sync, files);
+        let mut sync = ClipboardSync::new(framed, clipboard, active, report, sync, files);
         match sync.run(start).await {
             Ok(()) => debug!("数据连接已关闭"),
             Err(e) => warn!("剪贴板同步中断：{e}"),
@@ -100,7 +108,7 @@ struct ClipboardSync<S, C> {
     offer: Option<ClipboardOffer>,
     fetch: Option<Fetch>,
     next_transfer: u32,
-    events: Events,
+    report: Reporter,
     /// 最近一次报告“已被对方拉走”的通告序号，同一份内容的几个格式只报告一次。
     reported: Option<u32>,
     /// 是否同步剪贴板。
@@ -126,7 +134,7 @@ where
         framed: Framed<S>,
         clipboard: SharedClipboard<C>,
         active: watch::Receiver<bool>,
-        events: Events,
+        report: Reporter,
         sync: bool,
         files: Option<FileLink>,
     ) -> Self {
@@ -140,7 +148,7 @@ where
             offer: None,
             fetch: None,
             next_transfer: 1,
-            events,
+            report,
             reported: None,
             sync,
             files,
@@ -325,7 +333,8 @@ where
             && let Some((_, content)) = &self.offered
         {
             self.reported = Some(request.seq);
-            self.events.emit(Event::Clipboard {
+            self.report.events.emit(Event::Clipboard {
+                peer: self.report.peer,
                 to_peer: true,
                 summary: ClipSummary::of(content),
             });
@@ -372,7 +381,8 @@ where
                     bytes = fetch.done.total_len(),
                     "已同步对方的剪贴板"
                 );
-                self.events.emit(Event::Clipboard {
+                self.report.events.emit(Event::Clipboard {
+                    peer: self.report.peer,
                     to_peer: false,
                     summary: ClipSummary::of(&fetch.done),
                 });

@@ -44,7 +44,7 @@ pub struct Config {
     /// 设备名，空为计算机名。
     pub name: String,
     pub role: Role,
-    /// 服务端：对方屏幕在本机哪一侧。
+    /// 服务端：没有在 `layout` 里单独安排的设备放在本机哪一侧。
     pub side: Side,
     /// 服务端：把 Command 当作对方的 Ctrl。
     pub swap_cmd_ctrl: bool,
@@ -58,11 +58,27 @@ pub struct Config {
     pub theme: Theme,
     /// 设置界面的强调色，界面预设颜色的序号。
     pub accent: u8,
+    /// 服务端：单独安排过位置的设备，按先后排列。同一侧的几台按这个先后平分那条边，
+    /// 没有列出的设备放在 `side` 一侧、排在列出的后面。
+    ///
+    /// 写成 TOML 时是表格数组，必须放在最后。
+    pub layout: Vec<Placement>,
 }
 
 impl Config {
     /// 当前的配置结构版本。
-    pub const SCHEMA_VERSION: u32 = 1;
+    ///
+    /// - 1：第一版。
+    /// - 2：新增 `layout`；`side` 改为“没有单独安排的设备放在哪一侧”，只有一台设备时与版本 1 等价。
+    pub const SCHEMA_VERSION: u32 = 2;
+}
+
+/// 一台设备放在服务端的哪一侧。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Placement {
+    /// 设备的证书指纹，64 位十六进制。
+    pub fingerprint: String,
+    pub side: Side,
 }
 
 impl Default for Config {
@@ -78,6 +94,7 @@ impl Default for Config {
             server: String::new(),
             theme: Theme::System,
             accent: 0,
+            layout: Vec::new(),
         }
     }
 }

@@ -7,4 +7,5 @@ mod edge_switch;
 mod file_name;
 mod key_remap;
 mod layout;
+mod neighbors;
 mod pressed;

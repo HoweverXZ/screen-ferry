@@ -193,7 +193,7 @@ pub async fn send_via_running(store: &Store, paths: Vec<String>) -> Result<Strin
     let mut conn = ferry_ipc::connect(&endpoint)
         .await
         .map_err(|e| format!("连不上正在运行的 ScreenFerry：{e}"))?;
-    conn.send(&Request::SendFiles { paths })
+    conn.send(&Request::SendFiles { paths, to: None })
         .await
         .map_err(|e| format!("发不出请求：{e}"))?;
     // 后台展开大文件夹需要一点时间；先推来的状态快照和日志跳过，只等提示。

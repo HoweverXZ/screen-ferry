@@ -7,10 +7,18 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 
 import '../ipc/messages.dart';
+import 'arrangement.dart';
 import 'backend.dart';
 
 class DemoBackend implements Backend {
-  DemoBackend({this.role = Role.server, this.animate = true, this.startOnline = true, this._problem}) {
+  /// [paired] 为假时没有任何已配对的设备。
+  DemoBackend({
+    this.role = Role.server,
+    this.animate = true,
+    this.startOnline = true,
+    bool paired = true,
+    this._problem,
+  }) {
     final now = DateTime.now();
     _since = now.subtract(const Duration(hours: 1, minutes: 12, seconds: 14));
     _clip = ClipboardSync(
@@ -22,12 +30,19 @@ class DemoBackend implements Backend {
       at: now.subtract(const Duration(seconds: 12)),
     );
     if (role == Role.server) {
-      _peers.addAll([
-        _peer('办公室 PC', 'pc', online: true),
-        _peer('家里的笔记本', 'nb', lastSeen: now.subtract(const Duration(days: 3))),
-      ]);
+      if (paired) {
+        // 办公室 PC 和书房 PC 在右侧（书房 PC 没有单独安排，跟着默认的一侧排在后面），笔记本在左侧。
+        _peers.addAll([
+          _peer('办公室 PC', 'pc', online: true),
+          _peer('书房 PC', 'study', online: true),
+          _peer('家里的笔记本', 'nb', lastSeen: now.subtract(const Duration(days: 3))),
+        ]);
+        _settings = _settings.apply(
+          SettingsPatch(layout: [Placement(_fp('pc'), ScreenSide.right), Placement(_fp('nb'), ScreenSide.left)]),
+        );
+      }
     } else {
-      _peers.add(_peer('Mac Studio', 'mac', online: true));
+      if (paired) _peers.add(_peer('Mac Studio', 'mac', online: true));
       _found.add(_device('会议室 Mac', 'mr', '192.168.2.31'));
     }
     for (var h = 8; h <= now.hour; h++) {
@@ -52,7 +67,12 @@ class DemoBackend implements Backend {
   int _nextPairing = 1;
 
   bool _sharing = true;
-  bool _cursorOnPeer = false;
+
+  /// 光标所在的设备；在本机时为 null。
+  String? _cursor;
+
+  /// 最近连上（或光标最近去过）的设备。
+  String? _recent;
   Problem? _problem;
   late DateTime _since;
   ClipboardSync? _clip;
@@ -74,7 +94,21 @@ class DemoBackend implements Backend {
   );
 
   String get _localName => role == Role.server ? 'Mac Studio' : '办公室 PC';
-  String get _peerName => role == Role.server ? '办公室 PC' : 'Mac Studio';
+
+  /// 连接摘要指向的那台：光标所在的，否则最近连上的，再否则第一台在线的。
+  PeerInfo? get _linkPeer {
+    final online = _peers.where((p) => p.online).toList();
+    for (final fp in [_cursor, _recent]) {
+      final p = online.where((p) => p.fingerprint == fp).firstOrNull;
+      if (p != null) return p;
+    }
+    return online.firstOrNull;
+  }
+
+  String get _peerName =>
+      _linkPeer?.name ?? _peers.firstOrNull?.name ?? (role == Role.server ? '办公室 PC' : 'Mac Studio');
+
+  String _nameOf(String fingerprint) => _peers.where((p) => p.fingerprint == fingerprint).firstOrNull?.name ?? '对方';
 
   @override
   ValueListenable<DaemonLink> get link => _link;
@@ -112,6 +146,13 @@ class DemoBackend implements Backend {
     _emitState();
   }
 
+  /// 模拟光标切到某台设备；null 为回到本机。
+  set cursor(String? fingerprint) {
+    _cursor = fingerprint;
+    if (fingerprint != null) _recent = fingerprint;
+    _emitState();
+  }
+
   /// 模拟对方发起配对，返回请求编号。
   int requestPairing(String peerName) {
     final id = _nextPairing++;
@@ -136,18 +177,23 @@ class DemoBackend implements Backend {
     switch (request) {
       case SetSharingRequest(:final on):
         _sharing = on;
-        _cursorOnPeer = false;
+        _cursor = null;
         _addLog(LogKind.link, on ? LogIcon.play : LogIcon.pause, on ? '继续共享' : '暂停共享', on ? '键鼠可以切到对方' : '键鼠留在本机');
         emit(ToastNotice(on ? '已继续共享' : '已暂停共享'));
       case UpdateSettingsRequest(:final settings):
-        final side = settings.side;
-        if (side != null && side != _settings.side) {
-          _addLog(LogKind.link, LogIcon.layout, '$_peerName 移到本机${_sideLabel(side)}', '布局已保存');
-        }
+        final before = Arrangement.of(_peers, _settings);
         _settings = _settings.apply(settings);
+        _logLayout(before, Arrangement.of(_peers, _settings));
       case ForgetRequest(:final fingerprint):
         final gone = _peers.where((p) => p.fingerprint == fingerprint).toList();
         _peers.removeWhere((p) => p.fingerprint == fingerprint);
+        if (_cursor == fingerprint) _cursor = null;
+        // 它的位置安排也不再需要。
+        if (_settings.layout.any((p) => p.fingerprint == fingerprint)) {
+          _settings = _settings.apply(
+            SettingsPatch(layout: [..._settings.layout.where((p) => p.fingerprint != fingerprint)]),
+          );
+        }
         for (final p in gone) {
           _addLog(LogKind.link, LogIcon.unlink, '已移除 ${p.name}', '下次连接需要重新配对');
           emit(ToastNotice('已移除 ${p.name}'));
@@ -184,9 +230,10 @@ class DemoBackend implements Backend {
       case ClearLogRequest():
         _log.clear();
         emit(const ToastNotice('日志已清空'));
-      case SendFilesRequest(:final paths):
-        _addLog(LogKind.file, LogIcon.file, '发送 ${paths.length} 项到 $_peerName', '演示模式不会真的发送');
-        emit(ToastNotice('开始发给 $_peerName'));
+      case SendFilesRequest(:final paths, :final to):
+        final name = to == null ? _peerName : _nameOf(to);
+        _addLog(LogKind.file, LogIcon.file, '发送 ${paths.length} 项到 $name', '演示模式不会真的发送');
+        emit(ToastNotice('开始发给 $name'));
       case HelloRequest() || OpenPermissionSettingsRequest() || OpenSettingsRequest():
         break;
     }
@@ -210,18 +257,44 @@ class DemoBackend implements Backend {
       _rtt
         ..removeAt(0)
         ..add(0.26 + _random.nextDouble() * 0.12 + (_tick % 13 == 0 ? 0.3 : 0));
-      if (_tick % 6 == 0) {
-        _cursorOnPeer = !_cursorOnPeer;
-        if (_cursorOnPeer) _hours[DateTime.now().hour]++;
-        _addLog(
-          LogKind.cursor,
-          LogIcon.cursor,
-          _cursorOnPeer ? '光标切到 $_peerName' : '光标回到 本机',
-          _cursorOnPeer ? '从本机${_sideLabel(_settings.side)}边缘' : '从对方屏幕边缘',
-        );
-      }
+      if (_tick % 6 == 0) _moveCursor();
     }
     _emitState();
+  }
+
+  /// 光标轮流去每台在线的设备，中间回到本机一次。
+  void _moveCursor() {
+    final online = _peers.where((p) => p.online).toList();
+    if (online.isEmpty) return;
+    if (_cursor != null) {
+      final from = _nameOf(_cursor!);
+      _cursor = null;
+      _addLog(LogKind.cursor, LogIcon.cursor, '光标回到 本机', '从 $from 的屏幕边缘');
+      return;
+    }
+    final last = online.indexWhere((p) => p.fingerprint == _recent);
+    final next = online[(last + 1) % online.length];
+    _cursor = next.fingerprint;
+    _recent = next.fingerprint;
+    _hours[DateTime.now().hour]++;
+    final side = role == Role.server ? Arrangement.of(_peers, _settings).placeOf(next.fingerprint)?.side : null;
+    _addLog(LogKind.cursor, LogIcon.cursor, '光标切到 ${next.name}', side == null ? '从本机屏幕边缘' : '从本机${_sideLabel(side)}边缘');
+  }
+
+  /// 布局改了：哪台换了一侧，或同一侧换了先后。
+  void _logLayout(Arrangement before, Arrangement after) {
+    if (before.sameAs(after)) return;
+    final moved = [
+      for (final p in after.all)
+        if (before.placeOf(p.fingerprint)?.side != after.placeOf(p.fingerprint)?.side) p,
+    ];
+    if (moved.isEmpty) {
+      _addLog(LogKind.link, LogIcon.layout, '调整了同一侧设备的先后', '布局已保存');
+      return;
+    }
+    for (final p in moved) {
+      _addLog(LogKind.link, LogIcon.layout, '${p.name} 移到本机${_sideLabel(after.placeOf(p.fingerprint)!.side)}', '布局已保存');
+    }
   }
 
   void _emitState() {
@@ -238,6 +311,8 @@ class DemoBackend implements Backend {
         : LinkStatus.paused;
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
+    final linkPeer = connected ? _linkPeer : null;
+    final arrangement = Arrangement.of(_peers, _settings);
     return DaemonState(
       local: Local(
         name: _localName,
@@ -252,21 +327,34 @@ class DemoBackend implements Backend {
       sharing: _sharing,
       problem: _problem,
       link: Link(
-        status: status,
-        peer: connected
-            ? PeerRef(
-                name: _peerName,
-                fingerprint: _peers.first.fingerprint,
-                short: _peers.first.short,
-                addr: '192.168.2.18',
-              )
-            : null,
-        since: connected ? _since : null,
-        cursorOnPeer: connected && _cursorOnPeer,
-        rttMs: connected ? List.of(_rtt) : const [],
+        status: linkPeer == null && status == LinkStatus.connected
+            ? (role == Role.server ? LinkStatus.waiting : LinkStatus.searching)
+            : status,
+        peer: linkPeer == null
+            ? null
+            : PeerRef(
+                name: linkPeer.name,
+                fingerprint: linkPeer.fingerprint,
+                short: linkPeer.short,
+                addr: '192.168.2.${18 + _peers.indexOf(linkPeer)}',
+              ),
+        since: linkPeer != null ? _since : null,
+        cursorOnPeer: linkPeer != null && _cursor == linkPeer.fingerprint,
+        rttMs: linkPeer != null ? List.of(_rtt) : const [],
       ),
       clipboard: _clip,
-      peers: List.of(_peers),
+      peers: [
+        for (final p in _peers)
+          PeerInfo(
+            name: p.name,
+            fingerprint: p.fingerprint,
+            short: p.short,
+            online: p.online,
+            lastSeen: p.lastSeen,
+            side: role == Role.server ? arrangement.placeOf(p.fingerprint)?.side : null,
+            cursor: connected && p.online && _cursor == p.fingerprint,
+          ),
+      ],
       found: List.of(_found),
       settings: _settings,
       activity: [

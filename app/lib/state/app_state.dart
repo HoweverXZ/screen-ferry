@@ -6,10 +6,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../ipc/messages.dart';
+import 'arrangement.dart';
 import 'backend.dart';
 import 'demo_backend.dart';
 
 export '../ipc/messages.dart';
+export 'arrangement.dart';
 export 'backend.dart' show Backend, DaemonLink, IpcBackend;
 export 'demo_backend.dart' show DemoBackend;
 
@@ -167,7 +169,14 @@ class AppState extends ChangeNotifier {
   Problem? get problem => _daemon?.problem;
 
   /// 对方的名字；没连上时取第一台已配对的设备，再没有就叫“对方”。
+  /// 连着几台时 [peer] 是光标所在（否则最近连上）的那台。
   String get peerName => peer?.name ?? peers.firstOrNull?.name ?? '对方';
+
+  /// 光标所在的那台设备；光标在本机或没在共享时为 null。
+  PeerInfo? get cursorPeer => connected ? peers.where((p) => p.cursor).firstOrNull : null;
+
+  /// 已连接的设备有几台。
+  int get onlineCount => peers.where((p) => p.online).length;
 
   List<double> get rtt => connected ? (_daemon?.link.rttMs ?? const []) : const [];
   double? get latestRtt => rtt.isEmpty ? null : rtt.last;
@@ -211,7 +220,14 @@ class AppState extends ChangeNotifier {
               ))
           .apply(_pending);
 
+  /// 没有单独安排过位置的设备放在本机哪一侧；只有一台设备时就是它所在的那一侧。
   ScreenSide get side => settings.side;
+
+  /// 服务端：每台已配对设备在本机四周的位置。按设置（含还没确认的改动）算出。
+  Arrangement get arrangement => Arrangement.of(peers, settings);
+
+  /// 服务端：一台设备在本机哪一侧、排第几；不是已配对的设备时为 null。
+  PeerPlace? placeOf(String fingerprint) => arrangement.placeOf(fingerprint);
 
   // ── 今日 ──
 
@@ -280,8 +296,18 @@ class AppState extends ChangeNotifier {
 
   void setAccent(int accent) => updateSettings(SettingsPatch(accent: accent));
 
+  /// 改变没有单独安排的设备放在哪一侧。
   void moveScreen(ScreenSide to) {
     if (to != side) updateSettings(SettingsPatch(side: to));
+  }
+
+  /// 把一台设备移到本机 [to] 一侧的第 [index] 位（按去掉它之后的那一侧算）。
+  /// 发出的 layout 列出全部已配对设备，之后每台都是单独安排过的。位置没变时不发。
+  void moveDevice(String fingerprint, ScreenSide to, int index) {
+    final now = arrangement;
+    final next = now.moved(fingerprint, to, index);
+    if (next.sameAs(now)) return;
+    updateSettings(SettingsPatch(layout: next.toLayout()));
   }
 
   void forget(PeerInfo peer) {

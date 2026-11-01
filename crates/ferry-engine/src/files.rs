@@ -3,6 +3,8 @@
 //! [`Files`] 是一台设备上所有传输的控制中心，服务端和客户端各一个，跨会话保留，
 //! 断线重连后据此续传。控制消息（通告、接受、取消）走数据连接，
 //! 内容走每次单独打开的文件连接，文件连接始终由客户端打开。
+//!
+//! 服务端可能同时连着几台设备：每台一条数据连接、一组任务，续传只对同一台设备有效（ADR 0006）。
 
 mod manifest;
 mod receive;
@@ -18,6 +20,7 @@ use std::time::{Duration, Instant};
 use ferry_net::{ClientStream, Framed};
 use ferry_proto::{CancelReason, FileCancel, FileOffer, Message};
 use ferry_store::Store;
+use ferry_trust::Fingerprint;
 use ferry_types::TransferId;
 use ring::rand::{SecureRandom, SystemRandom};
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -62,13 +65,21 @@ struct Inner {
 
 #[derive(Default)]
 struct State {
-    link: Option<Link>,
+    /// 每台连着的设备一条数据连接。
+    links: HashMap<Fingerprint, Link>,
     /// 每次连上数据连接加一，旧连接迟到的断开据此识别。
     generation: u64,
     jobs: HashMap<TransferId, Job>,
 }
 
-/// 当前会话的数据连接。
+impl State {
+    /// 发给 `peer` 的控制消息的去处；没连着时为 `None`。
+    fn tx(&self, peer: &Fingerprint) -> Option<UnboundedSender<Message>> {
+        self.links.get(peer).map(|link| link.tx.clone())
+    }
+}
+
+/// 一台设备当前会话的数据连接。
 struct Link {
     generation: u64,
     /// 要在数据连接上发出的控制消息。
@@ -78,6 +89,8 @@ struct Link {
 }
 
 struct Job {
+    /// 对方。
+    peer: Fingerprint,
     kind: JobKind,
     /// 正在传输时的任务。
     task: Option<AbortHandle>,
@@ -92,10 +105,11 @@ enum JobKind {
 }
 
 impl JobKind {
-    fn update(&self, done: u64, state: TransferState) -> TransferUpdate {
+    fn update(&self, peer: Fingerprint, done: u64, state: TransferState) -> TransferUpdate {
         match self {
             Self::Send(plan) => TransferUpdate {
                 id: plan.id,
+                peer,
                 outgoing: true,
                 name: plan.name.clone(),
                 items: plan.items,
@@ -106,6 +120,7 @@ impl JobKind {
             },
             Self::Receive(offer) => TransferUpdate {
                 id: offer.id,
+                peer,
                 outgoing: false,
                 name: offer.name.clone(),
                 items: offer.items,
@@ -151,11 +166,11 @@ impl Files {
         }
     }
 
-    /// 把这些文件和文件夹发给当前连着的对方，返回这次传输的编号。
+    /// 把这些文件和文件夹发给连着的 `peer`，返回这次传输的编号。
     ///
     /// 展开文件夹需要读磁盘，在后台线程完成。对方会自动接受，进展经 [`Event::Transfer`] 报告。
-    pub async fn send(&self, paths: Vec<PathBuf>) -> Result<TransferId> {
-        if self.lock().link.is_none() {
+    pub async fn send(&self, peer: Fingerprint, paths: Vec<PathBuf>) -> Result<TransferId> {
+        if !self.lock().links.contains_key(&peer) {
             return Err(Error::NotConnected);
         }
         let id = new_id()?;
@@ -167,13 +182,14 @@ impl Files {
         let offer = plan.offer();
         {
             let mut state = self.lock();
-            let Some(link) = &state.link else {
+            let Some(tx) = state.tx(&peer) else {
                 return Err(Error::NotConnected);
             };
-            let _ = link.tx.send(Message::FileOffer(offer));
+            let _ = tx.send(Message::FileOffer(offer));
             state.jobs.insert(
                 id,
                 Job {
+                    peer,
                     kind: JobKind::Send(plan.clone()),
                     task: None,
                     retries: 0,
@@ -186,8 +202,13 @@ impl Files {
             bytes = plan.bytes,
             "准备发送文件"
         );
-        self.emit(JobKind::Send(plan).update(0, TransferState::Waiting));
+        self.emit(JobKind::Send(plan).update(peer, 0, TransferState::Waiting));
         Ok(id)
+    }
+
+    /// 现在连着、可以收发文件的设备。
+    pub fn connected(&self) -> Vec<Fingerprint> {
+        self.lock().links.keys().copied().collect()
     }
 
     /// 取消一次传输。对方会收到通知；接收方删掉已收到的部分。
@@ -195,24 +216,28 @@ impl Files {
         self.stop(id, false);
     }
 
-    /// 连上一条数据连接。之前没传完的发送任务立即重新通告，接着传。
+    /// 与 `peer` 连上一条数据连接。之前没传给它的发送任务立即重新通告，接着传。
     ///
     /// 返回的 [`FileLink`] 交给数据连接的任务：它要发出 `outbound` 中的消息，
-    /// 并把收到的文件控制消息交给 [`Files::on_control`]。丢弃它即表示数据连接已断开。
-    pub(crate) fn attach(&self, opener: Option<Opener>) -> FileLink {
+    /// 并把收到的文件控制消息交给 [`FileLink::on_control`]。丢弃它即表示数据连接已断开。
+    pub(crate) fn attach(&self, peer: Fingerprint, opener: Option<Opener>) -> FileLink {
         let (tx, outbound) = mpsc::unbounded_channel();
         let (generation, resumed) = {
             let mut state = self.lock();
             state.generation += 1;
             let generation = state.generation;
-            state.link = Some(Link {
-                generation,
-                tx: tx.clone(),
-                opener,
-            });
+            state.links.insert(
+                peer,
+                Link {
+                    generation,
+                    tx: tx.clone(),
+                    opener,
+                },
+            );
             let resumed: Vec<Arc<Plan>> = state
                 .jobs
                 .values_mut()
+                .filter(|job| job.peer == peer)
                 .filter_map(|job| match &job.kind {
                     JobKind::Send(plan) => {
                         job.retries = 0;
@@ -226,27 +251,38 @@ impl Files {
         for plan in resumed {
             info!(name = %plan.name, "重新连上，接着发送");
             let _ = tx.send(Message::FileOffer(plan.offer()));
-            self.emit(JobKind::Send(plan).update(0, TransferState::Waiting));
+            self.emit(JobKind::Send(plan).update(peer, 0, TransferState::Waiting));
         }
         FileLink {
             files: self.clone(),
             outbound,
             generation,
+            peer,
         }
     }
 
-    /// 数据连接上收到的文件控制消息。
-    pub(crate) fn on_control(&self, message: Message) {
+    /// `peer` 的数据连接上收到的文件控制消息。
+    fn on_control(&self, peer: Fingerprint, message: Message) {
         match message {
-            Message::FileOffer(offer) => self.on_offer(offer),
-            Message::FileAccept { id } => self.on_accept(id),
-            Message::FileCancel(FileCancel { id, .. }) => self.stop(id, true),
+            Message::FileOffer(offer) => self.on_offer(peer, offer),
+            Message::FileAccept { id } => self.on_accept(peer, id),
+            Message::FileCancel(FileCancel { id, .. }) if self.belongs(id, peer) => {
+                self.stop(id, true);
+            }
             _ => {}
         }
     }
 
-    /// 服务端收到一条文件连接（握手已完成）：等它说明是哪次传输，再开始收发。
-    pub(crate) fn serve<S>(&self, mut framed: Framed<S>)
+    /// 这次传输是不是和 `peer` 之间的。
+    fn belongs(&self, id: TransferId, peer: Fingerprint) -> bool {
+        self.lock()
+            .jobs
+            .get(&id)
+            .is_some_and(|job| job.peer == peer)
+    }
+
+    /// 服务端收到 `peer` 的一条文件连接（握手已完成）：等它说明是哪次传输，再开始收发。
+    pub(crate) fn serve<S>(&self, peer: Fingerprint, mut framed: Framed<S>)
     where
         S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     {
@@ -259,7 +295,11 @@ impl Files {
                     return;
                 }
             };
-            let idle = files.lock().jobs.get(&id).is_some_and(|j| j.task.is_none());
+            let idle = files
+                .lock()
+                .jobs
+                .get(&id)
+                .is_some_and(|j| j.task.is_none() && j.peer == peer);
             if !idle {
                 warn!(%id, "文件连接对应的传输不存在或已在进行，已关闭");
                 return;
@@ -269,20 +309,21 @@ impl Files {
         });
     }
 
-    fn on_offer(&self, offer: FileOffer) {
+    fn on_offer(&self, peer: Fingerprint, offer: FileOffer) {
         let id = offer.id;
         let (tx, opener) = {
             let mut state = self.lock();
             if state.jobs.contains_key(&id) {
                 return;
             }
-            let Some(link) = &state.link else {
+            let Some(link) = state.links.get(&peer) else {
                 return;
             };
             let found = (link.tx.clone(), link.opener.clone());
             state.jobs.insert(
                 id,
                 Job {
+                    peer,
                     kind: JobKind::Receive(offer.clone()),
                     task: None,
                     retries: 0,
@@ -291,21 +332,20 @@ impl Files {
             found
         };
         info!(name = %offer.name, files = offer.files, bytes = offer.bytes, "对方发来文件，开始接收");
-        self.emit(JobKind::Receive(offer).update(0, TransferState::Waiting));
+        self.emit(JobKind::Receive(offer).update(peer, 0, TransferState::Waiting));
         let _ = tx.send(Message::FileAccept { id });
         if let Some(opener) = opener {
             self.open_and_run(id, opener);
         }
     }
 
-    fn on_accept(&self, id: TransferId) {
+    fn on_accept(&self, peer: Fingerprint, id: TransferId) {
         let opener = {
             let state = self.lock();
-            let sending = state
-                .jobs
-                .get(&id)
-                .is_some_and(|j| j.task.is_none() && matches!(j.kind, JobKind::Send(_)));
-            match &state.link {
+            let sending = state.jobs.get(&id).is_some_and(|j| {
+                j.peer == peer && j.task.is_none() && matches!(j.kind, JobKind::Send(_))
+            });
+            match state.links.get(&peer) {
                 Some(link) if sending => link.opener.clone(),
                 _ => None,
             }
@@ -330,11 +370,15 @@ impl Files {
     where
         S: AsyncRead + AsyncWrite + Unpin,
     {
-        let kind = self.lock().jobs.get(&id).map(|job| job.kind.clone());
-        let Some(kind) = kind else {
+        let job = self
+            .lock()
+            .jobs
+            .get(&id)
+            .map(|job| (job.peer, job.kind.clone()));
+        let Some((peer, kind)) = job else {
             return Err(Stop::Fail("这次传输已经不存在".into()));
         };
-        let mut progress = Progress::new(self.inner.events.clone(), kind.clone());
+        let mut progress = Progress::new(self.inner.events.clone(), peer, kind.clone());
         match &kind {
             JobKind::Send(plan) => send::run(&mut framed, plan, &mut progress).await,
             JobKind::Receive(offer) => {
@@ -393,12 +437,18 @@ impl Files {
                     Some(first) => info!(at = %first.display(), "文件收好了"),
                     None => info!("文件发送完成"),
                 }
-                self.emit(job.kind.update(total, TransferState::Done { saved }));
+                self.emit(
+                    job.kind
+                        .update(job.peer, total, TransferState::Done { saved }),
+                );
             }
             Err(Stop::Net(reason)) => {
-                let (kind, retry) = {
+                let (peer, kind, retry) = {
                     let mut state = self.lock();
-                    let tx = state.link.as_ref().map(|link| link.tx.clone());
+                    let Some(peer) = state.jobs.get(&id).map(|job| job.peer) else {
+                        return;
+                    };
+                    let tx = state.tx(&peer);
                     let Some(job) = state.jobs.get_mut(&id) else {
                         return;
                     };
@@ -415,10 +465,10 @@ impl Files {
                         // 发送方会用同一个编号重新通告，届时再接着收。
                         state.jobs.remove(&id);
                     }
-                    (kind, retry)
+                    (peer, kind, retry)
                 };
                 warn!(%reason, "文件传输中断");
-                self.emit(kind.update(0, TransferState::Interrupted));
+                self.emit(kind.update(peer, 0, TransferState::Interrupted));
                 if let Some((tx, offer)) = retry {
                     let _ = tx.send(Message::FileOffer(offer));
                 }
@@ -426,10 +476,9 @@ impl Files {
             Err(Stop::Fail(reason)) => {
                 let (job, tx) = {
                     let mut state = self.lock();
-                    (
-                        state.jobs.remove(&id),
-                        state.link.as_ref().map(|link| link.tx.clone()),
-                    )
+                    let job = state.jobs.remove(&id);
+                    let tx = job.as_ref().and_then(|job| state.tx(&job.peer));
+                    (job, tx)
                 };
                 let Some(job) = job else {
                     return;
@@ -445,7 +494,10 @@ impl Files {
                 if matches!(job.kind, JobKind::Receive(_)) {
                     self.discard_partial(id);
                 }
-                self.emit(job.kind.update(0, TransferState::Failed { reason }));
+                self.emit(
+                    job.kind
+                        .update(job.peer, 0, TransferState::Failed { reason }),
+                );
             }
         }
     }
@@ -454,10 +506,9 @@ impl Files {
     fn stop(&self, id: TransferId, by_peer: bool) {
         let (job, tx) = {
             let mut state = self.lock();
-            (
-                state.jobs.remove(&id),
-                state.link.as_ref().map(|link| link.tx.clone()),
-            )
+            let job = state.jobs.remove(&id);
+            let tx = job.as_ref().and_then(|job| state.tx(&job.peer));
+            (job, tx)
         };
         let Some(job) = job else {
             return;
@@ -476,24 +527,28 @@ impl Files {
             self.discard_partial(id);
         }
         info!(%id, by_peer, "文件传输已取消");
-        self.emit(job.kind.update(0, TransferState::Cancelled { by_peer }));
+        self.emit(
+            job.kind
+                .update(job.peer, 0, TransferState::Cancelled { by_peer }),
+        );
     }
 
-    /// 数据连接断开：停下正在进行的传输。发送任务留着，下次连上接着传。
-    fn detach(&self, generation: u64) {
+    /// 与 `peer` 的数据连接断开：停下和它之间正在进行的传输。发送任务留着，下次连上接着传。
+    fn detach(&self, peer: Fingerprint, generation: u64) {
         let stopped: Vec<JobKind> = {
             let mut state = self.lock();
             if state
-                .link
-                .as_ref()
+                .links
+                .get(&peer)
                 .is_none_or(|l| l.generation != generation)
             {
                 return;
             }
-            state.link = None;
+            state.links.remove(&peer);
             let stopped = state
                 .jobs
                 .values_mut()
+                .filter(|job| job.peer == peer)
                 .map(|job| {
                     if let Some(task) = job.task.take() {
                         task.abort();
@@ -503,11 +558,11 @@ impl Files {
                 .collect();
             state
                 .jobs
-                .retain(|_, job| matches!(job.kind, JobKind::Send(_)));
+                .retain(|_, job| job.peer != peer || matches!(job.kind, JobKind::Send(_)));
             stopped
         };
         for kind in stopped {
-            self.emit(kind.update(0, TransferState::Interrupted));
+            self.emit(kind.update(peer, 0, TransferState::Interrupted));
         }
     }
 
@@ -533,6 +588,7 @@ pub(crate) struct FileLink {
     files: Files,
     outbound: UnboundedReceiver<Message>,
     generation: u64,
+    peer: Fingerprint,
 }
 
 impl FileLink {
@@ -541,29 +597,32 @@ impl FileLink {
         self.outbound.recv().await
     }
 
+    /// 数据连接上收到的文件控制消息。
     pub(crate) fn on_control(&self, message: Message) {
-        self.files.on_control(message);
+        self.files.on_control(self.peer, message);
     }
 }
 
 impl Drop for FileLink {
     fn drop(&mut self) {
-        self.files.detach(self.generation);
+        self.files.detach(self.peer, self.generation);
     }
 }
 
 /// 传输进度，限频报告。
 pub(crate) struct Progress {
     events: Events,
+    peer: Fingerprint,
     kind: JobKind,
     done: u64,
     last: Instant,
 }
 
 impl Progress {
-    fn new(events: Events, kind: JobKind) -> Self {
+    fn new(events: Events, peer: Fingerprint, kind: JobKind) -> Self {
         Self {
             events,
+            peer,
             kind,
             done: 0,
             last: Instant::now(),
@@ -585,7 +644,9 @@ impl Progress {
 
     fn report(&mut self) {
         self.last = Instant::now();
-        let update = self.kind.update(self.done, TransferState::Running);
+        let update = self
+            .kind
+            .update(self.peer, self.done, TransferState::Running);
         self.events.emit(Event::Transfer(update));
     }
 }

@@ -19,7 +19,7 @@ pub(crate) fn parse(path: &Path, data: &[u8]) -> Result<Config> {
             found: config.schema_version,
         });
     }
-    // 版本 1 是第一版，还没有需要迁移的旧格式。
+    // 版本 1 → 2：只新增了 `layout`（缺省为空），`side` 原样沿用，读进来就是等价的版本 2。
     Ok(Config {
         schema_version: Config::SCHEMA_VERSION,
         ..config

@@ -112,7 +112,7 @@ fn config_defaults_until_saved_then_round_trips() {
     store.save_config(&config).unwrap();
     let text = fs::read_to_string(dir.path().join("config.toml")).unwrap();
     assert!(
-        text.starts_with("schema_version = 1\n"),
+        text.starts_with("schema_version = 2\n"),
         "第一行必须是 schema_version：{text}"
     );
     assert_eq!(store.config().unwrap(), config);
@@ -136,11 +136,53 @@ fn config_tolerates_missing_and_unknown_fields() {
 fn config_from_a_newer_version_is_refused() {
     let dir = TempDir::new();
     let store = Store::open(dir.path()).unwrap();
-    fs::write(dir.path().join("config.toml"), "schema_version = 2\n").unwrap();
+    fs::write(dir.path().join("config.toml"), "schema_version = 3\n").unwrap();
     assert!(matches!(
         store.config(),
-        Err(Error::TooNew { found: 2, .. })
+        Err(Error::TooNew { found: 3, .. })
     ));
+}
+
+#[test]
+fn a_version_1_config_reads_as_version_2_with_an_empty_layout() {
+    use ferry_types::{Config, Placement, Side};
+
+    let dir = TempDir::new();
+    let store = Store::open(dir.path()).unwrap();
+    fs::write(
+        dir.path().join("config.toml"),
+        "schema_version = 1\nside = \"left\"\nclipboard = false\n",
+    )
+    .unwrap();
+    let config = store.config().unwrap();
+    assert_eq!(config.schema_version, Config::SCHEMA_VERSION);
+    assert_eq!(
+        config.side,
+        Side::Left,
+        "原来的一侧成为没有单独安排的设备的一侧"
+    );
+    assert!(config.layout.is_empty());
+    assert!(!config.clipboard);
+
+    // 安排过位置后写回：版本号更新，布局排在最后。
+    let config = Config {
+        layout: vec![
+            Placement {
+                fingerprint: "ab".repeat(32),
+                side: Side::Right,
+            },
+            Placement {
+                fingerprint: "cd".repeat(32),
+                side: Side::Right,
+            },
+        ],
+        ..config
+    };
+    store.save_config(&config).unwrap();
+    let text = fs::read_to_string(dir.path().join("config.toml")).unwrap();
+    assert!(text.starts_with("schema_version = 2\n"), "{text}");
+    assert!(text.contains("[[layout]]"), "{text}");
+    assert_eq!(store.config().unwrap(), config);
 }
 
 #[test]

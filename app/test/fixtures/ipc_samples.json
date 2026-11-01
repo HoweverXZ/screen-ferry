@@ -58,11 +58,13 @@
         },
         "peers": [
           {
+            "cursor": true,
             "fingerprint": "3f9a12c477e0b1d2aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55",
             "last_seen": null,
             "name": "办公室 PC",
             "online": true,
-            "short": "3F9A-12C4-77E0-B1D2"
+            "short": "3F9A-12C4-77E0-B1D2",
+            "side": "left"
           }
         ],
         "problem": null,
@@ -71,6 +73,12 @@
           "announce": true,
           "autostart": false,
           "clipboard": true,
+          "layout": [
+            {
+              "fingerprint": "3f9a12c477e0b1d2aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55",
+              "side": "left"
+            }
+          ],
           "name": "",
           "server": "",
           "side": "right",
@@ -119,11 +127,13 @@
         },
         "peers": [
           {
+            "cursor": true,
             "fingerprint": "3f9a12c477e0b1d2aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55",
             "last_seen": null,
             "name": "办公室 PC",
             "online": true,
-            "short": "3F9A-12C4-77E0-B1D2"
+            "short": "3F9A-12C4-77E0-B1D2",
+            "side": "left"
           }
         ],
         "problem": {
@@ -135,6 +145,12 @@
           "announce": true,
           "autostart": false,
           "clipboard": true,
+          "layout": [
+            {
+              "fingerprint": "3f9a12c477e0b1d2aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55",
+              "side": "left"
+            }
+          ],
           "name": "",
           "server": "",
           "side": "right",
@@ -207,6 +223,21 @@
       "type": "update_settings"
     },
     {
+      "settings": {
+        "layout": [
+          {
+            "fingerprint": "3f9a12c477e0b1d2aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55",
+            "side": "left"
+          },
+          {
+            "fingerprint": "7ab05cb238fbd60311223344556677889900aabbccddeeff0011223344556677",
+            "side": "right"
+          }
+        ]
+      },
+      "type": "update_settings"
+    },
+    {
       "fingerprint": "3f9a12c477e0b1d2aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55",
       "type": "forget"
     },
@@ -233,6 +264,13 @@
         "/Users/me/Desktop/证书.p12",
         "/Users/me/Desktop/设计稿"
       ],
+      "type": "send_files"
+    },
+    {
+      "paths": [
+        "/Users/me/Desktop/证书.p12"
+      ],
+      "to": "3f9a12c477e0b1d2aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55",
       "type": "send_files"
     }
   ],

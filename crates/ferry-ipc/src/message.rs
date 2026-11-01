@@ -3,7 +3,7 @@
 //! 设置界面（Dart）手写了对应的类型，两边靠 `app/test/fixtures/ipc_samples.json` 中的样例保持一致：
 //! 改动这里的任何结构，都要同时改 Dart 侧并重新生成样例，见 `docs/ipc.md`。
 
-use ferry_types::{Role, Side, Theme};
+use ferry_types::{Placement, Role, Side, Theme};
 use serde::{Deserialize, Serialize};
 
 /// 协议版本。不兼容的改动才递增。
@@ -34,8 +34,13 @@ pub enum Request {
     ClearLog,
     /// 请后台打开设置界面。另一份后台启动时用它把用户引到已在运行的这一份。
     OpenSettings,
-    /// 把这些文件和文件夹（本机的绝对路径）发给当前连着的对方。结果以 `toast` 和日志告知。
-    SendFiles { paths: Vec<String> },
+    /// 把这些文件和文件夹（本机的绝对路径）发给连着的设备 `to`（证书指纹）。
+    /// 不指定时发给光标最近去过的那台，只连着一台时就是它。结果以 `toast` 和日志告知。
+    SendFiles {
+        paths: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        to: Option<String>,
+    },
 }
 
 /// 后台 → 界面。
@@ -66,6 +71,7 @@ pub struct State {
     pub sharing: bool,
     /// 妨碍工作的问题，例如缺少权限。没有问题时为 `null`。
     pub problem: Option<Problem>,
+    /// 连接摘要：连着几台时指光标所在（否则最近连上）的那台。每台设备是否连着见 `peers`。
     pub link: Link,
     /// 最近一次剪贴板同步。
     pub clipboard: Option<ClipboardSync>,
@@ -175,6 +181,13 @@ pub struct PeerInfo {
     pub online: bool,
     /// 本次运行中最后一次断开的时刻（Unix 毫秒）；本次运行没连过为 `null`。
     pub last_seen: Option<i64>,
+    /// 服务端：这台设备在本机哪一侧；客户端为 `null`。
+    /// 同一侧的先后见 `settings.layout`，没有列在里面的排在后面。
+    #[serde(default)]
+    pub side: Option<Side>,
+    /// 光标正在这台设备上。
+    #[serde(default)]
+    pub cursor: bool,
 }
 
 /// 局域网里发现的一台服务端。
@@ -191,7 +204,12 @@ pub struct FoundDevice {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Settings {
     pub name: String,
+    /// 没有在 `layout` 里单独安排的设备放在本机哪一侧。
     pub side: Side,
+    /// 单独安排过位置的设备，按先后排列：同一侧的几台按这个先后平分那条边
+    /// （左右两侧从上到下，上下两侧从左到右）。
+    #[serde(default)]
+    pub layout: Vec<Placement>,
     pub swap_cmd_ctrl: bool,
     pub announce: bool,
     pub clipboard: bool,
@@ -211,6 +229,9 @@ pub struct SettingsPatch {
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub side: Option<Side>,
+    /// 整份替换。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layout: Option<Vec<Placement>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub swap_cmd_ctrl: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]

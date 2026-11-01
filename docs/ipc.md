@@ -56,11 +56,15 @@ sharing   用户没有暂停共享
 problem   null | { kind(permission|port_in_use|other), message }
 link      status(paused|starting|waiting|searching|connecting|connected|stopped)
           peer(null | { name, fingerprint, short, addr }) · since · cursor_on_peer · rtt_ms[]
+          连着几台时是摘要：指光标所在（否则最近连上）的那台；每台是否连着见 peers
 clipboard null | { to_peer, peer, chars, bytes, preview, at }
-peers[]   { name, fingerprint, short, online, last_seen }
+peers[]   { name, fingerprint, short, online, last_seen,
+            side（服务端：在本机哪一侧；客户端为 null）, cursor（光标正在它上面） }
 found[]   { name, fingerprint, short, addr, paired }        只有客户端会有
-settings  { name, side(left|right|top|bottom), swap_cmd_ctrl, announce, clipboard, server, autostart,
-            theme(system|light|dark), accent }
+settings  { name, side(left|right|top|bottom), layout[], swap_cmd_ctrl, announce, clipboard, server,
+            autostart, theme(system|light|dark), accent }
+          layout[] { fingerprint, side }：单独安排过位置的设备，按先后排列，同一侧的几台按这个先后
+          平分那条边（左右两侧从上到下，上下两侧从左到右）；side 是没有列出的设备放的那一侧
 activity[] { hour, switches, clips, connected_secs }         最近 48 小时，只列有活动的小时
 ```
 
@@ -70,14 +74,14 @@ activity[] { hour, switches, clips, connected_secs }         最近 48 小时，
 |---|---|---|
 | `hello` | `token`、`version` | 见第 3 节 |
 | `set_sharing` | `on` | 暂停或继续共享 |
-| `update_settings` | `settings`：`settings` 的任意子集 | 只改出现的字段 |
+| `update_settings` | `settings`：`settings` 的任意子集 | 只改出现的字段；`layout` 整份替换 |
 | `forget` | `fingerprint` | 删除一台已配对设备 |
 | `pair_reply` | `id`、`accept` | 回答配对请求 |
 | `connect` | `fingerprint` | 客户端：连接 `found` 中的一台服务端，未配对时先配对 |
 | `open_permission_settings` | | 打开系统中授予键鼠控制权限的页面 |
 | `clear_log` | | 清空日志 |
 | `open_settings` | | 请后台打开设置界面（另一份后台用） |
-| `send_files` | `paths`：本机绝对路径的列表 | 把这些文件和文件夹发给当前连着的对方（`screenferry send` 用），结果以 `toast` 和日志告知 |
+| `send_files` | `paths`：本机绝对路径的列表；可选 `to`：目标设备的证书指纹 | 把这些文件和文件夹发给 `to`，不填时发给光标最近去过的那台（只连着一台时就是它；`screenferry send` 用），结果以 `toast` 和日志告知 |
 
 命令没有逐条回执：结果体现在随后的 `state`、`log`、`toast` 里。
 

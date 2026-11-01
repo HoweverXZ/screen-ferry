@@ -67,6 +67,8 @@ class DevicesPage extends StatelessWidget {
         ),
         SectionTitle('已配对', note: '${state.peers.length} 台'),
         _CardWall(
+          // 服务端的卡片多一行“在本机哪一侧”。
+          height: state.isServer ? 240 : 220,
           empty: const _Empty(
             icon: Icons.link_rounded,
             title: '还没有配对的设备',
@@ -100,10 +102,11 @@ class DevicesPage extends StatelessWidget {
 
 /// 卡片墙：每张卡片至少 250 宽，放得下几列就几列。
 class _CardWall extends StatelessWidget {
-  const _CardWall({required this.children, required this.empty});
+  const _CardWall({required this.children, required this.empty, this.height = 220});
 
   final List<Widget> children;
   final Widget empty;
+  final double height;
 
   @override
   Widget build(BuildContext context) {
@@ -116,7 +119,7 @@ class _CardWall extends StatelessWidget {
         return Wrap(
           spacing: gap,
           runSpacing: gap,
-          children: [for (final child in children) SizedBox(width: width, height: 220, child: child)],
+          children: [for (final child in children) SizedBox(width: width, height: height, child: child)],
         );
       },
     );
@@ -183,6 +186,8 @@ class _PairedCardState extends State<_PairedCard> {
     final state = AppScope.of(context);
     final addr = state.peer?.fingerprint == d.fingerprint ? state.peer?.addr ?? '' : '';
     final seen = d.online && addr.isNotEmpty ? '在线 · $addr' : seenText(d);
+    // 服务端：这台设备贴在本机哪一侧（布局页里改）。
+    final place = state.isServer ? state.placeOf(d.fingerprint) : null;
     Widget card = SfCard(
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -222,6 +227,23 @@ class _PairedCardState extends State<_PairedCard> {
             overflow: TextOverflow.ellipsis,
             style: TextStyle(fontSize: 14, color: c.muted),
           ),
+          if (place != null) ...[
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Icon(Icons.splitscreen_rounded, size: 14, color: c.muted),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    '在本机${place.side.label}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 13, color: c.muted),
+                  ),
+                ),
+              ],
+            ),
+          ],
           const Spacer(),
           Divider(height: 1, thickness: 1, color: c.line),
           const SizedBox(height: 10),

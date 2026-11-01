@@ -17,7 +17,7 @@ mod scene;
 mod transfer;
 
 pub use clipboard::{ClipboardContent, ClipboardFormat};
-pub use config::{Config, Role, Theme};
+pub use config::{Config, Placement, Role, Theme};
 pub use display::{Display, DisplayId};
 pub use geometry::{Point, Rect, Side};
 pub use input::InputEvent;

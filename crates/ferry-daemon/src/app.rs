@@ -118,7 +118,12 @@ pub(crate) fn run(options: Options) -> ExitCode {
                         KeyRemap::none()
                     };
                     let config = ServerConfig {
-                        live: Live { side, remap }.fixed(),
+                        live: Live {
+                            side,
+                            layout: Vec::new(),
+                            remap,
+                        }
+                        .fixed(),
                         name: options.name,
                         clipboard: options.clipboard,
                         store,

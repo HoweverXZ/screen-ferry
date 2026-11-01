@@ -126,8 +126,4 @@ impl Rtt {
     pub(crate) fn history(&self) -> Vec<f64> {
         self.history.iter().copied().collect()
     }
-
-    pub(crate) fn clear(&mut self) {
-        *self = Self::default();
-    }
 }

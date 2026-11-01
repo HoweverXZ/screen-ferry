@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ferry_core::capsule::hit;
-use ferry_engine::{EdgeDrop, Event, Events, Files};
+use ferry_engine::{EdgeDrop, EdgeFeed, Event, Events, Files};
 use ferry_platform::{CaptureEvent, OverlayEvent};
 use ferry_platform_mock::MockOverlay;
 use ferry_types::{MouseButton, Point, Rgba, Shape};
@@ -184,7 +184,9 @@ async fn a_received_file_shows_a_card_that_opens_it() {
     // 等会话建好、边缘报告给了边缘投递，再从客户端发过来。
     let mut sent = false;
     for _ in 0..300 {
-        if rig.pc_files.send(vec![file.clone()]).await.is_ok() {
+        if let Some(peer) = rig.pc_files.connected().first().copied()
+            && rig.pc_files.send(peer, vec![file.clone()]).await.is_ok()
+        {
             sent = true;
             break;
         }
@@ -304,8 +306,14 @@ async fn the_client_learns_its_edge_from_the_server_and_shows_received_files() {
     let file = source.path().join("季度报告.pdf");
     fs::write(&file, b"pdf").unwrap();
 
+    let mut peer = None;
+    eventually("服务端的数据连接建好", || {
+        peer = rig.mac_files.connected().first().copied();
+        peer.is_some()
+    })
+    .await;
     rig.mac_files
-        .send(vec![file])
+        .send(peer.unwrap(), vec![file])
         .await
         .expect("服务端发出文件");
     eventually("客户端收完变成卡片", || {
@@ -505,7 +513,9 @@ async fn receive_card(rig: &Rig, overlay: &MockOverlay, name: &str) -> std::path
     let file = source_file(&source, name, b"notes");
     let mut sent = false;
     for _ in 0..300 {
-        if rig.pc_files.send(vec![file.clone()]).await.is_ok() {
+        if let Some(peer) = rig.pc_files.connected().first().copied()
+            && rig.pc_files.send(peer, vec![file.clone()]).await.is_ok()
+        {
             sent = true;
             break;
         }
@@ -584,5 +594,51 @@ async fn dragging_the_cards_own_files_toward_the_edge_does_not_send_them_back() 
     }
     let shown = texts(&overlay);
     assert!(shown.contains(&"打开".to_owned()), "卡片还在：{shown:?}");
+    left_button(&rig, false);
+}
+
+#[tokio::test]
+async fn with_two_clients_on_one_edge_files_go_to_the_one_whose_part_they_are_dropped_on() {
+    let (rig, overlay, _edge) = rig_with_edge_drop().await;
+    // 两台都在右边：先连上的 pc 在上半段，laptop 在下半段。
+    let laptop = rig.add_client("laptop", EdgeFeed::none()).await;
+    let source = TempDir::new();
+    let file = source_file(&source, "给笔记本.txt", b"laptop");
+
+    pointer(&rig, 500, 700);
+    press_and_drag(&rig, &overlay, Some(vec![file.clone()])).await;
+    eventually("下半段滑出胶囊", || {
+        pointer(&rig, 900, 700);
+        overlay.shown().is_some_and(|(window, _)| window.y > 400.0)
+    })
+    .await;
+    overlay.emit(OverlayEvent::DragEntered { files: true });
+    eventually("写着发给 laptop", || {
+        let shown = texts(&overlay);
+        shown.contains(&"松手发送到".to_owned()) && shown.contains(&"laptop".to_owned())
+    })
+    .await;
+
+    overlay.emit(OverlayEvent::Dropped {
+        paths: vec![file.clone()],
+    });
+    left_button(&rig, false);
+    let got = laptop.device.store.downloads_dir().join("给笔记本.txt");
+    eventually("laptop 收到文件", || got.is_file()).await;
+    assert!(
+        !rig.pc.store.downloads_dir().join("给笔记本.txt").exists(),
+        "pc 没有收到"
+    );
+
+    // 上半段是 pc。
+    pointer(&rig, 500, 100);
+    press_and_drag(&rig, &overlay, Some(vec![file])).await;
+    overlay.emit(OverlayEvent::DragEntered { files: true });
+    eventually("上半段写着发给 pc", || {
+        pointer(&rig, 900, 100);
+        let shown = texts(&overlay);
+        shown.contains(&"松手发送到".to_owned()) && shown.contains(&"pc".to_owned())
+    })
+    .await;
     left_button(&rig, false);
 }

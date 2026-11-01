@@ -25,6 +25,7 @@ use super::record::{Activity, Log, Rtt, now_ms};
 use super::ui::UiEvent;
 use super::{Command, Host, Summary};
 use crate::client::{ClientConfig, ServerAddr, connect};
+use crate::edge_drop::EdgeDrop;
 use crate::error::{Error, Result};
 use crate::events::{Event, Events, FoundServer, TransferState, TransferUpdate};
 use crate::files::Files;
@@ -61,6 +62,8 @@ pub(crate) struct Runtime<H> {
     asks: mpsc::UnboundedSender<PairAsk>,
     /// 文件传输。引擎重启后仍保留，断线重连后接着传。
     files: Files,
+    /// 边缘投递胶囊。
+    edge: EdgeDrop,
 
     paused: bool,
     engine: Option<EngineTask>,
@@ -106,6 +109,7 @@ impl<H: Host> Runtime<H> {
         let peers = store.peers()?;
         let autostart = host.autostart();
         let files = Files::new(&store, events.clone());
+        let edge = EdgeDrop::spawn(host.overlay(), files.clone(), accent_color(config.accent));
         let mut runtime = Self {
             store,
             host,
@@ -115,6 +119,7 @@ impl<H: Host> Runtime<H> {
             events,
             asks,
             files,
+            edge,
             paused: false,
             engine: None,
             retry_at: None,
@@ -193,6 +198,7 @@ impl<H: Host> Runtime<H> {
             announce: self.config.announce,
             events: self.events.clone(),
             files: self.files.clone(),
+            edge: self.edge.feed(),
         };
         let (displays, clipboard) = (self.host.displays(), self.host.clipboard());
         let port = self.host.listen_port();
@@ -599,6 +605,7 @@ impl<H: Host> Runtime<H> {
 
     /// 文件传输有了进展：开始、结束、中断都记进日志，过程中的进度不记。
     fn on_transfer(&mut self, update: TransferUpdate) {
+        self.edge.transfer(update.clone());
         let peer = self.peer_name();
         let what = if update.items > 1 {
             format!("{} 等 {} 项", update.name, update.items)
@@ -697,6 +704,7 @@ impl<H: Host> Runtime<H> {
         }
         if let Some(accent) = patch.accent {
             next.accent = accent;
+            self.edge.set_accent(accent_color(accent));
         }
         if let Some(on) = patch.autostart {
             match self.host.set_autostart(on) {
@@ -997,4 +1005,14 @@ fn size_text(bytes: u64) -> String {
     } else {
         format!("{value:.0} {}", UNITS[unit])
     }
+}
+
+/// 设置界面里第 `index` 个强调色（与 `app/lib/theme/tokens.dart` 中的浅色版一致）。
+fn accent_color(index: u8) -> ferry_types::Rgba {
+    const ACCENTS: [u32; 5] = [0x0A6CFF, 0x00796B, 0x6A4BD8, 0xC2410C, 0xC2185B];
+    let rgb = ACCENTS
+        .get(usize::from(index))
+        .copied()
+        .unwrap_or(ACCENTS[0]);
+    ferry_types::Rgba::hex(rgb, 255)
 }

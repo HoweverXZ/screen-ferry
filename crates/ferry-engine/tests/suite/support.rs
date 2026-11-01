@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use ferry_core::{KeyRemap, Side};
 use ferry_engine::{
-    ClientConfig, ConfirmPairing, Error, Events, Files, Live, PairingRequest, ServerAddr,
+    ClientConfig, ConfirmPairing, EdgeFeed, Error, Events, Files, Live, PairingRequest, ServerAddr,
     ServerConfig, connect, serve,
 };
 use ferry_platform::CaptureEvent;
@@ -86,6 +86,10 @@ pub struct Setup {
     pub live: Option<tokio::sync::watch::Receiver<Live>>,
     pub mac_events: Events,
     pub pc_events: Events,
+    /// 服务端的边缘投递报告去处；默认不需要。
+    pub edge: EdgeFeed,
+    /// 服务端的文件传输；不给时按 `mac` 的数据目录新建。
+    pub mac_files: Option<Files>,
 }
 
 impl Default for Setup {
@@ -102,6 +106,8 @@ impl Default for Setup {
             live: None,
             mac_events: Events::none(),
             pc_events: Events::none(),
+            edge: EdgeFeed::none(),
+            mac_files: None,
         }
     }
 }
@@ -170,7 +176,10 @@ impl Rig {
         let inject = MockInject::new();
         let mac_displays = MockDisplays::new(vec![display(1000, 800, 100)]);
         let pc_displays = MockDisplays::new(vec![display(1920, 1080, 150)]);
-        let mac_files = Files::new(&setup.mac.store, setup.mac_events.clone());
+        let mac_files = setup
+            .mac_files
+            .clone()
+            .unwrap_or_else(|| Files::new(&setup.mac.store, setup.mac_events.clone()));
         let pc_files = Files::new(&setup.pc.store, setup.pc_events.clone());
 
         let server = tokio::spawn({
@@ -192,6 +201,7 @@ impl Rig {
                 announce: setup.discover,
                 events: setup.mac_events.clone(),
                 files: mac_files.clone(),
+                edge: setup.edge.clone(),
             };
             async move {
                 match serve(listener, config, capture, displays, clipboard, confirm).await {

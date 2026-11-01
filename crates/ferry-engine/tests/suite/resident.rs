@@ -11,7 +11,7 @@ use ferry_ipc::{
     State,
 };
 use ferry_platform::Error as PlatformError;
-use ferry_platform_mock::{MockCapture, MockClipboard, MockDisplays, MockInject};
+use ferry_platform_mock::{MockCapture, MockClipboard, MockDisplays, MockInject, MockOverlay};
 use ferry_types::{Config, Display, DisplayId, Rect, Role, Side, Theme};
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, timeout};
@@ -33,6 +33,7 @@ impl Host for MockHost {
     type Inject = MockInject;
     type Displays = MockDisplays;
     type Clipboard = MockClipboard;
+    type Overlay = MockOverlay;
 
     fn device_name(&self) -> String {
         "测试 Mac".into()
@@ -60,6 +61,10 @@ impl Host for MockHost {
     }
     fn clipboard(&self) -> MockClipboard {
         MockClipboard::new()
+    }
+
+    fn overlay(&self) -> MockOverlay {
+        MockOverlay::new()
     }
     fn autostart(&self) -> bool {
         self.autostart.load(Ordering::SeqCst)

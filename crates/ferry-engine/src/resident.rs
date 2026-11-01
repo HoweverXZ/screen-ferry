@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use ferry_ipc::{Endpoint, Listener};
-use ferry_platform::{Clipboard, Displays, InputCapture, InputInject};
+use ferry_platform::{Clipboard, Displays, InputCapture, InputInject, Overlay};
 use ferry_store::Store;
 use ferry_types::Role;
 use tokio::sync::{mpsc, watch};
@@ -33,6 +33,7 @@ pub trait Host: Send + Sync + 'static {
     type Inject: InputInject + 'static;
     type Displays: Displays + Sync + 'static;
     type Clipboard: Clipboard;
+    type Overlay: Overlay + 'static;
 
     /// 本机缺省的设备名（计算机名）。
     fn device_name(&self) -> String;
@@ -42,6 +43,8 @@ pub trait Host: Send + Sync + 'static {
     fn inject(&self) -> ferry_platform::Result<Self::Inject>;
     fn displays(&self) -> Self::Displays;
     fn clipboard(&self) -> Self::Clipboard;
+    /// 屏幕边缘的浮层（边缘投递胶囊）。
+    fn overlay(&self) -> Self::Overlay;
     /// 是否已登记为登录时启动。
     fn autostart(&self) -> bool;
     fn set_autostart(&self, on: bool) -> ferry_platform::Result<()>;

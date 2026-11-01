@@ -13,6 +13,7 @@ mod display;
 mod event_loop;
 mod inject;
 mod keymap;
+mod overlay;
 mod permission;
 
 pub use autostart::WinAutostart;
@@ -21,4 +22,5 @@ pub use display::WinDisplays;
 pub use event_loop::WinEventLoop;
 pub use inject::WinInject;
 pub use keymap::{WinKey, win_key};
+pub use overlay::WinOverlay;
 pub use permission::WinPermissions;

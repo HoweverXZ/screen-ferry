@@ -11,6 +11,7 @@ mod display;
 mod event_loop;
 mod inject;
 mod keymap;
+mod overlay;
 mod permission;
 
 pub use autostart::MacAutostart;
@@ -19,4 +20,5 @@ pub use clipboard::MacClipboard;
 pub use display::MacDisplays;
 pub use event_loop::MacEventLoop;
 pub use keymap::{hid_code, media_key};
+pub use overlay::{MacOverlay, render_png};
 pub use permission::MacPermissions;

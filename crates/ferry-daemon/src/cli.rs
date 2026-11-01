@@ -85,6 +85,10 @@ pub(crate) enum Mode {
     Send {
         paths: Vec<PathBuf>,
     },
+    /// 调试：把边缘投递胶囊的各种样子画成 PNG，放进 `dir`。
+    PreviewCapsule {
+        dir: PathBuf,
+    },
 }
 
 pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, String> {
@@ -94,7 +98,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, St
         // 不带命令（或直接跟选项）：常驻运行。
         None => "resident".to_owned(),
         Some(first) if first.starts_with('-') => "resident".to_owned(),
-        Some(command @ ("serve" | "connect" | "peers" | "forget" | "send")) => {
+        Some(command @ ("serve" | "connect" | "peers" | "forget" | "send" | "preview-capsule")) => {
             let command = command.to_owned();
             args.next();
             command
@@ -129,7 +133,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, St
             "--no-cmd-ctrl-swap" if command == "serve" => swap_cmd_ctrl = false,
             "--no-announce" if command == "serve" => announce = false,
             other
-                if matches!(command.as_str(), "connect" | "forget")
+                if matches!(command.as_str(), "connect" | "forget" | "preview-capsule")
                     && positional.is_none()
                     && !other.starts_with('-') =>
             {
@@ -156,6 +160,9 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, St
         "peers" => Mode::Peers,
         "send" if paths.is_empty() => return Err("send 需要至少一个文件或文件夹".into()),
         "send" => Mode::Send { paths },
+        "preview-capsule" => Mode::PreviewCapsule {
+            dir: PathBuf::from(positional.ok_or("preview-capsule 需要一个输出目录")?),
+        },
         _ => Mode::Forget {
             target: positional.ok_or("forget 需要设备名或指纹，可先用 peers 查看")?,
         },

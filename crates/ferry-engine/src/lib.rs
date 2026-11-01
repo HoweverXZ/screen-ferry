@@ -10,6 +10,7 @@
 
 mod client;
 mod clipboard;
+mod edge_drop;
 mod error;
 mod events;
 mod files;
@@ -20,6 +21,7 @@ pub mod resident;
 mod server;
 
 pub use client::{ClientConfig, ServerAddr, connect};
+pub use edge_drop::{Edge, EdgeDrop, EdgeFeed, Pointer};
 pub use error::{Error, Result};
 pub use events::{ClipSummary, Event, Events, FoundServer, TransferState, TransferUpdate};
 pub use files::Files;

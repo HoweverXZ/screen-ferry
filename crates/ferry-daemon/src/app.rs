@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 use std::process::ExitCode;
 
 use ferry_core::KeyRemap;
-use ferry_engine::{ClientConfig, Events, Files, Live, ServerAddr, ServerConfig};
+use ferry_engine::{ClientConfig, EdgeFeed, Events, Files, Live, ServerAddr, ServerConfig};
 use ferry_store::Store;
 use ferry_trust::Fingerprint;
 use tracing::{error, info};
@@ -88,6 +88,7 @@ pub(crate) fn run(options: Options) -> ExitCode {
         Mode::Peers => return report(list_peers(&store)),
         Mode::Forget { target } => return report(forget(&store, &target)),
         Mode::Send { paths } => return report(send_files(&store, paths)),
+        Mode::PreviewCapsule { dir } => return report(crate::preview::write(&dir)),
         Mode::Serve { .. } | Mode::Connect { .. } => {}
     }
 
@@ -124,6 +125,7 @@ pub(crate) fn run(options: Options) -> ExitCode {
                         announce,
                         events: Events::none(),
                         files,
+                        edge: EdgeFeed::none(),
                     };
                     serve(listen, config).await
                 }
@@ -138,7 +140,11 @@ pub(crate) fn run(options: Options) -> ExitCode {
                     };
                     connect(config).await
                 }
-                Mode::Resident { .. } | Mode::Peers | Mode::Forget { .. } | Mode::Send { .. } => {
+                Mode::Resident { .. }
+                | Mode::Peers
+                | Mode::Forget { .. }
+                | Mode::Send { .. }
+                | Mode::PreviewCapsule { .. } => {
                     unreachable!("已在上面处理")
                 }
             }

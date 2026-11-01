@@ -13,6 +13,7 @@ mod display;
 mod event_loop;
 mod inject;
 mod keymap;
+mod overlay;
 mod permission;
 
 pub use autostart::MockAutostart;
@@ -21,4 +22,5 @@ pub use clipboard::MockClipboard;
 pub use display::MockDisplays;
 pub use event_loop::MockEventLoop;
 pub use inject::MockInject;
+pub use overlay::MockOverlay;
 pub use permission::MockPermissions;

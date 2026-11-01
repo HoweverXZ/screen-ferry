@@ -27,6 +27,7 @@ use tokio::time::{MissedTickBehavior, interval, timeout};
 use tracing::{debug, info, warn};
 
 use crate::clipboard::{self, ClipboardTask, SharedClipboard, Start};
+use crate::edge_drop::{Edge, EdgeFeed};
 use crate::error::{Error, Result};
 use crate::events::{Event, Events};
 use crate::files::Files;
@@ -49,6 +50,8 @@ pub struct ServerConfig {
     pub events: Events,
     /// 文件传输。跨会话保留，断线重连后接着传。
     pub files: Files,
+    /// 边缘投递：报告本机光标和朝向对方的那条边。
+    pub edge: EdgeFeed,
 }
 
 /// 会话中途也能立即生效的设置。
@@ -166,6 +169,8 @@ struct Server<C, D, K, P> {
     pressed: Pressed,
     /// 已建立会话、还没报告断开。
     in_session: bool,
+    /// 报告给边缘投递的那条边；会话中且对方能收文件时才有。
+    edge: Option<Edge>,
 }
 
 impl<C, D, K, P> Server<C, D, K, P>
@@ -202,6 +207,7 @@ where
             switch: None,
             pressed: Pressed::new(),
             in_session: false,
+            edge: None,
         })
     }
 
@@ -248,7 +254,10 @@ where
             fingerprint: peer,
             addr,
         });
-        self.session(framed, peer, hello, welcome, listener).await?;
+        let result = self.session(framed, peer, hello, welcome, listener).await;
+        self.edge = None;
+        self.config.edge.edge(None);
+        result?;
         Ok(Ended::Session)
     }
 
@@ -321,6 +330,16 @@ where
             "握手完成：把光标推出本机 {side:?} 侧边缘即可切换过去",
         );
         self.switch = Some(EdgeSwitch::new(local_rect, remote_rect, side, scale));
+        if welcome.capabilities.contains(Capabilities::FILES) {
+            self.edge = Some(Edge {
+                side,
+                screen: frame_of(local_rect),
+                scale: f32::from(primary_scale(&local)) / 100.0,
+                peer: hello.name.clone(),
+            });
+        }
+        self.config.edge.edge(self.edge.clone());
+        self.config.edge.pointer(|p| p.here = true);
         // 设置的发送方已经不在（命令行模式）时，不再等它的变化。
         let mut live_open = true;
 
@@ -465,6 +484,13 @@ where
                     return Ok(());
                 }
                 let free = !self.pressed.any_button();
+                if !switch.is_remote() {
+                    self.config.edge.pointer(|p| {
+                        p.x = position.x as f32;
+                        p.y = position.y as f32;
+                        p.here = true;
+                    });
+                }
                 if switch.is_remote() {
                     switch.remote_motion(dx, dy, free)
                 } else if free {
@@ -480,6 +506,8 @@ where
                     position: Point::default(),
                 };
                 self.pressed.track(&event);
+                let held = self.pressed.any_button();
+                self.config.edge.pointer(|p| p.held = held);
                 if current && let Some(position) = switch.remote_position() {
                     let event = InputEvent::Button {
                         button,
@@ -533,6 +561,7 @@ where
     ) -> Result<()> {
         match transition {
             Some(Transition::Enter { seq, at }) => {
+                self.config.edge.pointer(|p| p.here = false);
                 // 先抓取再通知对方：抓取失败时，会话结束后会照常归还控制权。
                 self.capture.grab()?;
                 let enter = Enter {
@@ -558,6 +587,7 @@ where
             Some(Transition::Leave { seq, local_at }) => {
                 // 先归还本机控制再通知对方：发送失败也不会把本机键鼠锁住。
                 self.capture.release(local_at)?;
+                self.config.edge.pointer(|p| p.here = true);
                 // 对方收到 Leave 会松开所有键，这些键不再需要跟踪。
                 self.pressed.clear_keys();
                 self.active.send_replace(true);
@@ -582,6 +612,10 @@ where
         }
         let transition = switch.set_side(side);
         info!(?side, "对方屏幕的方向已改变");
+        if let Some(edge) = &mut self.edge {
+            edge.side = side;
+            self.config.edge.edge(Some(edge.clone()));
+        }
         self.perform(transition, framed, false).await
     }
 
@@ -607,6 +641,11 @@ where
             return Ok(());
         };
         switch.set_local(rect, relative_scale(&now, remote));
+        if let Some(edge) = &mut self.edge {
+            edge.screen = frame_of(rect);
+            edge.scale = f32::from(primary_scale(&now)) / 100.0;
+            self.config.edge.edge(Some(edge.clone()));
+        }
         info!(local = ?rect, "本机的显示器布局已更新");
         send(framed, &Message::Displays(now.clone())).await?;
         *local = now;
@@ -631,6 +670,15 @@ where
             }
         }
     }
+}
+
+fn frame_of(rect: ferry_types::Rect) -> ferry_types::Frame {
+    ferry_types::Frame::new(
+        rect.x as f32,
+        rect.y as f32,
+        rect.width as f32,
+        rect.height as f32,
+    )
 }
 
 /// 会话期间接受新连接所需的信息。

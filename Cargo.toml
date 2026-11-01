@@ -47,10 +47,29 @@ objc2 = { version = "0.6.4", default-features = false, features = ["std"] }
 objc2-app-kit = { version = "0.3.2", default-features = false, features = [
     "std",
     "NSApplication",
+    "NSAttributedString",
+    "NSBezierPath",
+    "NSBitmapImageRep",
+    "NSColor",
+    "NSDragging",
     "NSEvent",
+    "NSFont",
+    "NSFontDescriptor",
+    "NSGraphics",
+    "NSGraphicsContext",
+    "NSImageRep",
+    "NSPanel",
+    "NSParagraphStyle",
     "NSPasteboard",
     "NSResponder",
     "NSRunningApplication",
+    "NSScreen",
+    "NSStringDrawing",
+    "NSText",
+    "NSView",
+    "NSWindow",
+    "NSWorkspace",
+    "objc2-core-foundation",
     "objc2-core-graphics",
 ] }
 objc2-core-foundation = { version = "0.3.2", default-features = false, features = [
@@ -59,15 +78,31 @@ objc2-core-foundation = { version = "0.3.2", default-features = false, features 
     "CFMachPort",
     "CFRunLoop",
 ] }
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSString"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "NSArray",
+    "NSAttributedString",
+    "NSData",
+    "NSDictionary",
+    "NSEnumerator",
+    "NSGeometry",
+    "NSObject",
+    "NSString",
+    "NSURL",
+    "NSValue",
+] }
 objc2-core-graphics = { version = "0.3.2", default-features = false, features = [
     "std",
     "libc",
+    "CGBitmapContext",
+    "CGColorSpace",
+    "CGContext",
     "CGDirectDisplay",
     "CGError",
     "CGEvent",
     "CGEventSource",
     "CGEventTypes",
+    "CGImage",
     "CGRemoteOperation",
 ] }
 windows = { version = "0.62.2", features = [

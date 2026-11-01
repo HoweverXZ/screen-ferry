@@ -73,7 +73,7 @@ mod mac {
     use ferry_engine::resident::Host;
     use ferry_platform::{Autostart, Error, Permissions, Result};
     use ferry_platform_macos::{
-        MacAutostart, MacCapture, MacClipboard, MacDisplays, MacPermissions,
+        MacAutostart, MacCapture, MacClipboard, MacDisplays, MacOverlay, MacPermissions,
     };
     use ferry_types::Role;
     use tracing::warn;
@@ -106,6 +106,7 @@ mod mac {
         type Inject = Unsupported;
         type Displays = MacDisplays;
         type Clipboard = MacClipboard;
+        type Overlay = MacOverlay;
 
         fn device_name(&self) -> String {
             Command::new("scutil")
@@ -143,6 +144,10 @@ mod mac {
 
         fn clipboard(&self) -> MacClipboard {
             MacClipboard::new()
+        }
+
+        fn overlay(&self) -> MacOverlay {
+            MacOverlay::new()
         }
 
         fn autostart(&self) -> bool {
@@ -205,7 +210,7 @@ mod win {
     use ferry_engine::resident::Host;
     use ferry_platform::{Autostart, Error, Permissions, Result};
     use ferry_platform_windows::{
-        WinAutostart, WinClipboard, WinDisplays, WinInject, WinPermissions,
+        WinAutostart, WinClipboard, WinDisplays, WinInject, WinOverlay, WinPermissions,
     };
     use ferry_types::Role;
     use tracing::warn;
@@ -234,6 +239,7 @@ mod win {
         type Inject = WinInject;
         type Displays = WinDisplays;
         type Clipboard = WinClipboard;
+        type Overlay = WinOverlay;
 
         fn device_name(&self) -> String {
             std::env::var("COMPUTERNAME")
@@ -263,6 +269,10 @@ mod win {
 
         fn clipboard(&self) -> WinClipboard {
             WinClipboard::new()
+        }
+
+        fn overlay(&self) -> WinOverlay {
+            WinOverlay::new()
         }
 
         fn autostart(&self) -> bool {

@@ -1,4 +1,7 @@
-# ScreenFerry
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/readme/hero-en-dark.png">
+  <img src="assets/readme/hero-en-light.png" alt="ScreenFerry: one keyboard and mouse for all your computers">
+</picture>
 
 [![CI](https://github.com/icloudza/screen-ferry/actions/workflows/ci.yml/badge.svg)](https://github.com/icloudza/screen-ferry/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)

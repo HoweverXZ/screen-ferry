@@ -1,0 +1,107 @@
+<!-- README 头图（英文、浅色）：左边图标、标题和副标题，右边一台笔记本、一台显示器，光标沿一道拖尾从这台划到那台。
+     由 cargo xtask icons 导出为同名 PNG（2560×1280），README 里按 GitHub 的浅色、深色主题切换。 -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" xml:lang="en" font-family="'Helvetica Neue', 'Hiragino Sans GB', 'PingFang SC', sans-serif" role="img" aria-label="ScreenFerry: one keyboard and mouse for all your computers">
+<defs><linearGradient id="panel" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#EEF1FF"/><stop offset="1" stop-color="#D3DCFF"/></linearGradient><linearGradient id="wall-a" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#B3C4FF"/><stop offset="1" stop-color="#6E7FF3"/></linearGradient><linearGradient id="wall-b" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFE6D3"/><stop offset="1" stop-color="#FFB894"/></linearGradient><linearGradient id="silver" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#E4E7EF"/><stop offset="1" stop-color="#C3C8D5"/></linearGradient><linearGradient id="photo" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFB37A"/><stop offset="1" stop-color="#7C8CFF"/></linearGradient><clipPath id="panel-shape"><rect width="520" height="404" rx="28"/></clipPath><filter id="card" x="-20%" y="-30%" width="140%" height="170%"><feDropShadow dx="0" dy="6" stdDeviation="9" flood-color="#2A3478" flood-opacity="0.16"/></filter><filter id="device" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#2A3478" flood-opacity="0.18"/></filter><filter id="cursor" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="1" dy="3" stdDeviation="2.5" flood-color="#000000" flood-opacity="0.3"/></filter></defs>
+<rect width="1280" height="640" fill="#FFFFFF"/>
+<svg x="64" y="52" width="84" height="84" viewBox="0 0 1024 1024"><defs>
+    <linearGradient id="icon-porcelain" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#ECEDF2"/>
+    </linearGradient>
+    <linearGradient id="icon-ground" x1="0.2" y1="0" x2="0.5" y2="1">
+      <stop offset="0" stop-color="#5563EC"/>
+      <stop offset="1" stop-color="#3236BC"/>
+    </linearGradient>
+    <linearGradient id="icon-body" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0" stop-color="#D3DEFF"/>
+      <stop offset="1" stop-color="#A9BCFF"/>
+    </linearGradient>
+    <linearGradient id="icon-screen" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0" stop-color="#8FA7FF"/>
+      <stop offset="1" stop-color="#6A84F6"/>
+    </linearGradient>
+    <clipPath id="icon-shape">
+      <rect width="100" height="100" rx="22.5"/>
+    </clipPath>
+    <clipPath id="icon-left">
+      <path d="M 42 -1 L 42 24 Q 42 25.5 43.08 26.55 L 64.6 47.49 Q 65.68 48.54 64.18 48.54 L 56.78 48.54 Q 55.28 48.54 55.87 49.92 L 59.65 58.68 Q 60.24 60.06 58.86 60.65 L 56.34 61.71 Q 54.96 62.3 54.36 60.92 L 50.44 51.84 Q 49.84 50.46 48.72 51.46 L 43.12 56.5 Q 42 57.5 42 59 L 42 101 L -1 101 L -1 -1 Z"/>
+    </clipPath>
+    <clipPath id="icon-right">
+      <path d="M 42 -1 L 42 24 Q 42 25.5 43.08 26.55 L 64.6 47.49 Q 65.68 48.54 64.18 48.54 L 56.78 48.54 Q 55.28 48.54 55.87 49.92 L 59.65 58.68 Q 60.24 60.06 58.86 60.65 L 56.34 61.71 Q 54.96 62.3 54.36 60.92 L 50.44 51.84 Q 49.84 50.46 48.72 51.46 L 43.12 56.5 Q 42 57.5 42 59 L 42 101 L 101 101 L 101 -1 Z"/>
+    </clipPath>
+    <filter id="icon-shadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="1.1"/>
+      <feOffset dy="1.1" result="blur"/>
+      <feFlood flood-color="#000000" flood-opacity="0.25"/>
+      <feComposite in2="blur" operator="in"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="icon-groove" filterUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
+      <feFlood flood-color="#70748F" flood-opacity="0.6" result="ink"/>
+      <feComposite in="ink" in2="SourceAlpha" operator="out" result="outside"/>
+      <feGaussianBlur in="outside" stdDeviation="0.5" result="outside-blur"/>
+      <feOffset in="outside-blur" dx="0.55" dy="0.75" result="outside-shift"/>
+      <feComposite in="outside-shift" in2="SourceAlpha" operator="in" result="inner"/>
+      <feFlood flood-color="#FFFFFF" result="light"/>
+      <feComposite in="light" in2="SourceAlpha" operator="in" result="light-shape"/>
+      <feOffset in="light-shape" dx="0.4" dy="0.55" result="light-shift"/>
+      <feComposite in="light-shift" in2="SourceAlpha" operator="out" result="lip"/>
+      <feMerge>
+        <feMergeNode in="lip"/>
+        <feMergeNode in="SourceGraphic"/>
+        <feMergeNode in="inner"/>
+      </feMerge>
+    </filter>
+    <filter id="icon-lift" filterUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
+      <feDropShadow dx="-0.9" dy="0.9" stdDeviation="1.2" flood-color="#1D1F6B" flood-opacity="0.38"/>
+    </filter>
+    <filter id="icon-raise" filterUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
+      <feDropShadow dx="0.4" dy="1.8" stdDeviation="1.6" flood-color="#14165A" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+  <g transform="translate(100 100) scale(8.24)">
+    <rect width="100" height="100" rx="22.5" fill="url(#icon-porcelain)" filter="url(#icon-shadow)"/>
+    <g clip-path="url(#icon-shape)">
+      <g clip-path="url(#icon-left)">
+        <g filter="url(#icon-groove)" fill="none" stroke="#E0E1E8" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="12" y="18" width="76" height="51" rx="11"/>
+          <path d="M 34.5 79.5 L 65.5 79.5"/>
+        </g>
+      </g>
+      <g filter="url(#icon-lift)">
+        <g clip-path="url(#icon-right)">
+          <rect width="100" height="100" fill="url(#icon-ground)"/>
+          <g filter="url(#icon-raise)">
+            <path d="M 45.5 68 L 54.5 68 L 56 78 L 44 78 Z" fill="#8EA6FB"/>
+            <rect x="33" y="77" width="34" height="5" rx="2.5" fill="url(#icon-body)"/>
+            <rect x="12" y="18" width="76" height="51" rx="11" fill="url(#icon-body)"/>
+          </g>
+          <rect x="16.5" y="22.5" width="67" height="42" rx="7" fill="url(#icon-screen)"/>
+          <path d="M 22 19.2 L 78 19.2" stroke="#FFFFFF" stroke-opacity="0.85" stroke-width="0.8" stroke-linecap="round"/>
+        </g>
+      </g>
+    </g>
+  </g></svg>
+<text x="150" y="103" font-size="24" font-weight="700" fill="#15161C">ScreenFerry</text>
+<text x="72" y="252.8" font-size="52" font-weight="700" fill="#15161C" letter-spacing="-0.5">One keyboard</text>
+<text x="72" y="311.0" font-size="52" font-weight="700" fill="#15161C" letter-spacing="-0.5">and mouse for</text>
+<text x="72" y="369.2" font-size="52" font-weight="700" fill="#15161C" letter-spacing="-0.5">all your computers</text>
+<text x="72" y="426.8" font-size="20" fill="#5A5E6B">Move between your Macs and PCs by pushing the cursor over.</text>
+<text x="72" y="458.8" font-size="20" fill="#5A5E6B">Clipboard sync, drag-and-drop files, encrypted end to end…</text>
+<rect x="72.0" y="544" width="196.0" height="36" rx="18" fill="#F1F3F9"/>
+<text x="170.0" y="567" font-size="14" fill="#3D4150" text-anchor="middle">Mac and Windows, any mix</text>
+<rect x="278.0" y="544" width="159.0" height="36" rx="18" fill="#F1F3F9"/>
+<text x="357.5" y="567" font-size="14" fill="#3D4150" text-anchor="middle">TLS 1.3 encryption</text>
+<rect x="447.0" y="544" width="109.5" height="36" rx="18" fill="#F1F3F9"/>
+<text x="501.8" y="567" font-size="14" fill="#3D4150" text-anchor="middle">Open source</text>
+<g transform="translate(688 60)"><rect width="520" height="404" rx="28" fill="url(#panel)"/><g clip-path="url(#panel-shape)"><circle cx="478" cy="26" r="128" fill="#FFFFFF" fill-opacity="0.28"/><circle cx="478" cy="26" r="72" fill="#FFFFFF" fill-opacity="0.3"/></g><g filter="url(#device)"><rect x="30" y="96" width="220" height="146" rx="12" fill="#22242D"/><path d="M 12 242 H 268 L 262 252 Q 260 256 255 256 H 25 Q 20 256 18 252 Z" fill="url(#silver)"/></g><rect x="120" y="242" width="40" height="3" rx="1.5" fill="#AEB3C2"/><rect x="37" y="103" width="206" height="132" rx="6" fill="url(#wall-a)"/><rect x="54" y="120" width="118" height="84" rx="7" fill="#FFFFFF" fill-opacity="0.94"/><circle cx="64" cy="130" r="2.6" fill="#C9CEDF"/><circle cx="72" cy="130" r="2.6" fill="#C9CEDF"/><circle cx="80" cy="130" r="2.6" fill="#C9CEDF"/><rect x="64" y="144" width="86" height="6" rx="3" fill="#DCE2F7"/><rect x="64" y="158" width="70" height="6" rx="3" fill="#DCE2F7"/><rect x="64" y="172" width="94" height="6" rx="3" fill="#DCE2F7"/><rect x="64" y="186" width="54" height="6" rx="3" fill="#DCE2F7"/><rect x="152" y="152" width="78" height="70" rx="7" fill="#FFFFFF" fill-opacity="0.82"/><rect x="162" y="166" width="50" height="6" rx="3" fill="#DCE2F7"/><rect x="162" y="180" width="58" height="6" rx="3" fill="#DCE2F7"/><rect x="162" y="194" width="40" height="6" rx="3" fill="#DCE2F7"/><g filter="url(#device)"><rect x="284" y="78" width="214" height="140" rx="10" fill="#22242D"/><path d="M 384 218 L 398 218 L 402 249 L 380 249 Z" fill="url(#silver)"/><rect x="352" y="248" width="78" height="8" rx="4" fill="url(#silver)"/></g><rect x="290" y="84" width="202" height="128" rx="5" fill="url(#wall-b)"/><rect x="306" y="100" width="116" height="78" rx="7" fill="#FFFFFF" fill-opacity="0.94"/><rect x="318" y="124" width="80" height="6" rx="3" fill="#F5DDD0"/><rect x="318" y="138" width="92" height="6" rx="3" fill="#F5DDD0"/><rect x="318" y="152" width="62" height="6" rx="3" fill="#F5DDD0"/><rect x="290" y="200" width="202" height="12" fill="#FFFFFF" fill-opacity="0.55"/><rect x="373" y="203" width="6" height="6" rx="1.5" fill="#FFFFFF"/><rect x="383" y="203" width="6" height="6" rx="1.5" fill="#FFFFFF"/><rect x="393" y="203" width="6" height="6" rx="1.5" fill="#FFFFFF"/><rect x="403" y="203" width="6" height="6" rx="1.5" fill="#FFFFFF"/><path d="M 0 0 L 0 20 L 4.9 15.6 L 8.1 23 L 11.4 21.6 L 8.3 14.4 L 14.8 14.4 Z" transform="translate(186 112) scale(1.6)" fill="#FFFFFF" fill-opacity="0.45" stroke="#FFFFFF" stroke-opacity="0.85" stroke-width="1.2" stroke-linejoin="round"/><circle cx="200.0" cy="104.3" r="1.50" fill="#4F5BEA" fill-opacity="0.28"/><circle cx="210.8" cy="99.5" r="1.70" fill="#4F5BEA" fill-opacity="0.35"/><circle cx="221.9" cy="95.5" r="1.90" fill="#4F5BEA" fill-opacity="0.41"/><circle cx="233.4" cy="92.6" r="2.10" fill="#4F5BEA" fill-opacity="0.48"/><circle cx="245.0" cy="90.7" r="2.30" fill="#4F5BEA" fill-opacity="0.54"/><circle cx="256.8" cy="90.0" r="2.50" fill="#4F5BEA" fill-opacity="0.61"/><circle cx="268.6" cy="90.5" r="2.70" fill="#4F5BEA" fill-opacity="0.67"/><circle cx="280.2" cy="92.2" r="2.90" fill="#4F5BEA" fill-opacity="0.74"/><circle cx="291.8" cy="95.0" r="3.10" fill="#4F5BEA" fill-opacity="0.80"/><circle cx="302.9" cy="98.9" r="3.30" fill="#4F5BEA" fill-opacity="0.87"/><circle cx="313.6" cy="103.8" r="3.50" fill="#4F5BEA" fill-opacity="0.93"/><circle cx="324.0" cy="109.5" r="3.70" fill="#4F5BEA" fill-opacity="1.00"/><path d="M 0 0 L 0 20 L 4.9 15.6 L 8.1 23 L 11.4 21.6 L 8.3 14.4 L 14.8 14.4 Z" transform="translate(334 116) scale(1.6)" fill="#15161C" stroke="#FFFFFF" stroke-width="1.3" stroke-linejoin="round" filter="url(#cursor)"/><g filter="url(#card)"><rect x="30" y="292" width="224" height="56" rx="16" fill="#FFFFFF"/></g><rect x="44" y="306" width="28" height="28" rx="8" fill="#EEF1FF"/><path d="M 53 313 H 51.5 Q 50 313 50 314.5 V 329 Q 50 330.5 51.5 330.5 H 64.5 Q 66 330.5 66 329 V 314.5 Q 66 313 64.5 313 H 63 M 55 311 H 61 Q 62 311 62 312 V 315 Q 62 316 61 316 H 55 Q 54 316 54 315 V 312 Q 54 311 55 311 Z M 54 322 L 57 325 L 62 319" fill="none" stroke="#4F5BEA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><text x="84" y="318" font-size="15" font-weight="700" fill="#15161C">Clipboard synced</text><text x="84" y="337" font-size="12" fill="#6B7080">Copy here, paste over there</text><g transform="rotate(-5 400 332)"><g filter="url(#card)"><rect x="298" y="298" width="204" height="68" rx="16" fill="#FFFFFF"/></g><rect x="310" y="310" width="44" height="44" rx="10" fill="url(#photo)"/><path d="M 314 350 L 326 334 L 334 342 L 342 330 L 352 350 Z" fill="#FFFFFF" fill-opacity="0.75"/><circle cx="342" cy="320" r="4" fill="#FFFFFF" fill-opacity="0.85"/><text x="366" y="327" font-size="15" font-weight="700" fill="#15161C">trip-photo.jpg</text><text x="366" y="345" font-size="12" fill="#6B7080">2.4 MB · Sending</text><rect x="366" y="352" width="122" height="4" rx="2" fill="#E6E9F5"/><rect x="366" y="352" width="76" height="4" rx="2" fill="#4F5BEA"/></g></g>
+<rect x="688.0" y="486" width="162.7" height="3" rx="1.5" fill="#4F5BEA"/>
+<text x="688.0" y="516" font-size="15" font-weight="700" fill="#15161C">Keyboard and mouse</text>
+<rect x="866.7" y="486" width="162.7" height="3" rx="1.5" fill="#E3E6EF"/>
+<text x="866.7" y="516" font-size="15" fill="#6B6F7E">Clipboard</text>
+<rect x="1045.3" y="486" width="162.7" height="3" rx="1.5" fill="#E3E6EF"/>
+<text x="1045.3" y="516" font-size="15" fill="#6B6F7E">Files</text>
+</svg>

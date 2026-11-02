@@ -1,4 +1,7 @@
-# ScreenFerry
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/readme/hero-zh-dark.png">
+  <img src="assets/readme/hero-zh-light.png" alt="ScreenFerry：鼠标推过去，就到了另一台">
+</picture>
 
 [![CI](https://github.com/icloudza/screen-ferry/actions/workflows/ci.yml/badge.svg)](https://github.com/icloudza/screen-ferry/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#许可证)

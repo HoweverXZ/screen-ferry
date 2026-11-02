@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+### 新增
+
+- README 头图：左边图标和一句话介绍，右边一台笔记本、一台显示器，光标沿拖尾从这台划到那台。中英文 README 各一张，
+  按 GitHub 的浅色、深色主题自动切换；源文件在 `assets/readme/`，`cargo xtask icons` 导出两倍大小的 PNG。
+
 ## [0.1.0] - 2026-11-02
 
 ### 新增

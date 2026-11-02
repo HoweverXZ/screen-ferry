@@ -7,6 +7,7 @@
 //! ├─ tray-win-connected.png / tray-win-disconnected.png        Windows 任务栏，32×32
 //! └─ app-icon-windows.ico                                      Windows 应用图标，16–256：后台程序与安装包用
 //! assets/dmg/background.png、background@2x.png                Mac 安装盘的窗口背景，660×400 和 1320×800（144 ppi）
+//! assets/readme/hero-{zh,en}-{light,dark}.png                 README 头图，2560×1280（画面 1280×640 的两倍）
 //! app/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_*.png   macOS 应用图标，16–1024
 //! app/windows/runner/resources/app_icon.ico                            同一个 Windows 图标，设置界面用
 //! ```
@@ -86,6 +87,23 @@ pub(crate) fn run() -> Result {
         .map_err(|e| format!("无法运行 sips：{e}"))?;
     if !marked.status.success() {
         return Err("sips 标注 background@2x.png 的分辨率失败".into());
+    }
+
+    // README 头图：中英文 × 浅色、深色，按两倍导出，高分屏上也清楚。用 PNG 而不直接用 SVG，
+    // 因为 SVG 里的文字会用看的人电脑上的字体，换台电脑字形和宽度就变了。
+    let readme = root.join("assets/readme");
+    for name in [
+        "hero-zh-light",
+        "hero-zh-dark",
+        "hero-en-light",
+        "hero-en-dark",
+    ] {
+        render_size(
+            &readme.join(format!("{name}.svg")),
+            2560,
+            1280,
+            &readme.join(format!("{name}.png")),
+        )?;
     }
 
     let packed = pack_ico(&images)?;

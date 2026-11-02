@@ -6,6 +6,7 @@
 //! ├─ tray-connected@2x.png / tray-disconnected@2x.png         macOS 菜单栏模板图，36×36
 //! ├─ tray-win-connected.png / tray-win-disconnected.png        Windows 任务栏，32×32
 //! └─ app-icon-windows.ico                                      Windows 应用图标，16–256：后台程序与安装包用
+//! assets/dmg/background.png、background@2x.png                Mac 安装盘的窗口背景，660×400 和 1320×800（144 ppi）
 //! app/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_*.png   macOS 应用图标，16–1024
 //! app/windows/runner/resources/app_icon.ico                            同一个 Windows 图标，设置界面用
 //! ```
@@ -68,6 +69,25 @@ pub(crate) fn run() -> Result {
         render(&icons.join(svg), size, &png)?;
         images.push((size, fs::read(&png).map_err(|e| io(&png, e))?));
     }
+    let dmg = root.join("assets/dmg");
+    render_size(
+        &dmg.join("background.svg"),
+        660,
+        400,
+        &dmg.join("background.png"),
+    )?;
+    let retina = dmg.join("background@2x.png");
+    render_size(&dmg.join("background.svg"), 1320, 800, &retina)?;
+    // Retina 那张标成 144 ppi，打包时 tiffutil 才把两张认成同一张图的两种分辨率。
+    let marked = Command::new("sips")
+        .args(["-s", "dpiWidth", "144", "-s", "dpiHeight", "144"])
+        .arg(&retina)
+        .output()
+        .map_err(|e| format!("无法运行 sips：{e}"))?;
+    if !marked.status.success() {
+        return Err("sips 标注 background@2x.png 的分辨率失败".into());
+    }
+
     let packed = pack_ico(&images)?;
     for ico in [
         icons.join("app-icon-windows.ico"),
@@ -81,9 +101,13 @@ pub(crate) fn run() -> Result {
 
 /// 用 rsvg-convert 把 SVG 画成 `size`×`size` 的 PNG。
 fn render(svg: &Path, size: u32, png: &Path) -> Result {
-    let side = size.to_string();
+    render_size(svg, size, size, png)
+}
+
+fn render_size(svg: &Path, width: u32, height: u32, png: &Path) -> Result {
+    let (w, h) = (width.to_string(), height.to_string());
     let status = Command::new("rsvg-convert")
-        .args(["-w", &side, "-h", &side, "-o"])
+        .args(["-w", &w, "-h", &h, "-o"])
         .arg(png)
         .arg(svg)
         .status()

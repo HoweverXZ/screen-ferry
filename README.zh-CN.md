@@ -5,7 +5,7 @@
 
 [English](README.md) | 简体中文
 
-一套键盘鼠标控制多台电脑。ScreenFerry 在 macOS 与 Windows 之间共享键鼠，同步剪贴板、互传文件，连接全程 TLS 1.3 加密。
+一套键盘鼠标控制多台电脑。ScreenFerry 在多台电脑之间共享键鼠（Mac、Windows 任意搭配），同步剪贴板、互传文件，连接全程 TLS 1.3 加密。
 
 ## 特性
 
@@ -60,7 +60,7 @@ sequenceDiagram
 
 | 系统 | 方式 |
 |---|---|
-| macOS | 在 [Releases](https://github.com/icloudza/screen-ferry/releases/latest) 下载 `ScreenFerry-<版本>-macos.zip`，解压后把 `ScreenFerry.app` 拖进“应用程序”。首次运行时在「系统设置 → 隐私与安全性 → 辅助功能」中允许 ScreenFerry。 |
+| macOS | 在 [Releases](https://github.com/icloudza/screen-ferry/releases/latest) 下载 `ScreenFerry-<版本>-macos-universal.dmg`，打开后把 ScreenFerry 拖进“应用程序”。首次运行时在「系统设置 → 隐私与安全性 → 辅助功能」中允许 ScreenFerry。 |
 | Windows | 在 [Releases](https://github.com/icloudza/screen-ferry/releases/latest) 下载 `ScreenFerry-<版本>-windows-x64-setup.exe` 并运行。 |
 
 ScreenFerry 每天检查一次更新，有新版本时在后台下载好，你方便时点“重启并更新”即可；可以在“设置 → 关于”里关掉自动检查。安装前会用内置的签名公钥校验更新。
@@ -73,7 +73,7 @@ Windows 安装包：
 
 ## 使用
 
-1. 两台电脑都打开 ScreenFerry。默认 Mac 控制、Windows 被控制，可以在“设置 → 这台电脑”里互换。
+1. 两台电脑都打开 ScreenFerry。默认 Mac 控制、Windows 被控制，可以在“设置 → 这台电脑”里改。两台是同一种系统时，把没接键鼠的那台改成“被控制”。
 2. 在被控端的“设备”页选中控制端，两边核对 6 位配对码。局域网里找不到时，用“按地址连接”，或在控制端“邀请一台电脑”；地址在对方「设备」页顶部。
 3. 在控制端的“布局”页摆好各台的位置，把光标推出屏幕边缘即可切过去。
 
@@ -111,7 +111,7 @@ macOS 另需 Xcode；Windows 另需 Visual Studio 2022（使用 C++ 的桌面开
 cargo xtask bundle
 ```
 
-在哪个系统上运行就打哪个系统的包，产物在 `target/bundle/`：macOS 是 `ScreenFerry.app` 和它的更新包 `ScreenFerry-<版本>-macos.zip`，Windows 是 `ScreenFerry-<版本>-windows-x64-setup.exe`。发布用 `cargo xtask release <版本>`，见 ADR 0014。
+在哪个系统上运行就打哪个系统的包，产物在 `target/bundle/`：macOS 是 `ScreenFerry.app` 和它的更新包 `ScreenFerry-<版本>-macos-<架构>.zip`（加 `--dmg` 另做安装盘），Windows 是 `ScreenFerry-<版本>-windows-x64-setup.exe`。发布用 `cargo xtask release <版本>`，见 ADR 0014。
 macOS 上钥匙串里有 Developer ID 证书时自动签名（也可以用 `SCREENFERRY_SIGN_IDENTITY` 指定），否则用临时签名，每次重新打包都要重新授予辅助功能权限。
 
 ## 开发

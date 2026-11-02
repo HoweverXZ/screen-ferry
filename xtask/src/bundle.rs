@@ -21,6 +21,12 @@
 //!   需要先 `rustup target add aarch64-apple-darwin x86_64-apple-darwin`。
 //! - `--notarize`：交给 Apple 公证并装订票据。需要环境变量 `SCREENFERRY_NOTARY_KEY`
 //!   （App Store Connect API 密钥 .p8 文件的路径）、`SCREENFERRY_NOTARY_KEY_ID`、`SCREENFERRY_NOTARY_ISSUER`。
+//! - `--dmg`：另外做一个安装盘 `ScreenFerry-<版本>-macos-<架构>.dmg`，第一次安装用：打开后把应用拖进
+//!   “应用程序”。窗口背景是 `assets/dmg/background.png`（和 @2x），布局由 dmgbuild 写进盘里，
+//!   不用打开访达；需要 `dmgbuild`（`pip install dmgbuild`，或用环境变量 `SCREENFERRY_DMGBUILD` 指定）。
+//!   有开发者证书时给盘签名；同时开着 `--notarize` 时盘也交公证、装订票据。
+//!
+//! 更新包和安装盘的名字里带架构：通用版是 `macos-universal`，否则是本机的 `macos-arm64` 或 `macos-x86_64`。
 //!
 //! Windows 先组装 `target/bundle/windows/ScreenFerry/` 目录，再用 Inno Setup 打成安装包
 //! `target/bundle/windows/ScreenFerry-<版本>-windows-x64-setup.exe`（`packaging/windows/screenferry.iss`，ADR 0011）：
@@ -51,6 +57,7 @@ const LSREGISTER: &str = "/System/Library/Frameworks/CoreServices.framework/Fram
 struct Options {
     universal: bool,
     notarize: bool,
+    dmg: bool,
 }
 
 pub(crate) fn run(args: &[String]) -> Result {
@@ -63,6 +70,7 @@ pub(crate) fn run(args: &[String]) -> Result {
         match arg.as_str() {
             "--universal" => options.universal = true,
             "--notarize" => options.notarize = true,
+            "--dmg" => options.dmg = true,
             other => return Err(format!("不认识的选项 {other}")),
         }
     }
@@ -244,6 +252,18 @@ fn macos(root: &Path, options: &Options) -> Result {
     } else {
         None
     };
+    let dmgbuild = if options.dmg {
+        Some(find_dmgbuild()?)
+    } else {
+        None
+    };
+    let platform = if options.universal {
+        "macos-universal"
+    } else if std::env::consts::ARCH == "aarch64" {
+        "macos-arm64"
+    } else {
+        "macos-x86_64"
+    };
 
     let daemon = if options.universal {
         universal_daemon(&root)?
@@ -341,7 +361,7 @@ fn macos(root: &Path, options: &Options) -> Result {
 
     step("打成更新包");
     let zip = root.join(format!(
-        "target/bundle/macos/ScreenFerry-{version}-macos.zip"
+        "target/bundle/macos/ScreenFerry-{version}-{platform}.zip"
     ));
     if zip.exists() {
         fs::remove_file(&zip).map_err(|e| io(&zip, e))?;
@@ -358,8 +378,48 @@ fn macos(root: &Path, options: &Options) -> Result {
         ],
     )?;
 
+    let dmg = match &dmgbuild {
+        Some(tool) => {
+            let dmg = root.join(format!(
+                "target/bundle/macos/ScreenFerry-{version}-{platform}.dmg"
+            ));
+            make_dmg(&root, tool, &bundle, &dmg)?;
+            if identity != "-" {
+                step("给安装盘签名");
+                let path = dmg.to_str().ok_or("路径不是 UTF-8")?;
+                run_in(
+                    &root,
+                    "codesign",
+                    &["--force", "--timestamp", "--sign", &identity, path],
+                )?;
+                if let Some(notary) = &notary {
+                    submit(&root, &dmg, notary)?;
+                    step("给安装盘装订公证票据");
+                    run_in(&root, "xcrun", &["stapler", "staple", path])?;
+                    run_in(
+                        &root,
+                        "spctl",
+                        &[
+                            "--assess",
+                            "--type",
+                            "open",
+                            "--context",
+                            "context:primary-signature",
+                            path,
+                        ],
+                    )?;
+                }
+            }
+            Some(dmg)
+        }
+        None => None,
+    };
+
     println!("\n✓ {}", bundle.display());
     println!("  更新包：{}", zip.display());
+    if let Some(dmg) = &dmg {
+        println!("  安装盘：{}", dmg.display());
+    }
     println!("  打开：open \"{}\"", bundle.display());
     println!("  安装：拖到“应用程序”文件夹。首次运行需要在系统设置里允许它控制键盘和鼠标。");
     if identity == "-" {
@@ -440,7 +500,6 @@ impl Notary {
 
 /// 交给 Apple 公证，等结果，通过后把票据装订进应用，再用 Gatekeeper 检查一遍。
 fn notarize(root: &Path, bundle: &Path, notary: &Notary) -> Result {
-    step("公证（xcrun notarytool，通常要几分钟）");
     let upload = root.join("target/bundle/macos/ScreenFerry-notarize.zip");
     let _ = fs::remove_file(&upload);
     let bundle_path = bundle.to_str().ok_or("路径不是 UTF-8")?;
@@ -450,8 +509,28 @@ fn notarize(root: &Path, bundle: &Path, notary: &Notary) -> Result {
         "ditto",
         &["-c", "-k", "--keepParent", bundle_path, upload_path],
     )?;
+    let submitted = submit(root, &upload, notary);
+    let _ = fs::remove_file(&upload);
+    submitted?;
+    step("装订公证票据");
+    run_in(root, "xcrun", &["stapler", "staple", bundle_path])?;
+    run_in(
+        root,
+        "spctl",
+        &["--assess", "--type", "execute", bundle_path],
+    )
+}
+
+/// 交给 Apple 公证（zip、dmg 都行），等到有结果。
+fn submit(root: &Path, file: &Path, notary: &Notary) -> Result {
+    step(&format!(
+        "公证 {}（xcrun notarytool，通常要几分钟）",
+        file.file_name().and_then(|n| n.to_str()).unwrap_or("")
+    ));
     let output = Command::new("xcrun")
-        .args(["notarytool", "submit", upload_path, "--wait"])
+        .args(["notarytool", "submit"])
+        .arg(file)
+        .arg("--wait")
         .args([
             "--key",
             &notary.key,
@@ -463,7 +542,6 @@ fn notarize(root: &Path, bundle: &Path, notary: &Notary) -> Result {
         .current_dir(root)
         .output()
         .map_err(|e| format!("无法运行 notarytool：{e}"))?;
-    let _ = fs::remove_file(&upload);
     let text = String::from_utf8_lossy(&output.stdout);
     print!("{text}");
     if !output.status.success() || !text.contains("status: Accepted") {
@@ -472,12 +550,81 @@ fn notarize(root: &Path, bundle: &Path, notary: &Notary) -> Result {
             String::from_utf8_lossy(&output.stderr).trim()
         ));
     }
-    step("装订公证票据");
-    run_in(root, "xcrun", &["stapler", "staple", bundle_path])?;
+    Ok(())
+}
+
+/// 安装盘窗口：内容 660 × 400 加 28 高的标题栏；图标 128、文件名 13，两个图标的位置和
+/// assets/dmg/background.svg 对齐。
+const DMG_WINDOW: (u32, u32) = (660, 428);
+const DMG_APP_AT: (u32, u32) = (165, 210);
+const DMG_APPLICATIONS_AT: (u32, u32) = (495, 210);
+
+/// dmgbuild：环境变量 `SCREENFERRY_DMGBUILD` 指定的，否则 PATH 里的。
+fn find_dmgbuild() -> Result<String> {
+    let tool = std::env::var("SCREENFERRY_DMGBUILD")
+        .ok()
+        .filter(|t| !t.trim().is_empty())
+        .unwrap_or_else(|| "dmgbuild".to_owned());
+    let found = Command::new(&tool)
+        .arg("--help")
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if found {
+        Ok(tool)
+    } else {
+        Err("找不到 dmgbuild：pip install dmgbuild，或用环境变量 SCREENFERRY_DMGBUILD 指定".into())
+    }
+}
+
+/// 做安装盘：应用、指向“应用程序”的替身、背景图、卷图标，窗口布局写进盘里。
+fn make_dmg(root: &Path, tool: &str, bundle: &Path, dmg: &Path) -> Result {
+    step("做安装盘（dmgbuild）");
+    if dmg.exists() {
+        fs::remove_file(dmg).map_err(|e| io(dmg, e))?;
+    }
+    let quote = |path: &Path| -> Result<String> {
+        let text = path.to_str().ok_or("路径不是 UTF-8")?;
+        serde_json::to_string(text).map_err(|e| e.to_string())
+    };
+    let name = bundle
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or("应用的名字不是 UTF-8")?;
+    let (width, height) = DMG_WINDOW;
+    let settings = format!(
+        "# 由 cargo xtask bundle --dmg 生成，每次打包都会重写。\n\
+         format = \"ULFO\"\n\
+         filesystem = \"HFS+\"\n\
+         files = [{app}]\n\
+         symlinks = {{\"Applications\": \"/Applications\"}}\n\
+         icon = {icon}\n\
+         background = {background}\n\
+         window_rect = ((200, 120), ({width}, {height}))\n\
+         icon_size = 128\n\
+         text_size = 13\n\
+         icon_locations = {{\"{name}\": {app_at:?}, \"Applications\": {apps_at:?}}}\n\
+         hide_extensions = [\"{name}\"]\n\
+         show_status_bar = False\n\
+         show_toolbar = False\n\
+         show_pathbar = False\n\
+         show_sidebar = False\n",
+        app = quote(bundle)?,
+        icon = quote(&bundle.join("Contents/Resources/AppIcon.icns"))?,
+        background = quote(&root.join("assets/dmg/background.png"))?,
+        app_at = DMG_APP_AT,
+        apps_at = DMG_APPLICATIONS_AT,
+    );
+    let path = root.join("target/bundle/macos/dmg-settings.py");
+    write(&path, settings.as_bytes())?;
     run_in(
         root,
-        "spctl",
-        &["--assess", "--type", "execute", bundle_path],
+        tool,
+        &[
+            "-s",
+            path.to_str().ok_or("路径不是 UTF-8")?,
+            "ScreenFerry",
+            dmg.to_str().ok_or("路径不是 UTF-8")?,
+        ],
     )
 }
 

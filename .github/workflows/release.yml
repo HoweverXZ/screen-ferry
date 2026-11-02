@@ -81,6 +81,12 @@ jobs:
         with:
           flutter-version: 3.47.8
           channel: stable
+      - name: 安装 dmgbuild（做安装盘用）
+        if: steps.secrets.outputs.ok == 'true'
+        run: |
+          python3 -m venv "$RUNNER_TEMP/dmgbuild"
+          "$RUNNER_TEMP/dmgbuild/bin/pip" install --quiet dmgbuild==1.6.5
+          echo "SCREENFERRY_DMGBUILD=$RUNNER_TEMP/dmgbuild/bin/dmgbuild" >> "$GITHUB_ENV"
       - name: 导入 Developer ID 证书
         if: steps.secrets.outputs.ok == 'true'
         run: |
@@ -94,20 +100,22 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -k "$password" "$keychain"
           security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
           rm "$RUNNER_TEMP/certificate.p12"
-      - name: 打包、签名、公证
+      - name: 打包、签名、公证，做安装盘
         if: steps.secrets.outputs.ok == 'true'
         run: |
           echo "$NOTARY_KEY" | base64 --decode > "$RUNNER_TEMP/notary.p8"
           SCREENFERRY_NOTARY_KEY="$RUNNER_TEMP/notary.p8" \
           SCREENFERRY_NOTARY_KEY_ID="$NOTARY_KEY_ID" \
           SCREENFERRY_NOTARY_ISSUER="$NOTARY_ISSUER" \
-            cargo xtask bundle --universal --notarize
+            cargo xtask bundle --universal --notarize --dmg
           rm "$RUNNER_TEMP/notary.p8"
       - uses: actions/upload-artifact@v4
         if: steps.secrets.outputs.ok == 'true'
         with:
           name: release-macos
-          path: target/bundle/macos/*-macos.zip
+          path: |
+            target/bundle/macos/*-macos-universal.zip
+            target/bundle/macos/*-macos-universal.dmg
           if-no-files-found: error
 
   publish:

@@ -5,7 +5,7 @@
 
 English | [简体中文](README.zh-CN.md)
 
-One keyboard and mouse for several computers. ScreenFerry shares a keyboard and mouse between macOS and Windows, syncs the clipboard and sends files, all over TLS 1.3.
+One keyboard and mouse for several computers. ScreenFerry shares a keyboard and mouse between your computers, Mac or Windows in any combination, syncs the clipboard and sends files, all over TLS 1.3.
 
 ## Features
 
@@ -60,7 +60,7 @@ sequenceDiagram
 
 | System | How |
 |---|---|
-| macOS | Download `ScreenFerry-<version>-macos.zip` from [Releases](https://github.com/icloudza/screen-ferry/releases/latest), unzip it and drag `ScreenFerry.app` into Applications. On first launch, allow ScreenFerry in System Settings → Privacy & Security → Accessibility. |
+| macOS | Download `ScreenFerry-<version>-macos-universal.dmg` from [Releases](https://github.com/icloudza/screen-ferry/releases/latest), open it and drag ScreenFerry into Applications. On first launch, allow ScreenFerry in System Settings → Privacy & Security → Accessibility. |
 | Windows | Download `ScreenFerry-<version>-windows-x64-setup.exe` from [Releases](https://github.com/icloudza/screen-ferry/releases/latest) and run it. |
 
 ScreenFerry checks for updates once a day and downloads them in the background. Choose Restart to Update when it suits you; you can turn automatic checks off in Settings → About. Updates are verified against a built-in signing key before anything is installed.
@@ -73,7 +73,7 @@ About the Windows installer:
 
 ## Usage
 
-1. Open ScreenFerry on both computers. By default the Mac controls and Windows is controlled; swap them in Settings → This Computer.
+1. Open ScreenFerry on both computers. By default a Mac controls and a Windows PC is controlled; change this in Settings → This Computer. When both computers run the same system, set the one without the keyboard and mouse to Be Controlled.
 2. On the controlled computer, choose the controlling one on the Devices page and confirm the 6-digit pairing code on both sides. If it isn't found on the network, use Connect by Address, or Invite a Computer from the controlling one. The address is at the top of the other computer's Devices page.
 3. On the controlling computer, arrange the screens on the Layout page, then push the cursor off a screen edge to move over.
 
@@ -111,7 +111,7 @@ macOS also needs Xcode; Windows also needs Visual Studio 2022 (Desktop developme
 cargo xtask bundle
 ```
 
-It builds for the system it runs on and puts the result in `target/bundle/`: `ScreenFerry.app` and its update package `ScreenFerry-<version>-macos.zip` on macOS, `ScreenFerry-<version>-windows-x64-setup.exe` on Windows. Releases are made with `cargo xtask release <version>`; see ADR 0014.
+It builds for the system it runs on and puts the result in `target/bundle/`: `ScreenFerry.app` and its update package `ScreenFerry-<version>-macos-<arch>.zip` on macOS (add `--dmg` for the installer disk), `ScreenFerry-<version>-windows-x64-setup.exe` on Windows. Releases are made with `cargo xtask release <version>`; see ADR 0014.
 On macOS the app is signed with a Developer ID certificate from the keychain when there is one (or the one named by `SCREENFERRY_SIGN_IDENTITY`). Otherwise it gets an ad-hoc signature, and Accessibility permission has to be granted again after every rebuild.
 
 ## Development

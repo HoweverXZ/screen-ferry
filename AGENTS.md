@@ -58,7 +58,8 @@ screen-ferry/
 ├─ fuzz/                   # 协议解码器的 fuzz 测试（nightly，不加入 workspace）
 ├─ app/                    # Flutter 设置界面（不是 Cargo workspace 成员），测试放 app/test/
 ├─ assets/                 # 唯一存放二进制资源的地方（例外：app/ 中平台工程要求的图标，见 ADR 0003）
-│  └─ icons/               #   应用图标、托盘图标（svg 源文件 + 导出图）
+│  ├─ icons/               #   应用图标、托盘图标（svg 源文件 + 导出图）
+│  └─ dmg/                 #   Mac 安装盘的窗口背景（svg 源文件 + 导出图）
 ├─ packaging/              # 平台打包配置，只放配置，不放代码
 │  ├─ macos/               #   Info.plist、entitlements.plist
 │  └─ windows/             #   app.manifest（DPI、uiAccess）、安装包配置
@@ -242,3 +243,80 @@ flutter test
 ```
 
 以上检查全部通过才能提交。`cargo xtask lint` 自动检查第 4–9 节中可以静态验证的规则；新增 crate 时，先在 `xtask/src/deps.rs` 的 `layer()` 中登记层级。
+
+## 13. 发布
+
+决策见 ADR 0014。
+
+### 版本号
+
+`x.y.z`，现在是 0.x：
+
+| 这一版有什么 | 升哪一位 | 例子 |
+|---|---|---|
+| 只有修复 | 最后一位 | 0.2.0 → 0.2.1 |
+| 新功能、改进 | 中间一位，最后一位归零 | 0.2.3 → 0.3.0 |
+| 改了两台之间的通信方式（线协议版本） | 中间一位，并在更新说明里写明两台要一起更新 | 0.3.1 → 0.4.0 |
+
+Cargo.toml 的 `[workspace.package] version` 是唯一的版本号，`app/pubspec.yaml` 跟着它走，都由 `cargo xtask release` 改，不要手改。
+
+### 更新说明
+
+每个版本一份 `docs/releases/<版本>.md`，给用户看：
+
+```markdown
+# ScreenFerry 0.2.0
+
+## 简体中文
+
+### 新增
+- Mac 安装盘：打开后把应用拖进“应用程序”
+
+### 改进
+- 设置界面在 Windows 上只用一个窗口打开
+
+### 修复
+- 修好 Windows 上偶尔卡键
+
+## English
+
+### New
+- Mac installer disk: open it and drag the app into Applications
+
+### Improved
+- The settings window opens as a single window on Windows
+
+### Fixed
+- Fixed keys occasionally getting stuck on Windows
+```
+
+- 中英文两节都要有，内容对应。分类只能是 `新增 / 改进 / 修复`（`New / Improved / Fixed`），按这个顺序写，没有内容的分类整个不写。
+- 每条一行、以“- ”开头，写用户看得到的变化，不写实现细节、crate 名、ADR 编号。
+- 它是 GitHub 发布页的正文，也写进更新清单，程序的更新卡片按分类显示。
+- CHANGELOG.md 是给开发者看的，只写中文，可以写细；两者不互相替代。
+
+### 发布产物
+
+每个版本的附件正好 5 个，名字是 `ScreenFerry-<版本>-<系统>-<架构>.<扩展名>`：
+
+| 文件 | 用途 |
+|---|---|
+| `ScreenFerry-<版本>-macos-universal.dmg` | Mac 第一次安装 |
+| `ScreenFerry-<版本>-macos-universal.zip` | Mac 自动更新 |
+| `ScreenFerry-<版本>-windows-x64-setup.exe` | Windows 安装和自动更新 |
+| `update.json`、`update.json.minisig` | 程序检查更新时读，名字不能改 |
+
+- 不另附 `.sha256` 之类的校验文件：每个包的大小和 SHA-256 写在签名过的 `update.json` 里。
+- macOS 的包都是通用版（arm64 + x86_64），签名并公证；Windows 安装包不签名（ADR 0011）。
+- 附件只由 CI 生成，不手动上传、不替换已发布版本的附件。
+
+### 流程
+
+1. 写好 `docs/releases/<版本>.md`，CHANGELOG 的 `## [Unreleased]` 下记全这一版的改动。
+2. `cargo xtask release <版本>`：检查更新说明，改版本号，把 CHANGELOG 的 `[Unreleased]` 归到这个版本，提交 `release: <版本>` 并打 tag `v<版本>`。
+3. `git push && git push origin v<版本>`：CI（`release.yml`）构建两个系统的产物，写好签名的更新清单，存成草稿。
+4. 在 GitHub 上看过草稿（附件是不是 5 个、更新说明对不对），再点“公开”。公开之后，程序的自动更新才看得到它。
+
+- 只发正式版，不发测试版、不把草稿标成 pre-release。
+- 发布私钥、证书、公证密钥只放在 GitHub 的 Repository secrets 里（名字见 `release.yml` 开头），不进仓库、不进日志。
+- 已经公开的版本有问题时，发一个新的修复版，不删除、不改动已公开的版本。

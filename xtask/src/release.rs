@@ -1,7 +1,8 @@
 //! 发布（ADR 0014）：
 //!
 //! - `release <版本>`：改版本号（Cargo.toml、app/pubspec.yaml、Cargo.lock），整理 CHANGELOG，
-//!   检查 `docs/releases/<版本>.md` 里的更新说明，然后提交并打 tag。推送由人来做，推上 tag 后
+//!   检查 `docs/releases/<版本>.md` 里的更新说明，然后提交并打 tag。还没发过的当前版本也可以直接发（第一版）。
+//!   版本号的规矩：只有修复升最后一位；有新功能、改进，或者改了两台之间的通信方式，升中间一位。推送由人来做，推上 tag 后
 //!   CI（`.github/workflows/release.yml`）构建两个系统的安装包，存成 GitHub 上的草稿。
 //! - `manifest`：CI 用。按目录里的更新包写 `update.json`：版本、发布和过期时间、各平台的地址、
 //!   大小和 SHA-256、线协议版本、更新说明。
@@ -27,7 +28,7 @@ const MANIFEST_LIFETIME: i64 = 180 * 86_400;
 
 /// 各平台更新包的文件名结尾，对应清单里的平台名。
 const PLATFORMS: [(&str, &str); 2] = [
-    ("macos-universal", "-macos.zip"),
+    ("macos-universal", "-macos-universal.zip"),
     ("windows-x86_64", "-windows-x64-setup.exe"),
 ];
 
@@ -47,16 +48,26 @@ pub(crate) fn release(args: &[String]) -> Result {
     let parsed =
         ferry_update::Version::parse(version).map_err(|e| format!("版本号 {version}：{e}"))?;
     let root = root();
+    let tag = format!("v{version}");
+    let tagged = Command::new("git")
+        .args(["tag", "--list", &tag])
+        .current_dir(&root)
+        .output()
+        .map_err(|e| format!("无法运行 git：{e}"))?;
+    if !String::from_utf8_lossy(&tagged.stdout).trim().is_empty() {
+        return Err(format!("{tag} 已经发过了"));
+    }
+
     let notes_path = root.join(format!("docs/releases/{version}.md"));
     if !notes_path.exists() {
         if let Some(dir) = notes_path.parent() {
             fs::create_dir_all(dir).map_err(|e| io(dir, e))?;
         }
-        let template =
-            format!("# ScreenFerry {version}\n\n## 简体中文\n\n- \n\n## English\n\n- \n");
-        fs::write(&notes_path, template).map_err(|e| io(&notes_path, e))?;
+        fs::write(&notes_path, notes_template(version)).map_err(|e| io(&notes_path, e))?;
         return Err(format!(
-            "先在 {} 里写好中英文的更新说明（每条一行，以“- ”开头），再运行一次",
+            "先在 {} 里写好中英文的更新说明，再运行一次。\n\
+             每条一行、以“- ”开头，放在“### 新增 / 改进 / 修复”（英文 New / Improved / Fixed）下面，\n\
+             没有内容的分类整个删掉",
             notes_path.display()
         ));
     }
@@ -68,38 +79,49 @@ pub(crate) fn release(args: &[String]) -> Result {
         ));
     }
 
+    // 版本号：比现在的新就改；和现在的一样（还没发过的第一版）就不动。
     let cargo_toml = root.join("Cargo.toml");
     let text = fs::read_to_string(&cargo_toml).map_err(|e| io(&cargo_toml, e))?;
     let current = workspace_version(&text)?;
-    if ferry_update::Version::parse(&current).is_ok_and(|c| c >= parsed) {
-        return Err(format!("{version} 不比现在的 {current} 新"));
+    let current_parsed = ferry_update::Version::parse(&current).map_err(|e| e.to_string())?;
+    let mut files = vec![
+        "CHANGELOG.md".to_owned(),
+        format!("docs/releases/{version}.md"),
+    ];
+    let mut build = None;
+    if parsed < current_parsed {
+        return Err(format!("{version} 比现在的 {current} 还旧"));
     }
-    let text = text.replacen(
-        &format!("version = \"{current}\""),
-        &format!("version = \"{version}\""),
-        1,
-    );
-    fs::write(&cargo_toml, text).map_err(|e| io(&cargo_toml, e))?;
+    if parsed > current_parsed {
+        let text = text.replacen(
+            &format!("version = \"{current}\""),
+            &format!("version = \"{version}\""),
+            1,
+        );
+        fs::write(&cargo_toml, text).map_err(|e| io(&cargo_toml, e))?;
 
-    let pubspec = root.join("app/pubspec.yaml");
-    let text = fs::read_to_string(&pubspec).map_err(|e| io(&pubspec, e))?;
-    let mut build = 1;
-    let text: String = text
-        .lines()
-        .map(|line| match line.strip_prefix("version: ") {
-            Some(old) => {
-                build = old
-                    .split('+')
-                    .nth(1)
-                    .and_then(|b| b.trim().parse::<u32>().ok())
-                    .map_or(1, |b| b + 1);
-                format!("version: {version}+{build}")
-            }
-            None => line.to_owned(),
-        })
-        .map(|line| line + "\n")
-        .collect();
-    fs::write(&pubspec, text).map_err(|e| io(&pubspec, e))?;
+        let pubspec = root.join("app/pubspec.yaml");
+        let text = fs::read_to_string(&pubspec).map_err(|e| io(&pubspec, e))?;
+        let text: String = text
+            .lines()
+            .map(|line| match line.strip_prefix("version: ") {
+                Some(old) => {
+                    let next = old
+                        .split('+')
+                        .nth(1)
+                        .and_then(|b| b.trim().parse::<u32>().ok())
+                        .map_or(1, |b| b + 1);
+                    build = Some(next);
+                    format!("version: {version}+{next}")
+                }
+                None => line.to_owned(),
+            })
+            .map(|line| line + "\n")
+            .collect();
+        fs::write(&pubspec, text).map_err(|e| io(&pubspec, e))?;
+        run(&root, "cargo", &["update", "--workspace", "--offline"])?;
+        files.extend(["Cargo.toml", "Cargo.lock", "app/pubspec.yaml"].map(str::to_owned));
+    }
 
     let changelog = root.join("CHANGELOG.md");
     let text = fs::read_to_string(&changelog).map_err(|e| io(&changelog, e))?;
@@ -113,20 +135,9 @@ pub(crate) fn release(args: &[String]) -> Result {
     );
     fs::write(&changelog, text).map_err(|e| io(&changelog, e))?;
 
-    run(&root, "cargo", &["update", "--workspace", "--offline"])?;
-    let notes_rel = format!("docs/releases/{version}.md");
-    run(
-        &root,
-        "git",
-        &[
-            "add",
-            "Cargo.toml",
-            "Cargo.lock",
-            "app/pubspec.yaml",
-            "CHANGELOG.md",
-            &notes_rel,
-        ],
-    )?;
+    let mut add = vec!["add"];
+    add.extend(files.iter().map(String::as_str));
+    run(&root, "git", &add)?;
     run(
         &root,
         "git",
@@ -135,33 +146,75 @@ pub(crate) fn release(args: &[String]) -> Result {
     run(
         &root,
         "git",
-        &[
-            "tag",
-            "-a",
-            &format!("v{version}"),
-            "-m",
-            &format!("ScreenFerry {version}"),
-        ],
+        &["tag", "-a", &tag, "-m", &format!("ScreenFerry {version}")],
     )?;
-    println!("\n✓ 已提交并打好 tag v{version}（设置界面的构建号 {build}）");
+    match build {
+        Some(build) => println!("\n✓ 已提交并打好 tag {tag}（设置界面的构建号 {build}）"),
+        None => println!("\n✓ 已提交并打好 tag {tag}（版本号本来就是 {version}，没有改）"),
+    }
     println!("  推送后 CI 会构建安装包、存成 GitHub 上的草稿：");
-    println!("    git push && git push origin v{version}");
+    println!("    git push && git push origin {tag}");
     Ok(())
 }
 
-/// `docs/releases/<版本>.md`：`## 简体中文`、`## English` 两节下以“- ”开头的行。
+/// 更新说明的分类：中文、英文的小标题一一对应，按这个顺序写。
+const CATEGORIES: [(&str, &str); 3] = [("新增", "New"), ("改进", "Improved"), ("修复", "Fixed")];
+
+fn notes_template(version: &str) -> String {
+    let section = |english: bool| -> String {
+        CATEGORIES
+            .iter()
+            .map(|(zh, en)| format!("### {}\n\n- \n\n", if english { en } else { zh }))
+            .collect()
+    };
+    format!(
+        "# ScreenFerry {version}\n\n## 简体中文\n\n{}## English\n\n{}",
+        section(false),
+        section(true)
+    )
+    .trim_end()
+    .to_owned()
+        + "\n"
+}
+
+/// `docs/releases/<版本>.md`：`## 简体中文`、`## English` 两节，每节里是 `### 分类` 和它下面以“- ”开头的条目。
+/// 写进清单时保留这个结构（`### 分类` 一行，后面每条一行“- 条目”），程序按它分类显示。
 fn read_notes(path: &Path) -> Result<Notes> {
     let text = fs::read_to_string(path).map_err(|e| io(path, e))?;
     let mut notes = Notes::default();
-    let mut section = None;
+    let mut section: Option<bool> = None;
+    let mut category: Option<&str> = None;
+    let mut pending: Option<String> = None;
     for line in text.lines() {
         let line = line.trim();
         if let Some(title) = line.strip_prefix("## ") {
             section = match title.trim() {
-                "简体中文" => Some(true),
-                "English" => Some(false),
+                "简体中文" => Some(false),
+                "English" => Some(true),
                 _ => None,
             };
+            category = None;
+            continue;
+        }
+        let Some(english) = section else { continue };
+        if let Some(title) = line.strip_prefix("### ") {
+            let title = title.trim();
+            let known = CATEGORIES
+                .iter()
+                .find(|(zh, en)| title == if english { *en } else { *zh });
+            let Some((zh, en)) = known else {
+                let allowed: Vec<&str> = CATEGORIES
+                    .iter()
+                    .map(|(zh, en)| if english { *en } else { *zh })
+                    .collect();
+                return Err(format!(
+                    "{}：不认识的分类“{title}”，只能是 {}",
+                    path.display(),
+                    allowed.join("、")
+                ));
+            };
+            category = Some(if english { en } else { zh });
+            pending = Some(format!("### {}", category.unwrap_or_default()));
             continue;
         }
         let Some(item) = line
@@ -171,15 +224,24 @@ fn read_notes(path: &Path) -> Result<Notes> {
         else {
             continue;
         };
-        let target = match section {
-            Some(true) => &mut notes.zh,
-            Some(false) => &mut notes.en,
-            None => continue,
-        };
-        if !target.is_empty() {
-            target.push('\n');
+        if category.is_none() {
+            return Err(format!(
+                "{}：“{item}”要放在某个分类（### …）下面",
+                path.display()
+            ));
         }
-        target.push_str(item);
+        let target = if english {
+            &mut notes.en
+        } else {
+            &mut notes.zh
+        };
+        // 分类的小标题等到它下面有条目时才写，空分类不出现。
+        for line in pending.take().into_iter().chain([format!("- {item}")]) {
+            if !target.is_empty() {
+                target.push('\n');
+            }
+            target.push_str(&line);
+        }
     }
     Ok(notes)
 }
@@ -339,7 +401,7 @@ pub(crate) fn keygen(args: &[String]) -> Result {
     };
     let lines: String = publics
         .iter()
-        .map(|(key, label)| format!("    \"{key}\", // {label}，生成于 {}\n", today()))
+        .map(|(key, label)| format!("    // {label}，生成于 {}\n    \"{key}\",\n", today()))
         .collect();
     let text = format!("{}{start}\n{lines}    {}", &text[..a], &text[b..]);
     fs::write(&keys, text).map_err(|e| io(&keys, e))?;

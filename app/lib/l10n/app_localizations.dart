@@ -407,7 +407,7 @@ abstract class AppLocalizations {
   /// No description provided for @aboutTagline.
   ///
   /// In zh, this message translates to:
-  /// **'在 Mac 与 Windows 之间共享一套键盘鼠标'**
+  /// **'在多台电脑之间共享一套键盘鼠标'**
   String get aboutTagline;
 
   /// No description provided for @aboutCheckUpdates.
@@ -3137,7 +3137,7 @@ abstract class AppLocalizations {
   /// No description provided for @aboutVersionLine.
   ///
   /// In zh, this message translates to:
-  /// **'版本 {version} · 在 Mac 与 Windows 之间共享一套键盘鼠标'**
+  /// **'版本 {version} · 在多台电脑之间共享一套键盘鼠标'**
   String aboutVersionLine(String version);
 
   /// No description provided for @updateCurrent.

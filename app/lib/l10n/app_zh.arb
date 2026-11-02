@@ -66,7 +66,7 @@
   "accentPink": "粉色",
   "aboutTitle": "关于",
   "aboutBack": "返回设置",
-  "aboutTagline": "在 Mac 与 Windows 之间共享一套键盘鼠标",
+  "aboutTagline": "在多台电脑之间共享一套键盘鼠标",
   "aboutCheckUpdates": "检查更新",
   "aboutUpdatesSoon": "自动检查更新即将支持",
   "aboutAuthor": "作者主页",
@@ -1433,7 +1433,7 @@
       }
     }
   },
-  "aboutVersionLine": "版本 {version} · 在 Mac 与 Windows 之间共享一套键盘鼠标",
+  "aboutVersionLine": "版本 {version} · 在多台电脑之间共享一套键盘鼠标",
   "@aboutVersionLine": {
     "placeholders": {
       "version": {

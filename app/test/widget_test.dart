@@ -1345,6 +1345,25 @@ void main() {
       expect(find.text('安装'), findsOneWidget);
     });
 
+    testWidgets('更新说明按新增、改进、修复分类显示', (tester) async {
+      const categorized = UpdateRelease(
+        version: '0.2.0',
+        notesZh: '### 新增\n- Mac 安装盘\n### 修复\n- 修好偶尔卡键',
+        notesEn: '### New\n- Mac installer disk\n### Fixed\n- Fixed stuck keys',
+      );
+      final backend = DemoBackend(
+        animate: false,
+        update: const UpdateInfo(status: UpdateStatus.ready, latest: categorized, canInstall: true),
+      );
+      final state = await launch(tester, const Size(1160, 780), backend: backend);
+      state.go(SfPage.about);
+      await settle(tester);
+      for (final text in ['新增', 'Mac 安装盘', '修复', '修好偶尔卡键']) {
+        expect(find.text(text), findsOneWidget, reason: text);
+      }
+      expect(find.textContaining('###'), findsNothing);
+    });
+
     testWidgets('英文和窄屏下更新卡片能正常显示', (tester) async {
       final backend = DemoBackend(
         animate: false,

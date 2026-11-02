@@ -7,5 +7,9 @@
 /// 任何一把对得上，更新清单就算可信。
 pub const RELEASE_KEYS: &[&str] = &[
     // update-keygen：开始
+    // 日常发布用，生成于 2026-11-02
+    "RWTzbOvk4S1+VUqoWO6IwjWIJv629lsdOW5cIcpt9kwFQMHlAuZ5R8YB",
+    // 备用，私钥离线保存，生成于 2026-11-02
+    "RWTl7ZHxhPzeBk/bpk0cjeRSs/V302VNRBE7gAniXFJ09UJKldcd+Sfm",
     // update-keygen：结束
 ];

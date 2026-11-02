@@ -59,8 +59,8 @@ Name: "en"; MessagesFile: "compiler:Default.isl"
 Name: "chs"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 
 [CustomMessages]
-en.AppComment=Share one keyboard and mouse between Mac and Windows
-chs.AppComment=在 Mac 与 Windows 之间共享一套键盘鼠标
+en.AppComment=Share one keyboard and mouse across your computers
+chs.AppComment=在多台电脑之间共享一套键盘鼠标
 en.FirewallStatus=Configuring Windows Firewall…
 chs.FirewallStatus=正在设置 Windows 防火墙…
 

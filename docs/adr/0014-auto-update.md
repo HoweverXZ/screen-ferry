@@ -36,6 +36,25 @@ ScreenFerry 的情况有几处特别：
   写 `update.json` 并用发布私钥签名，附上 GitHub 构建证明，存成草稿。维护者看过后点“公开”。
 - 没有配置 macOS 的签名和公证密钥时，这次发布只含 Windows 安装包。
 
+### 版本号、更新说明和发布产物
+
+- 版本号：只有修复，升最后一位（0.2.0 → 0.2.1）；有新功能、改进，或者改了两台之间的通信方式，升中间一位
+  （0.2.x → 0.3.0）。还没发过的当前版本可以直接发（第一版）。
+- 更新说明 `docs/releases/<版本>.md`：`## 简体中文`、`## English` 两节，每节按 `### 新增 / 改进 / 修复`
+  （`New / Improved / Fixed`）分类，每条一行、以“- ”开头，没有内容的分类不写。草稿正文就是这个文件；
+  写进清单时保留分类，程序的更新卡片按分类显示。只写用户看得懂的几条，细节写在 CHANGELOG。
+- 每个版本的附件 5 个，名字是 `ScreenFerry-<版本>-<系统>-<架构>.<扩展名>`：
+  `ScreenFerry-0.2.0-macos-universal.dmg`（第一次安装）、`ScreenFerry-0.2.0-macos-universal.zip`（自动更新）、
+  `ScreenFerry-0.2.0-windows-x64-setup.exe`，加上 `update.json`、`update.json.minisig`。不另附 SHA-256 文件：
+  每个包的 SHA-256 写在签名的清单里。
+
+### Mac 安装盘
+
+- 窗口 660 × 400（加标题栏），背景是 `assets/dmg/background.svg` 导出的普通和 Retina 两张图：上方一条品牌色带，
+  中间两个图标之间三个渐深的箭头，下方一句中英文说明。图标 128、文件名 13。
+- 图标下的文件名由访达来画、颜色由系统决定，那一块保持浅色；打开了“显示路径栏”的访达会盖住最下面 28，那里不放东西。
+- dmgbuild 直接写窗口布局，不用打开访达；压缩成 ULFO，签名、公证、装订。
+
 ### 清单
 
 `update.json`（`ferry-update` 定义）：`schema`、`version`、`published`、`expires`（发布后 180 天）、`protocol`（线协议版本）、

@@ -170,7 +170,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get aboutBack => '返回设置';
 
   @override
-  String get aboutTagline => '在 Mac 与 Windows 之间共享一套键盘鼠标';
+  String get aboutTagline => '在多台电脑之间共享一套键盘鼠标';
 
   @override
   String get aboutCheckUpdates => '检查更新';
@@ -1795,7 +1795,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String aboutVersionLine(String version) {
-    return '版本 $version · 在 Mac 与 Windows 之间共享一套键盘鼠标';
+    return '版本 $version · 在多台电脑之间共享一套键盘鼠标';
   }
 
   @override

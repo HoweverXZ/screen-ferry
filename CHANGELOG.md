@@ -167,6 +167,11 @@
   - 协议：新增能力位 `REMOTE_SETTINGS` 和消息 `OpenSettings`。本机通信升到版本 2：`settings.mouse_dpi`、`settings.devices`、
     `set_device`、`open_peer_settings`、`show_device`、`peers[].alias`、`peers[].platform`、`local.natural_scrolling`，
     去掉 `settings.swap_cmd_ctrl`。
+- Mac 安装盘：发布时另附 `ScreenFerry-<版本>-macos-universal.dmg`，打开后把应用拖进“应用程序”；
+  窗口上方一条品牌色带，签名、公证。`cargo xtask bundle --dmg` 制作（需要 dmgbuild）。
+- 发布规范：更新说明按新增、改进、修复分类（程序里也分类显示）；产物统一叫 `ScreenFerry-<版本>-<系统>-<架构>`；
+  还没发过的当前版本可以直接发。
+- 介绍文字从“在 Mac 与 Windows 之间”改为“在多台电脑之间”：Mac 和 Mac、Windows 和 Windows 之间也能用。
 - 版本更新（ADR 0014）：程序自己检查、下载、安装新版本。
   - 每天检查一次 GitHub 上的正式版，有新版本就在后台下载好；侧栏、仪表盘、托盘菜单提醒，点“重启并更新”就装好重开。
     “关于”页可以手动检查、看更新说明（长了可以滚动），可以关掉自动检查。

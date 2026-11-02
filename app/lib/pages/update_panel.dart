@@ -234,11 +234,7 @@ class _ReleaseCard extends StatelessWidget {
     final c = SfColors.of(context);
     final ready = info.status == UpdateStatus.ready;
     final zh = Localizations.localeOf(context).languageCode == 'zh';
-    final notes = (zh ? release.notesZh : release.notesEn)
-        .split('\n')
-        .map((line) => line.trim().replaceFirst(RegExp(r'^[-*•]\s*'), ''))
-        .where((line) => line.isNotEmpty)
-        .toList();
+    final notes = parseNotes(zh ? release.notesZh : release.notesEn);
     final published = release.published;
     final meta = [
       if (published != null) l.updateReleased(DateFormat.MMMd(l.localeName).format(published)),
@@ -322,10 +318,22 @@ class _ReleaseCard extends StatelessWidget {
 }
 
 /// 更新说明：浅色小框，超过几行可以滚动，底部渐隐。
+/// 更新说明的一行：分类的小标题（`### 新增`），或者一条（`- …`，旧格式没有前缀）。
+typedef NoteLine = ({bool heading, String text});
+
+/// 把清单里的更新说明拆成行。
+List<NoteLine> parseNotes(String notes) => [
+  for (final raw in notes.split('\n'))
+    if (raw.trim() case final line when line.isNotEmpty)
+      line.startsWith('###')
+          ? (heading: true, text: line.replaceFirst(RegExp(r'^#+\s*'), ''))
+          : (heading: false, text: line.replaceFirst(RegExp(r'^[-*•]\s*'), '')),
+];
+
 class _Notes extends StatelessWidget {
   const _Notes({required this.lines});
 
-  final List<String> lines;
+  final List<NoteLine> lines;
 
   @override
   Widget build(BuildContext context) {
@@ -336,24 +344,33 @@ class _Notes extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          for (final line in lines)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 3),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8, right: 10),
-                    child: Container(
-                      width: 5,
-                      height: 5,
-                      decoration: BoxDecoration(color: c.fg, shape: BoxShape.circle),
+          for (final (i, line) in lines.indexed)
+            if (line.heading)
+              Padding(
+                padding: EdgeInsets.only(top: i == 0 ? 0 : 8, bottom: 2),
+                child: Text(
+                  line.text,
+                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: c.muted),
+                ),
+              )
+            else
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8, right: 10),
+                      child: Container(
+                        width: 5,
+                        height: 5,
+                        decoration: BoxDecoration(color: c.fg, shape: BoxShape.circle),
+                      ),
                     ),
-                  ),
-                  Expanded(child: Text(line, style: const TextStyle(fontSize: 14.5, height: 1.45))),
-                ],
+                    Expanded(child: Text(line.text, style: const TextStyle(fontSize: 14.5, height: 1.45))),
+                  ],
+                ),
               ),
-            ),
         ],
       ),
     );

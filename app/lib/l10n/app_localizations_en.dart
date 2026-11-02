@@ -171,7 +171,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get aboutBack => 'Back to Settings';
 
   @override
-  String get aboutTagline => 'Share one keyboard and mouse between Mac and Windows';
+  String get aboutTagline => 'Share one keyboard and mouse across your computers';
 
   @override
   String get aboutCheckUpdates => 'Check for Updates';
@@ -1862,7 +1862,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String aboutVersionLine(String version) {
-    return 'Version $version · One keyboard and mouse for Mac and Windows';
+    return 'Version $version · Share one keyboard and mouse across your computers';
   }
 
   @override

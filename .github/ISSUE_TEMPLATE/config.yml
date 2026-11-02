@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability / 安全漏洞
+    url: https://github.com/icloudza/screen-ferry/security/advisories/new
+    about: Report it privately instead of in a public issue / 请私下报告，不要发公开的 issue
+  - name: Usage guide / 使用说明
+    url: https://github.com/icloudza/screen-ferry#usage
+    about: Pairing, arranging screens, connecting by address / 配对、摆放屏幕、按地址连接

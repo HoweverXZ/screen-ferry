@@ -1,0 +1,29 @@
+name: Question / 使用问题
+description: Not sure how to set something up or how something works / 不知道怎么设置，或者想问某个功能怎么用
+labels: [question]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The Usage section of the README covers pairing, layout, and connecting by address.
+        If something is broken rather than unclear, a bug report with a diagnostics file gets it fixed faster.
+
+        README 的「使用」一节讲了配对、摆放屏幕和按地址连接。
+        如果是出了错而不是不会用，开“问题反馈”并附上诊断文件，能更快修好。
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question / 你的问题
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version / 版本
+      description: Shown in Settings → About / 在「设置 → 关于」里能看到
+      placeholder: 0.1.0
+  - type: input
+    id: systems
+    attributes:
+      label: Systems / 两台电脑的系统
+      placeholder: macOS 15.6 (keyboard and mouse) + Windows 11

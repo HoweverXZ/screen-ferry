@@ -7,9 +7,11 @@ body:
       value: |
         In ScreenFerry, go to Log → Diagnostics, choose Export Diagnostics, then drag the file into "Diagnostics file" at the bottom.
         Device names, user names and file names in it are replaced with placeholders. It contains no clipboard contents or keys.
+        Security issues: please don't post them here. See "Report a vulnerability" on the Security tab.
 
         先在 ScreenFerry 的「日志 → 运行日志」里点“导出诊断文件”，再把文件拖到最下面的“诊断文件”里。
         诊断文件里的设备名、用户名和文件名已经换成代号，不含剪贴板内容和密钥。
+        安全问题请不要发在这里，到仓库的 Security 页点“Report a vulnerability”私下报告。
   - type: textarea
     id: what
     attributes:
@@ -25,10 +27,34 @@ body:
         1. On the Mac…
         2. Move the cursor to…
         3. See…
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area / 哪方面
+      multiple: true
+      options:
+        - Keyboard and mouse / 键鼠
+        - Clipboard / 剪贴板
+        - File transfer / 传文件
+        - Discovery, pairing, connection / 发现、配对与连接
+        - Updates / 版本更新
+        - Installing / 安装
+        - Settings window / 设置界面
+        - Other / 其他
+  - type: dropdown
+    id: where
+    attributes:
+      label: Which computer / 哪一台出的问题
+      options:
+        - The one with the keyboard and mouse / 键鼠所在的那台（控制端）
+        - The one being controlled / 被控制的那台
+        - Both / 两台都有
+        - Not sure / 说不清
   - type: input
     id: version
     attributes:
       label: Version / 版本
+      description: Shown in Settings → About / 在「设置 → 关于」里能看到
       placeholder: 0.1.0
     validations:
       required: true

@@ -8,6 +8,7 @@ import 'package:screenferry_settings/shell/sidebar.dart';
 import 'package:screenferry_settings/state/app_state.dart';
 import 'package:screenferry_settings/theme/tokens.dart';
 import 'package:screenferry_settings/widgets/address_dialog.dart';
+import 'package:screenferry_settings/widgets/brand.dart';
 import 'package:screenferry_settings/widgets/controls.dart';
 import 'package:screenferry_settings/widgets/glyph.dart';
 import 'package:screenferry_settings/widgets/group.dart';
@@ -1042,6 +1043,14 @@ void main() {
   });
 
   group('关于', () {
+    testWidgets('页头显示彩色的应用图标', (tester) async {
+      final state = await launch(tester, const Size(1160, 780));
+      state.go(SfPage.about);
+      await settle(tester);
+      expect(find.byType(AppIconMark), findsOneWidget);
+      expect(find.bySemanticsLabel('ScreenFerry'), findsWidgets);
+    });
+
     testWidgets('点作者主页用浏览器打开，不再列出加密和协议版本', (tester) async {
       final opened = <String>[];
       final state = await launch(tester, const Size(1160, 780), opened: opened);

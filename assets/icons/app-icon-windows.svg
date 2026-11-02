@@ -1,39 +1,81 @@
-<!-- 应用图标（Windows）：256 画布，主体几乎铺满，圆角比 macOS 小。
-     由 cargo xtask icons 导出为设置界面 app_icon.ico 的 48–256 像素；16–32 像素用 app-icon-windows-small.svg。 -->
+<!-- 应用图标（Windows）：256 画布，主体几乎铺满，圆角比 macOS 小，构图同 app-icon-macos.svg。
+     由 cargo xtask icons 导出为 app_icon.ico 的 48–256 像素；16–32 像素用 app-icon-windows-small.svg。 -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#5B98FF"/>
-      <stop offset="1" stop-color="#4A4AE2"/>
-    </linearGradient>
-    <radialGradient id="hl" cx="0.5" cy="0" r="0.9">
-      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.28"/>
-      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
-    </radialGradient>
-    <linearGradient id="tail" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0"/>
-      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0.7"/>
-    </linearGradient>
-    <radialGradient id="orb" cx="0.35" cy="0.3" r="0.75">
+    <linearGradient id="porcelain" x1="0" y1="0" x2="0.35" y2="1">
       <stop offset="0" stop-color="#FFFFFF"/>
-      <stop offset="1" stop-color="#CCD9FF"/>
-    </radialGradient>
-    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
-      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.45"/>
-      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
-    </radialGradient>
-    <mask id="gap" maskUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
-      <rect width="100" height="100" fill="#FFFFFF"/>
-      <circle cx="67" cy="50" r="17.5" fill="#000000"/>
-    </mask>
+      <stop offset="1" stop-color="#ECEDF2"/>
+    </linearGradient>
+    <linearGradient id="ground" x1="0.2" y1="0" x2="0.5" y2="1">
+      <stop offset="0" stop-color="#5563EC"/>
+      <stop offset="1" stop-color="#3236BC"/>
+    </linearGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0" stop-color="#D3DEFF"/>
+      <stop offset="1" stop-color="#A9BCFF"/>
+    </linearGradient>
+    <linearGradient id="screen" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0" stop-color="#8FA7FF"/>
+      <stop offset="1" stop-color="#6A84F6"/>
+    </linearGradient>
+    <clipPath id="shape">
+      <rect width="100" height="100" rx="20"/>
+    </clipPath>
+    <!-- 瓷面和蓝色的分界线：从上往下是一条直线，到屏幕中间拐出一个光标，再接着往下 -->
+    <clipPath id="left">
+      <path d="M 42 -1 L 42 24 Q 42 25.5 43.08 26.55 L 64.6 47.49 Q 65.68 48.54 64.18 48.54 L 56.78 48.54 Q 55.28 48.54 55.87 49.92 L 59.65 58.68 Q 60.24 60.06 58.86 60.65 L 56.34 61.71 Q 54.96 62.3 54.36 60.92 L 50.44 51.84 Q 49.84 50.46 48.72 51.46 L 43.12 56.5 Q 42 57.5 42 59 L 42 101 L -1 101 L -1 -1 Z"/>
+    </clipPath>
+    <clipPath id="right">
+      <path d="M 42 -1 L 42 24 Q 42 25.5 43.08 26.55 L 64.6 47.49 Q 65.68 48.54 64.18 48.54 L 56.78 48.54 Q 55.28 48.54 55.87 49.92 L 59.65 58.68 Q 60.24 60.06 58.86 60.65 L 56.34 61.71 Q 54.96 62.3 54.36 60.92 L 50.44 51.84 Q 49.84 50.46 48.72 51.46 L 43.12 56.5 Q 42 57.5 42 59 L 42 101 L 101 101 L 101 -1 Z"/>
+    </clipPath>
+    <!-- 刻在瓷面上的槽：左上内缘一道阴影，右下外缘一道反光 -->
+    <filter id="groove" filterUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
+      <feFlood flood-color="#70748F" flood-opacity="0.6" result="ink"/>
+      <feComposite in="ink" in2="SourceAlpha" operator="out" result="outside"/>
+      <feGaussianBlur in="outside" stdDeviation="0.5" result="outside-blur"/>
+      <feOffset in="outside-blur" dx="0.55" dy="0.75" result="outside-shift"/>
+      <feComposite in="outside-shift" in2="SourceAlpha" operator="in" result="inner"/>
+      <feFlood flood-color="#FFFFFF" result="light"/>
+      <feComposite in="light" in2="SourceAlpha" operator="in" result="light-shape"/>
+      <feOffset in="light-shape" dx="0.4" dy="0.55" result="light-shift"/>
+      <feComposite in="light-shift" in2="SourceAlpha" operator="out" result="lip"/>
+      <feMerge>
+        <feMergeNode in="lip"/>
+        <feMergeNode in="SourceGraphic"/>
+        <feMergeNode in="inner"/>
+      </feMerge>
+    </filter>
+    <!-- 蓝色那半比瓷面高一层，投下的影子也落进光标里 -->
+    <filter id="lift" filterUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
+      <feDropShadow dx="-0.9" dy="0.9" stdDeviation="1.2" flood-color="#1D1F6B" flood-opacity="0.38"/>
+    </filter>
+    <filter id="raise" filterUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
+      <feDropShadow dx="0.4" dy="1.8" stdDeviation="1.6" flood-color="#14165A" flood-opacity="0.45"/>
+    </filter>
   </defs>
   <g transform="translate(4 4) scale(2.48)">
-    <rect width="100" height="100" rx="20" fill="url(#bg)"/>
-    <rect width="100" height="100" rx="20" fill="url(#hl)"/>
-    <rect x="19" y="30" width="48" height="40" rx="10" fill="#FFFFFF" fill-opacity="0.16"
-          stroke="#FFFFFF" stroke-opacity="0.92" stroke-width="3.2" mask="url(#gap)"/>
-    <rect x="36" y="45.5" width="31" height="9" rx="4.5" fill="url(#tail)"/>
-    <circle cx="67" cy="50" r="20" fill="url(#glow)"/>
-    <circle cx="67" cy="50" r="12.5" fill="url(#orb)"/>
+    <rect width="100" height="100" rx="20" fill="url(#porcelain)"/>
+    <g clip-path="url(#shape)">
+      <!-- 左半：刻在瓷面上的显示器 -->
+      <g clip-path="url(#left)">
+        <g filter="url(#groove)" fill="none" stroke="#E0E1E8" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="12" y="18" width="76" height="51" rx="11"/>
+          <path d="M 34.5 79.5 L 65.5 79.5"/>
+        </g>
+      </g>
+      <!-- 右半：实心的蓝色机身 -->
+      <g filter="url(#lift)">
+        <g clip-path="url(#right)">
+          <rect width="100" height="100" fill="url(#ground)"/>
+          <g filter="url(#raise)">
+            <path d="M 45.5 68 L 54.5 68 L 56 78 L 44 78 Z" fill="#8EA6FB"/>
+            <rect x="33" y="77" width="34" height="5" rx="2.5" fill="url(#body)"/>
+            <rect x="12" y="18" width="76" height="51" rx="11" fill="url(#body)"/>
+          </g>
+          <rect x="16.5" y="22.5" width="67" height="42" rx="7" fill="url(#screen)"/>
+          <path d="M 22 19.2 L 78 19.2" stroke="#FFFFFF" stroke-opacity="0.85" stroke-width="0.8" stroke-linecap="round"/>
+        </g>
+      </g>
+    </g>
   </g>
 </svg>

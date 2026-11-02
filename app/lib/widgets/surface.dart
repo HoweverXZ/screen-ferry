@@ -462,52 +462,6 @@ class _DashPainter extends CustomPainter {
   bool shouldRepaint(_DashPainter old) => old.color != color || old.radius != radius;
 }
 
-/// 应用标识：两块屏幕和它们之间的摆渡箭头。
-class FerryGlyph extends StatelessWidget {
-  const FerryGlyph({super.key, this.size = 24, this.color});
-
-  final double size;
-  final Color? color;
-
-  @override
-  Widget build(BuildContext context) => CustomPaint(
-    size: Size.square(size),
-    painter: _FerryPainter(color ?? IconTheme.of(context).color ?? Colors.black),
-  );
-}
-
-class _FerryPainter extends CustomPainter {
-  _FerryPainter(this.color);
-
-  final Color color;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final s = size.width / 24;
-    canvas.scale(s);
-    final p = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.7
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-    canvas.drawRRect(RRect.fromLTRBR(2.5, 5.5, 10.5, 16, const Radius.circular(2)), p);
-    canvas.drawRRect(RRect.fromLTRBR(13.5, 5.5, 21.5, 16, const Radius.circular(2)), p);
-    canvas.drawPath(
-      Path()
-        ..moveTo(8.5, 19)
-        ..lineTo(15.5, 19)
-        ..moveTo(12.2, 16.8)
-        ..lineTo(15.5, 19)
-        ..lineTo(12.2, 21.2),
-      p,
-    );
-  }
-
-  @override
-  bool shouldRepaint(_FerryPainter old) => old.color != color;
-}
-
 /// 复制文字并提示。
 void copyText(BuildContext context, String text, String done) {
   Clipboard.setData(ClipboardData(text: text));

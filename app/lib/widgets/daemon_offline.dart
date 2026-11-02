@@ -7,6 +7,7 @@ import '../ipc/launcher.dart';
 import '../state/app_scope.dart';
 import '../state/app_state.dart';
 import '../theme/tokens.dart';
+import 'brand.dart';
 import 'surface.dart';
 
 class DaemonOffline extends StatelessWidget {

@@ -4,6 +4,7 @@ import '../l10n/l10n.dart';
 import '../state/app_scope.dart';
 import '../state/app_state.dart';
 import '../theme/tokens.dart';
+import '../widgets/brand.dart';
 import '../widgets/controls.dart';
 import '../widgets/group.dart';
 import '../widgets/page_scaffold.dart';
@@ -36,12 +37,7 @@ class AboutPage extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  Container(
-                    width: 66,
-                    height: 66,
-                    decoration: ShapeDecoration(color: c.accent, shape: continuous(20)),
-                    child: Center(child: FerryGlyph(size: 36, color: c.onAccent)),
-                  ),
+                  const AppIconMark(size: 66),
                   const SizedBox(width: 18),
                   Expanded(
                     child: Column(

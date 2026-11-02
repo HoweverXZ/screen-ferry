@@ -164,3 +164,7 @@ The engineering docs are written in Chinese:
 ## License
 
 Licensed under either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option. Unless you state otherwise, any contribution you submit is licensed the same way.
+
+## Friends
+
+- [LINUX DO](https://linux.do/)

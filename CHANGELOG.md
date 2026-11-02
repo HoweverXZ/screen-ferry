@@ -8,6 +8,9 @@
 
 - README 头图：左边图标和一句话介绍，右边一台笔记本、一台显示器，光标沿拖尾从这台划到那台。中英文 README 各一张，
   按 GitHub 的浅色、深色主题自动切换；源文件在 `assets/readme/`，`cargo xtask icons` 导出两倍大小的 PNG。
+- 宣传片 `assets/promo/screenferry-promo-1080p60.mp4`（60 秒，带背景音乐）：键鼠共享、剪贴板、拖文件三章演示，
+  配对与连接，更多功能。边缘投递胶囊和配对弹窗照代码画，鼠标、拖拽、拼音输入按真实操作模拟。
+- README 底部加友情链接：[LINUX DO](https://linux.do/)。
 
 ## [0.1.0] - 2026-11-02
 

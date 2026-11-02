@@ -60,7 +60,8 @@ screen-ferry/
 ├─ assets/                 # 唯一存放二进制资源的地方（例外：app/ 中平台工程要求的图标，见 ADR 0003）
 │  ├─ icons/               #   应用图标、托盘图标（svg 源文件 + 导出图）
 │  ├─ dmg/                 #   Mac 安装盘的窗口背景（svg 源文件 + 导出图）
-│  └─ readme/              #   README 头图，中英文 × 浅色、深色（svg 源文件 + 导出图）
+│  ├─ readme/              #   README 头图，中英文 × 浅色、深色（svg 源文件 + 导出图）
+│  └─ promo/               #   宣传片成片（1080p60）
 ├─ packaging/              # 平台打包配置，只放配置，不放代码
 │  ├─ macos/               #   Info.plist、entitlements.plist
 │  └─ windows/             #   app.manifest（DPI、uiAccess）、安装包配置

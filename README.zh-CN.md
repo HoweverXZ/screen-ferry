@@ -162,3 +162,7 @@ cargo xtask lint
 ## 许可证
 
 [MIT](LICENSE-MIT) 或 [Apache-2.0](LICENSE-APACHE)，任选其一。除非另有声明，你提交的贡献同样按这两种许可证授权。
+
+## 友情链接
+
+- [LINUX DO](https://linux.do/)

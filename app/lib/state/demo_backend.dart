@@ -204,8 +204,15 @@ class DemoBackend implements Backend {
       case SetSharingRequest(:final on):
         _sharing = on;
         _cursor = null;
-        _addLog(LogKind.link, on ? LogIcon.play : LogIcon.pause, on ? '继续共享' : '暂停共享', on ? '键鼠可以切到对方' : '键鼠留在本机');
-        emit(ToastNotice(on ? '已继续共享' : '已暂停共享'));
+        final phrase = Phrase(on ? 'sharing_resumed' : 'sharing_paused');
+        _addLog(
+          LogKind.link,
+          on ? LogIcon.play : LogIcon.pause,
+          on ? '继续共享' : '暂停共享',
+          on ? '键鼠可以切到对方' : '键鼠留在本机',
+          phrase: phrase,
+        );
+        emit(ToastNotice(on ? '已继续共享' : '已暂停共享', phrase: phrase));
       case UpdateSettingsRequest(:final settings):
         final before = Arrangement.of(_peers, _settings);
         _settings = _settings.apply(settings);
@@ -247,7 +254,8 @@ class DemoBackend implements Backend {
       case RevealDiagnosticsRequest() || OpenLogsFolderRequest():
         break;
       case OpenPeerSettingsRequest(:final fingerprint):
-        emit(ToastNotice('已在 ${_nameOf(fingerprint)} 上打开设置，把光标移过去就能改'));
+        final name = _nameOf(fingerprint);
+        emit(ToastNotice('已在 $name 上打开设置，把光标移过去就能改', phrase: Phrase('peer_settings_opened', {'name': name})));
       case ForgetRequest(:final fingerprint):
         final gone = _peers.where((p) => p.fingerprint == fingerprint).toList();
         _peers.removeWhere((p) => p.fingerprint == fingerprint);
@@ -261,8 +269,9 @@ class DemoBackend implements Backend {
           );
         }
         for (final p in gone) {
-          _addLog(LogKind.link, LogIcon.unlink, '已移除 ${p.name}', '下次连接需要重新配对');
-          emit(ToastNotice('已移除 ${p.name}'));
+          final phrase = Phrase('removed', {'name': p.name});
+          _addLog(LogKind.link, LogIcon.unlink, '已移除 ${p.name}', '下次连接需要重新配对', phrase: phrase);
+          emit(ToastNotice('已移除 ${p.name}', phrase: phrase));
         }
       case ConnectRequest(:final fingerprint):
         final device = _found.where((d) => d.fingerprint == fingerprint).firstOrNull;
@@ -286,20 +295,42 @@ class DemoBackend implements Backend {
         if (accept && device != null) {
           _found.remove(device);
           _peers.insert(0, _peer(device.name, device.fingerprint, online: true, raw: true));
-          _addLog(LogKind.link, LogIcon.lock, '已与 ${device.name} 配对', '指纹 ${device.short}');
+          final phrase = Phrase('paired', {'name': device.name, 'short': device.short});
+          _addLog(LogKind.link, LogIcon.lock, '已与 ${device.name} 配对', '指纹 ${device.short}', phrase: phrase);
           emit(PairingClosedNotice(id));
-          emit(ToastNotice('已与 ${device.name} 配对'));
+          emit(ToastNotice('已与 ${device.name} 配对', phrase: phrase));
         } else {
           emit(PairingClosedNotice(id));
-          emit(ToastNotice(accept ? '配对已结束' : '已拒绝配对'));
+          if (device != null) {
+            _addLog(
+              LogKind.link,
+              LogIcon.warning,
+              '已拒绝 ${device.name} 的配对请求',
+              '',
+              phrase: Phrase('pairing_rejected', {'name': device.name, 'by_peer': 'false'}),
+            );
+          }
         }
       case ClearLogRequest():
         _log.clear();
-        emit(const ToastNotice('日志已清空'));
       case SendFilesRequest(:final paths, :final to):
         final name = to == null ? _peerName : _nameOf(to);
-        _addLog(LogKind.file, LogIcon.file, '发送 ${paths.length} 项到 $name', '演示模式不会真的发送');
-        emit(ToastNotice('开始发给 $name'));
+        final file = paths.first.split(RegExp(r'[/\\]')).last;
+        final items = paths.length;
+        _addLog(
+          LogKind.file,
+          LogIcon.file,
+          items > 1 ? '发送 $file 等 $items 项到 $name' : '发送 $file 到 $name',
+          '演示模式不会真的发送',
+          phrase: Phrase('transfer_sending', {
+            'name': name,
+            'file': file,
+            'items': '$items',
+            'files': '$items',
+            'bytes': '0',
+          }),
+        );
+        emit(ToastNotice('开始发给 $name', phrase: Phrase('sending', {'name': name})));
       case HelloRequest() || OpenPermissionSettingsRequest() || OpenSettingsRequest():
         break;
     }
@@ -337,7 +368,13 @@ class DemoBackend implements Backend {
     if (_cursor != null) {
       final from = _nameOf(_cursor!);
       _cursor = null;
-      _addLog(LogKind.cursor, LogIcon.cursor, '光标回到 本机', '从 $from 的屏幕边缘');
+      _addLog(
+        LogKind.cursor,
+        LogIcon.cursor,
+        '光标回到本机',
+        '从 $from 的屏幕边缘',
+        phrase: const Phrase('cursor_back', {'hotkey': 'false'}),
+      );
       return;
     }
     final last = online.indexWhere((p) => p.fingerprint == _recent);
@@ -346,7 +383,13 @@ class DemoBackend implements Backend {
     _recent = next.fingerprint;
     _hours[DateTime.now().hour]++;
     final side = role == Role.server ? Arrangement.of(_peers, _settings).placeOf(next.fingerprint)?.side : null;
-    _addLog(LogKind.cursor, LogIcon.cursor, '光标切到 ${next.name}', side == null ? '从本机屏幕边缘' : '从本机${_sideLabel(side)}边缘');
+    _addLog(
+      LogKind.cursor,
+      LogIcon.cursor,
+      '光标切到 ${next.name}',
+      side == null ? '从本机屏幕边缘' : '从本机${_sideLabel(side)}边缘',
+      phrase: Phrase('cursor_to_peer', {'name': next.name, 'side': (side ?? ScreenSide.right).name}),
+    );
   }
 
   /// 布局改了：哪台换了一侧，或同一侧换了先后。
@@ -357,11 +400,18 @@ class DemoBackend implements Backend {
         if (before.placeOf(p.fingerprint)?.side != after.placeOf(p.fingerprint)?.side) p,
     ];
     if (moved.isEmpty) {
-      _addLog(LogKind.link, LogIcon.layout, '调整了同一侧设备的先后', '布局已保存');
+      _addLog(LogKind.link, LogIcon.layout, '调整了设备的位置', '布局已保存', phrase: const Phrase('layout_arranged'));
       return;
     }
     for (final p in moved) {
-      _addLog(LogKind.link, LogIcon.layout, '${p.name} 移到本机${_sideLabel(after.placeOf(p.fingerprint)!.side)}', '布局已保存');
+      final side = after.placeOf(p.fingerprint)!.side;
+      _addLog(
+        LogKind.link,
+        LogIcon.layout,
+        '${p.name} 移到本机${_sideLabel(side)}',
+        '布局已保存',
+        phrase: Phrase('layout_moved', {'name': p.name, 'side': side.name}),
+      );
     }
   }
 
@@ -465,7 +515,7 @@ class DemoBackend implements Backend {
     );
   }
 
-  void _addLog(LogKind kind, LogIcon icon, String text, String detail, {DateTime? at}) {
+  void _addLog(LogKind kind, LogIcon icon, String text, String detail, {DateTime? at, Phrase? phrase}) {
     final entry = LogEntry(
       id: _nextLog++,
       kind: kind,
@@ -473,6 +523,7 @@ class DemoBackend implements Backend {
       text: text,
       detail: detail,
       at: at ?? DateTime.now(),
+      phrase: phrase,
     );
     _log.insert(0, entry);
     if (_log.length > 200) _log.removeLast();
@@ -480,16 +531,65 @@ class DemoBackend implements Backend {
   }
 
   void _seedLog(DateTime now) {
+    final peer = _peerName;
     final seed = [
-      (LogKind.link, LogIcon.power, 'ScreenFerry 已启动', '监听 0.0.0.0:24810', const Duration(minutes: 73)),
-      (LogKind.link, LogIcon.link, '已连接 $_peerName', 'TLS 1.3 · 指纹 3F9A-12C4-77E0-B1D2', const Duration(minutes: 72)),
-      (LogKind.clip, LogIcon.clipboard, '剪贴板同步到 本机', '文本 · 128 字', const Duration(minutes: 15)),
-      (LogKind.cursor, LogIcon.cursor, '光标回到 本机', '快捷键 Ctrl + Option + Esc', const Duration(minutes: 7)),
-      (LogKind.cursor, LogIcon.cursor, '光标切到 $_peerName', '从本机右侧边缘', const Duration(minutes: 3)),
-      (LogKind.clip, LogIcon.clipboard, '剪贴板同步到 $_peerName', '文本 · 31 字', const Duration(seconds: 12)),
+      (
+        LogKind.link,
+        LogIcon.power,
+        'ScreenFerry 已启动',
+        '$_localName · 键鼠在本机',
+        Phrase('started', {'name': _localName, 'role': role.name}),
+        const Duration(minutes: 73),
+      ),
+      (
+        LogKind.link,
+        LogIcon.link,
+        '已连接 $peer',
+        'TLS 1.3 · 192.168.2.18',
+        Phrase('connected', {'name': peer, 'ip': '192.168.2.18'}),
+        const Duration(minutes: 72),
+      ),
+      (
+        LogKind.clip,
+        LogIcon.clipboard,
+        '剪贴板同步到本机',
+        '文本 · 128 字',
+        Phrase('clipboard_synced', {
+          'name': peer,
+          'to_peer': 'false',
+          'content': 'text',
+          'chars': '128',
+          'bytes': '384',
+        }),
+        const Duration(minutes: 15),
+      ),
+      (
+        LogKind.cursor,
+        LogIcon.cursor,
+        '光标回到本机',
+        '快捷键 Ctrl + Option + Esc',
+        const Phrase('cursor_back', {'hotkey': 'true'}),
+        const Duration(minutes: 7),
+      ),
+      (
+        LogKind.cursor,
+        LogIcon.cursor,
+        '光标切到 $peer',
+        '从本机右侧边缘',
+        Phrase('cursor_to_peer', {'name': peer, 'side': 'right'}),
+        const Duration(minutes: 3),
+      ),
+      (
+        LogKind.clip,
+        LogIcon.clipboard,
+        '剪贴板同步到 $peer',
+        '文本 · 31 字',
+        Phrase('clipboard_synced', {'name': peer, 'to_peer': 'true', 'content': 'text', 'chars': '31', 'bytes': '93'}),
+        const Duration(seconds: 12),
+      ),
     ];
-    for (final (kind, icon, text, detail, ago) in seed) {
-      _addLog(kind, icon, text, detail, at: now.subtract(ago));
+    for (final (kind, icon, text, detail, phrase, ago) in seed) {
+      _addLog(kind, icon, text, detail, at: now.subtract(ago), phrase: phrase);
     }
   }
 

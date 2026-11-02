@@ -115,6 +115,7 @@ void main() {
     expect(s.settings.layout, [const Placement(pc, ScreenSide.left)]);
     expect(s.settings.theme, UiTheme.dark);
     expect(s.settings.accent, 2);
+    expect(s.settings.language, UiLanguage.en);
     expect(s.activity.single.switches, 12);
     expect(s.activity.single.hour, DateTime.fromMillisecondsSinceEpoch(1793476800 * 1000));
 
@@ -139,6 +140,11 @@ void main() {
     expect(prompt.digits, '482913');
     expect(decoded.whereType<PairingClosedNotice>().single.id, 3);
     expect(decoded.whereType<ToastNotice>().single.text, '已暂停共享');
+    expect(decoded.whereType<ToastNotice>().single.phrase?.key, 'sharing_paused');
+    final entry = history.entries.single;
+    expect(entry.phrase?.key, 'cursor_to_peer');
+    expect(entry.phrase?.arg('name'), '办公室 PC');
+    expect(entry.phrase?.arg('side'), 'right');
     expect(decoded.whereType<ShowDeviceNotice>().single.fingerprint, pc);
     final dialed = decoded.whereType<DialedNotice>().toList();
     expect(dialed.first.address, '192.168.2.12');
@@ -165,6 +171,7 @@ void main() {
           side: ScreenSide.left,
           autostart: true,
           theme: UiTheme.light,
+          language: UiLanguage.zh,
           clipboardLimitMb: 16,
           mouseDpi: 800,
         ),

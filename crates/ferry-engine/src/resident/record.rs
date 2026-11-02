@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use ferry_ipc::{HourActivity, LogEntry, LogIcon, LogKind};
+use ferry_ipc::{HourActivity, LogEntry, LogIcon, LogKind, Phrase};
 
 /// 日志最多保留的条数。
 const LOG_CAPACITY: usize = 200;
@@ -33,6 +33,7 @@ impl Log {
         icon: LogIcon,
         text: impl Into<String>,
         detail: impl Into<String>,
+        phrase: Phrase,
     ) -> LogEntry {
         let entry = LogEntry {
             id: self.next_id,
@@ -41,6 +42,7 @@ impl Log {
             text: text.into(),
             detail: detail.into(),
             at: now_ms(),
+            phrase: Some(phrase),
         };
         self.next_id += 1;
         self.entries.push_front(entry.clone());

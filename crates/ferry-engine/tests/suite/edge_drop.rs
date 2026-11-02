@@ -6,7 +6,7 @@ use ferry_core::capsule::hit;
 use ferry_engine::{EdgeDrop, EdgeFeed, Event, Events, Files};
 use ferry_platform::{CaptureEvent, OverlayEvent};
 use ferry_platform_mock::MockOverlay;
-use ferry_types::{MouseButton, Point, Rgba, Shape};
+use ferry_types::{Lang, MouseButton, Point, Rgba, Shape};
 use tokio::time::sleep;
 
 use crate::support::{Device, Rig, Setup, TempDir, eventually};
@@ -18,7 +18,12 @@ fn edge_drop_for(device: &Device) -> (Files, MockOverlay, Arc<EdgeDrop>) {
     let (events, mut rx) = Events::channel();
     let files = Files::new(&device.store, events);
     let overlay = MockOverlay::new();
-    let edge = Arc::new(EdgeDrop::spawn(overlay.clone(), files.clone(), ACCENT));
+    let edge = Arc::new(EdgeDrop::spawn(
+        overlay.clone(),
+        files.clone(),
+        ACCENT,
+        Lang::Zh,
+    ));
     tokio::spawn({
         let edge = edge.clone();
         async move {

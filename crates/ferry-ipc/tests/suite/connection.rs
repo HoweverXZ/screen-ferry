@@ -31,6 +31,7 @@ async fn handshake_then_messages_both_ways() {
         assert_eq!(request, Request::SetSharing { on: false });
         conn.send(&Notice::Toast {
             text: "已暂停共享".into(),
+            phrase: None,
         })
         .await
         .unwrap();
@@ -45,7 +46,8 @@ async fn handshake_then_messages_both_ways() {
     assert_eq!(
         notice,
         Notice::Toast {
-            text: "已暂停共享".into()
+            text: "已暂停共享".into(),
+            phrase: None,
         }
     );
     server.await.unwrap();

@@ -4,6 +4,8 @@ import 'package:screenferry_settings/app.dart';
 import 'package:screenferry_settings/shell/window_frame.dart';
 import 'package:screenferry_settings/state/app_state.dart';
 
+import '../support.dart';
+
 const _channel = MethodChannel('screenferry/window');
 
 Future<void> settle(WidgetTester tester) async {
@@ -23,6 +25,7 @@ Future<List<String>> launch(WidgetTester tester, {required bool frame}) async {
     return call.method == 'isMaximized' ? false : null;
   });
   addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(_channel, null));
+  useLocale(tester);
   final state = AppState(backend: DemoBackend(animate: false));
   addTearDown(state.dispose);
   await tester.pumpWidget(ScreenFerryApp(state: state, windowFrame: frame));
@@ -81,6 +84,7 @@ void main() {
     tester.view.physicalSize = const Size(1160, 780);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
+    useLocale(tester);
     final state = AppState(backend: DemoBackend(animate: false));
     addTearDown(state.dispose);
     await tester.pumpWidget(ScreenFerryApp(state: state, windowFrame: true));

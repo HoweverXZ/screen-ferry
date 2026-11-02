@@ -6,6 +6,7 @@ import 'dart:math';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import '../l10n/l10n.dart';
 import '../state/app_scope.dart';
 import '../state/app_state.dart';
 import '../theme/tokens.dart';
@@ -24,7 +25,7 @@ class LayoutPage extends StatelessWidget {
     if (!state.isServer) {
       // 屏幕怎么摆由键鼠所在的那台（服务端）决定。
       return PageScaffold(
-        title: '布局',
+        title: context.l10n.layoutTitle,
         children: [
           SfCard(
             child: Row(
@@ -35,8 +36,11 @@ class LayoutPage extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('屏幕位置在 ${state.peerName} 上设置', style: const TextStyle(fontWeight: FontWeight.w600)),
-                      Text('键盘鼠标在那台电脑上，由它决定从哪条边切过来。', style: TextStyle(color: c.muted)),
+                      Text(
+                        context.l10n.layoutSetOnServer(state.peerName),
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      Text(context.l10n.layoutSetOnServerHint, style: TextStyle(color: c.muted)),
                     ],
                   ),
                 ),
@@ -47,29 +51,32 @@ class LayoutPage extends StatelessWidget {
       );
     }
     return PageScaffold(
-      title: '布局',
+      title: context.l10n.layoutTitle,
       children: [
         const _Stage(),
         SfGroup(
           children: [
-            const SfRow(
-              title: '切换方式',
-              subtitle: '停留一下再切换，可以避免鼠标甩到边缘时误切 · 即将支持',
+            SfRow(
+              title: context.l10n.layoutSwitchMode,
+              subtitle: context.l10n.layoutSwitchModeHint,
               trailing: SfSegmented<SwitchMode>(
-                label: '切换方式',
-                segments: [(SwitchMode.instant, '立即'), (SwitchMode.dwell, '停留 0.15 秒')],
+                label: context.l10n.layoutSwitchMode,
+                segments: [
+                  (SwitchMode.instant, context.l10n.layoutInstant),
+                  (SwitchMode.dwell, context.l10n.layoutDwell),
+                ],
                 value: SwitchMode.instant,
                 onChanged: null,
               ),
             ),
-            const SfRow(
-              title: '拖拽时不切换',
-              subtitle: '按住鼠标键时，光标不会切到另一台电脑 · 目前始终开启',
-              trailing: SfSwitch(value: true, label: '拖拽时不切换', onChanged: null),
+            SfRow(
+              title: context.l10n.layoutNoDragSwitch,
+              subtitle: context.l10n.layoutNoDragSwitchHint,
+              trailing: SfSwitch(value: true, label: context.l10n.layoutNoDragSwitch, onChanged: null),
             ),
             SfRow(
-              title: '回到本机',
-              subtitle: '光标卡在对方屏幕上时，按它立即回来',
+              title: context.l10n.layoutBackHere,
+              subtitle: context.l10n.layoutBackHereHint,
               trailing: KeyCombo(['Ctrl', state.localIsMac ? 'Option' : 'Alt', 'Esc']),
             ),
           ],
@@ -296,7 +303,15 @@ class _StageState extends State<_Stage> {
                     rect: rect,
                     child: _DeviceTile(
                       peer: p,
-                      label: _label(p, side, i, list.length, cursor: p.fingerprint == cursor, movable: state.online),
+                      label: _label(
+                        context.l10n,
+                        p,
+                        side,
+                        i,
+                        list.length,
+                        cursor: p.fingerprint == cursor,
+                        movable: state.online,
+                      ),
                       cursor: p.fingerprint == cursor,
                       lifted: isDragged,
                       // 没连上后台时不能改，拖不动。
@@ -357,13 +372,17 @@ class _StageState extends State<_Stage> {
                       children: [
                         Expanded(
                           child: Text(
-                            _caption(shown, target),
+                            _caption(context.l10n, shown, target),
                             style: TextStyle(fontSize: 13, color: c.muted, height: 1.5),
                           ),
                         ),
                         if (shown.isEmpty) ...[
                           const SizedBox(width: 12),
-                          TextLink(label: '去配对', chevron: true, onPressed: () => state.go(SfPage.devices)),
+                          TextLink(
+                            label: context.l10n.layoutGoPair,
+                            chevron: true,
+                            onPressed: () => state.go(SfPage.devices),
+                          ),
                         ],
                       ],
                     ),
@@ -377,28 +396,39 @@ class _StageState extends State<_Stage> {
     );
   }
 
-  static String _order(ScreenSide side) => side == ScreenSide.left || side == ScreenSide.right ? '从上往下' : '从左往右';
+  /// 在本机哪一侧；那一侧不止一台时带上第几台。
+  static String _where(AppLocalizations l, ScreenSide side, int i, int k) =>
+      k > 1 ? l.layoutWhereNth(side.name, i + 1) : l.layoutWhere(side.name);
 
-  static String _label(PeerInfo p, ScreenSide side, int i, int k, {required bool cursor, required bool movable}) => [
-    '${p.displayName}，在本机${side.label}${k > 1 ? '${_order(side)}第 ${i + 1} 台' : ''}',
-    p.online ? '已连接' : '未连接',
-    if (cursor) '光标在这台上',
-    if (movable) '可以拖动',
-  ].join('，');
+  static String _label(
+    AppLocalizations l,
+    PeerInfo p,
+    ScreenSide side,
+    int i,
+    int k, {
+    required bool cursor,
+    required bool movable,
+  }) => [
+    l.layoutPeerAt(p.displayName, _where(l, side, i, k)),
+    p.online ? l.commonConnected : l.commonNotConnected,
+    if (cursor) l.layoutCursorOnIt,
+    if (movable) l.layoutMovable,
+  ].join(l.commonComma);
 
-  static String _caption(Arrangement shown, PeerPlace? target) {
-    if (shown.isEmpty) return '还没有配对的设备。在另一台电脑上运行 ScreenFerry 并配对后，它会出现在本机旁边';
+  static String _caption(AppLocalizations l, Arrangement shown, PeerPlace? target) {
+    if (shown.isEmpty) return l.layoutEmpty;
     if (target != null) {
       final k = shown.on(target.side).length;
-      final where = '松手后放到本机${target.side.label}';
-      return k > 1 ? '$where，${_order(target.side)}第 ${target.index + 1} 台' : where;
+      return k > 1
+          ? l.layoutDropAtNth(target.side.name, target.index + 1)
+          : l.layoutDropAt(l.layoutWhere(target.side.name));
     }
     if (shown.length == 1) {
       final p = shown.all.single;
-      return '${p.displayName} 在本机${shown.placeOf(p.fingerprint)!.side.label}，光标从相接的那条边穿过去';
+      return l.layoutSingle(p.displayName, l.layoutWhere(shown.placeOf(p.fingerprint)!.side.name));
     }
-    final parts = [for (final s in shown.usedSides) '${s.label} ${shown.on(s).length} 台'];
-    return '本机${parts.join('、')}。同一侧已连接的几台按先后平分那条边，光标从哪一段穿过去就到哪台';
+    final parts = [for (final s in shown.usedSides) l.layoutSideCount(s.name, shown.on(s).length)];
+    return l.layoutMany(parts.join(l.commonEnum));
   }
 }
 
@@ -506,10 +536,10 @@ class _ScreenBox extends StatelessWidget {
           _Look.offline => (lifted ? c.card : c.card.withValues(alpha: 0.75), Colors.transparent, c.card3, c.muted),
         };
         final (status, statusInk) = switch (look) {
-          _ when cursor => ('光标在这里', c.accent),
-          _Look.local => ('本机', c.muted),
-          _Look.online => ('已连接', c.muted),
-          _Look.offline => ('未连接', c.muted),
+          _ when cursor => (context.l10n.layoutCursorHere, c.accent),
+          _Look.local => (context.l10n.commonThisComputer, c.muted),
+          _Look.online => (context.l10n.commonConnected, c.muted),
+          _Look.offline => (context.l10n.commonNotConnected, c.muted),
         };
         Widget screen = AnimatedContainer(
           duration: Motion.medium,

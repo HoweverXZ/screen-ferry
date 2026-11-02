@@ -1,0 +1,1436 @@
+{
+  "@@locale": "zh",
+  "appTitle": "ScreenFerry",
+  "commonSave": "保存",
+  "commonCancel": "取消",
+  "commonClose": "关闭",
+  "navOverview": "仪表盘",
+  "navDevices": "设备",
+  "navLayout": "布局",
+  "navLog": "日志",
+  "navSettings": "设置",
+  "sidebarExpand": "展开侧栏",
+  "sidebarCollapse": "收起侧栏",
+  "statusConnectingDaemon": "正在连接后台",
+  "statusDaemonNotRunning": "后台未运行",
+  "statusDaemonLost": "与后台断开",
+  "statusSharing": "共享中",
+  "statusSharingRtt": "共享中 · {ms} ms",
+  "@statusSharingRtt": {
+    "placeholders": {
+      "ms": {
+        "type": "String"
+      }
+    }
+  },
+  "statusPaused": "已暂停共享",
+  "statusWaiting": "等待对方连接",
+  "statusSearching": "正在寻找对方",
+  "statusConnecting": "正在连接",
+  "statusStarting": "正在启动",
+  "statusStopped": "已停止",
+  "windowMinimize": "最小化",
+  "windowRestore": "还原",
+  "windowMaximize": "最大化",
+  "chartSwitchesLabel": "今日各小时的切换次数",
+  "chartMidnight": "0 时",
+  "chartNoon": "12 时",
+  "chartNow": "现在",
+  "bannerDaemonLost": "与后台的连接已断开，正在重连…",
+  "bannerPermission": "需要键鼠控制权限",
+  "bannerPortInUse": "端口被占用",
+  "bannerOther": "后台遇到了问题",
+  "bannerOpenSystemSettings": "打开系统设置",
+  "problemPermission": "需要在系统设置的“隐私与安全性”中允许 ScreenFerry 控制键盘和鼠标",
+  "problemPortInUse": "端口 {port} 被占用：可能还开着另一个键鼠共享软件或另一份 ScreenFerry",
+  "@problemPortInUse": {
+    "placeholders": {
+      "port": {
+        "type": "int"
+      }
+    }
+  },
+  "offlineConnecting": "正在连接后台…",
+  "offlineNotRunning": "后台没有运行",
+  "offlineStartHint": "请先启动 ScreenFerry，连上后会自动显示。",
+  "offlineAutoConnect": "启动后会自动连上。",
+  "offlineStartFailed": "启动失败，请在“应用程序”中打开 ScreenFerry",
+  "offlineStarting": "正在启动…",
+  "offlineStart": "启动 ScreenFerry",
+  "offlineRetrying": "正在重试",
+  "nameEditorRename": "改名字",
+  "accentBlue": "蓝色",
+  "accentTeal": "青色",
+  "accentPurple": "紫色",
+  "accentOrange": "橙色",
+  "accentPink": "粉色",
+  "aboutTitle": "关于",
+  "aboutBack": "返回设置",
+  "aboutTagline": "在 Mac 与 Windows 之间共享一套键盘鼠标",
+  "aboutCheckUpdates": "检查更新",
+  "aboutUpdatesSoon": "自动检查更新即将支持",
+  "aboutAuthor": "作者主页",
+  "aboutLicense": "许可证",
+  "logTitle": "日志",
+  "logClear": "清空",
+  "logFilter": "筛选",
+  "logAll": "全部",
+  "logCursor": "光标",
+  "logClipboard": "剪贴板",
+  "logFiles": "文件",
+  "logLinks": "设备与连接",
+  "logRun": "运行日志",
+  "logEmpty": "暂无记录",
+  "logCount": "共 {count} 条",
+  "@logCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "logRunSize": "{size} · {lines} 行",
+  "@logRunSize": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      },
+      "lines": {
+        "type": "String"
+      }
+    }
+  },
+  "pairingTitle": "配对",
+  "pairingWith": "与“{name}”配对",
+  "@pairingWith": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "pairingCheck": "请确认两台电脑上显示的是同一个配对码，一致才确认。",
+  "pairingPeerFingerprint": "对方指纹 ",
+  "pairingWaiting": "已确认，等待对方确认…",
+  "pairingAutoReject": "{seconds} 秒后自动拒绝",
+  "@pairingAutoReject": {
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
+  "pairingTimedOut": "已超时",
+  "pairingReject": "拒绝",
+  "pairingAccept": "数字一致，配对",
+  "pairingCodeLabel": "配对码 {code}",
+  "@pairingCodeLabel": {
+    "placeholders": {
+      "code": {
+        "type": "String"
+      }
+    }
+  },
+  "pairingDone": "已与“{name}”配对",
+  "@pairingDone": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "pairingNoMoreAsking": "以后连接不再询问",
+  "dialBadAddressTitle": "地址不对：{address}",
+  "@dialBadAddressTitle": {
+    "placeholders": {
+      "address": {
+        "type": "String"
+      }
+    }
+  },
+  "dialBadAddressBody": "填 IP（例如 192.168.2.12）、IP:端口，或者电脑名。",
+  "dialNotWaitingInviteTitle": "{address} 没有在等待邀请",
+  "@dialNotWaitingInviteTitle": {
+    "placeholders": {
+      "address": {
+        "type": "String"
+      }
+    }
+  },
+  "dialNotWaitingInviteBody": "确认那台电脑开着 ScreenFerry，并且选的是“被控制”。它的版本太旧时也不能被邀请，需要先升级。",
+  "dialNotWaitingTitle": "{address} 没有在等待连接",
+  "@dialNotWaitingTitle": {
+    "placeholders": {
+      "address": {
+        "type": "String"
+      }
+    }
+  },
+  "dialNotWaitingBody": "确认那台电脑开着 ScreenFerry，并且在设置里选的是“控制别的电脑”。",
+  "dialUnreachableTitle": "连不上 {address}",
+  "@dialUnreachableTitle": {
+    "placeholders": {
+      "address": {
+        "type": "String"
+      }
+    }
+  },
+  "dialUnreachableBody": "确认两台在同一个网络里、地址没有填错。Windows 第一次运行 ScreenFerry 时会询问防火墙，请允许它通过。",
+  "dialNotScreenFerryTitle": "{address} 上不是 ScreenFerry",
+  "@dialNotScreenFerryTitle": {
+    "placeholders": {
+      "address": {
+        "type": "String"
+      }
+    }
+  },
+  "dialNotScreenFerryBody": "确认地址和端口没有填错。",
+  "dialIncompatibleTitle": "版本不兼容",
+  "dialIncompatibleBody": "两台电脑上的 ScreenFerry 版本相差太多，请都升级到最新版。",
+  "dialBusyTitle": "{address} 正连着另一台电脑",
+  "@dialBusyTitle": {
+    "placeholders": {
+      "address": {
+        "type": "String"
+      }
+    }
+  },
+  "dialBusyBody": "先在那台电脑上断开，再邀请。",
+  "dialWrongRoleInviteTitle": "本机现在是被控制的一方",
+  "dialWrongRoleInviteBody": "邀请是控制端用的；被控制的一方请用“按地址连接”。",
+  "dialWrongRoleTitle": "本机现在是控制端",
+  "dialWrongRoleBody": "按地址连接是被控制的一方用的；控制端请用“邀请一台电脑”。",
+  "dialInviteTitle": "邀请一台电脑",
+  "dialConnectTitle": "按地址连接",
+  "dialInvited": "已邀请 {address}，它正在连过来",
+  "@dialInvited": {
+    "placeholders": {
+      "address": {
+        "type": "String"
+      }
+    }
+  },
+  "dialConnected": "已连上 {address}",
+  "@dialConnected": {
+    "placeholders": {
+      "address": {
+        "type": "String"
+      }
+    }
+  },
+  "dialInviteHint": "那台电脑要开着 ScreenFerry，选的是“被控制”。地址在它的「设备」页上；不写端口时用 24811。",
+  "dialConnectHint": "可以是 IP、IP:端口或电脑名，不写端口时用 24810。地址在那台电脑的「设备」页上。",
+  "dialInviteSubtitle": "输入被控制那台的地址，它会自动连过来",
+  "dialConnectSubtitle": "输入控制端（键盘鼠标所在那台）的地址",
+  "dialAddress": "地址",
+  "dialExample": "例如 {address}",
+  "@dialExample": {
+    "placeholders": {
+      "address": {
+        "type": "String"
+      }
+    }
+  },
+  "dialInviting": "正在邀请 {address}…",
+  "@dialInviting": {
+    "placeholders": {
+      "address": {
+        "type": "String"
+      }
+    }
+  },
+  "dialConnecting": "正在连接 {address}…",
+  "@dialConnecting": {
+    "placeholders": {
+      "address": {
+        "type": "String"
+      }
+    }
+  },
+  "dialRetry": "重试",
+  "dialInvite": "邀请",
+  "dialConnect": "连接",
+  "diagTitle": "提问题时附上诊断文件",
+  "diagBody": "包含版本、系统、设置和最近的运行日志。设备名、用户名和文件名会换成代号，不含剪贴板内容和密钥。",
+  "diagCopySummary": "复制摘要",
+  "diagExport": "导出诊断文件",
+  "diagOpenFolder": "打开日志文件夹",
+  "diagReport": "去 GitHub 提问题",
+  "diagSaved": "已存到“下载”：",
+  "diagShowInFinder": "在访达中显示",
+  "diagShowInExplorer": "在资源管理器中显示",
+  "diagVerbose": "详细记录",
+  "diagVerboseOff": "排查连接问题时打开，会多记一些细节。重启 ScreenFerry 后自动关闭",
+  "diagVerboseJustOn": "刚刚打开。问题出现后导出，再把它关掉",
+  "diagVerboseOnFor": "已打开 {minutes} 分钟。问题出现后导出，再把它关掉",
+  "@diagVerboseOnFor": {
+    "placeholders": {
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "diagRecent": "最近的运行日志",
+  "diagLive": "实时",
+  "diagNotConnected": "未连接",
+  "diagLevel": "日志级别",
+  "diagProblemsOnly": "警告和错误",
+  "diagNoProblems": "最近没有警告和错误",
+  "diagNoLog": "还没有运行日志",
+  "diagLevelDebug": "调试",
+  "diagLevelInfo": "信息",
+  "diagLevelWarn": "警告",
+  "diagLevelError": "错误",
+  "diagCopied": "已复制摘要：版本、系统和最近 200 行，可以直接贴进问题描述",
+  "keyMapTitle": "添加按键映射",
+  "keyMapNothing": "不发送",
+  "keyMapOnlyFor": "只对 {name} 生效",
+  "@keyMapOnlyFor": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "keyMapStep1": "① 本机按哪个键",
+  "keyMapRecording": "正在录制，按一个键",
+  "keyMapRerecord": "重新录制",
+  "keyMapPressAKey": "请在键盘上按一个键…",
+  "keyMapEscCancels": "Esc 取消",
+  "keyMapRecorded": "已录下",
+  "keyMapClickToRecord": "点这里，再按一个键",
+  "keyMapModifiersToo": "也能录单个修饰键，左右分开算。",
+  "keyMapStep2": "② {name} 收到什么",
+  "@keyMapStep2": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "keyMapSearch": "搜索按键，例如 Home、F5、音量",
+  "keyMapPress": "按",
+  "keyMapGetsNothing": "{name} 什么也收不到",
+  "@keyMapGetsNothing": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "keyMapGets": "{name} 收到",
+  "@keyMapGets": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "keyMapAdd": "添加",
+  "sideLeft": "左侧",
+  "sideRight": "右侧",
+  "sideTop": "上方",
+  "sideBottom": "下方",
+  "peerFallback": "对方",
+  "toastLinkCopied": "打不开浏览器，链接已复制",
+  "toastNotConnected": "还没连上后台，稍后再试",
+  "toastConnectingTo": "正在连接 {name}…",
+  "@toastConnectingTo": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "timeJustNow": "刚刚",
+  "timeSecondsAgo": "{n} 秒前",
+  "@timeSecondsAgo": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "timeMinutesAgo": "{n} 分钟前",
+  "@timeMinutesAgo": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "timeHoursAgo": "{n} 小时前",
+  "@timeHoursAgo": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "timeDaysAgo": "{n} 天前",
+  "@timeDaysAgo": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "seenOnline": "在线",
+  "seenOffline": "离线",
+  "seenAgo": "{ago}连接过",
+  "@seenAgo": {
+    "placeholders": {
+      "ago": {
+        "type": "String"
+      }
+    }
+  },
+  "durationUnderMinute": "不到 1 分钟",
+  "durationMinutes": "{m} 分钟",
+  "@durationMinutes": {
+    "placeholders": {
+      "m": {
+        "type": "int"
+      }
+    }
+  },
+  "durationHours": "{h} 小时 {m} 分",
+  "@durationHours": {
+    "placeholders": {
+      "h": {
+        "type": "int"
+      },
+      "m": {
+        "type": "int"
+      }
+    }
+  },
+  "keyMedia": "媒体键 0x{hex}",
+  "@keyMedia": {
+    "placeholders": {
+      "hex": {
+        "type": "String"
+      }
+    }
+  },
+  "keyUnknown": "按键 0x{hex}",
+  "@keyUnknown": {
+    "placeholders": {
+      "hex": {
+        "type": "String"
+      }
+    }
+  },
+  "keyNumpad": "小键盘 {key}",
+  "@keyNumpad": {
+    "placeholders": {
+      "key": {
+        "type": "String"
+      }
+    }
+  },
+  "keyLeft": "左 {key}",
+  "@keyLeft": {
+    "placeholders": {
+      "key": {
+        "type": "String"
+      }
+    }
+  },
+  "keyRight": "右 {key}",
+  "@keyRight": {
+    "placeholders": {
+      "key": {
+        "type": "String"
+      }
+    }
+  },
+  "keySpace": "空格",
+  "keyIso": "\\（ISO）",
+  "keyMenu": "菜单键",
+  "keyMute": "静音",
+  "keyVolumeUp": "音量 +",
+  "keyVolumeDown": "音量 −",
+  "keyHangul": "韩/英、かな",
+  "keyHanja": "汉字、英数",
+  "keyForwardDelete": "⌦ 向前删除",
+  "keyBrightnessUp": "亮度 +",
+  "keyBrightnessDown": "亮度 −",
+  "keyNextTrack": "下一首",
+  "keyPreviousTrack": "上一首",
+  "keyStop": "停止",
+  "keyPlayPause": "播放/暂停",
+  "settingsThisComputer": "这台电脑",
+  "settingsRole": "角色",
+  "settingsRoleServerHint": "键盘鼠标接在这台上，用它控制别的电脑",
+  "settingsRoleClientHint": "由另一台电脑的键盘鼠标控制 · 切换后重新连接",
+  "settingsRoleServer": "控制别的电脑",
+  "settingsRoleClient": "被控制",
+  "settingsAppearance": "外观",
+  "settingsTheme": "主题",
+  "settingsFollowSystem": "跟随系统",
+  "settingsLight": "浅色",
+  "settingsDark": "深色",
+  "settingsLanguage": "语言",
+  "settingsAccent": "强调色",
+  "settingsAccentHint": "开关、选中项和按钮的颜色",
+  "settingsMouseClipboard": "鼠标与剪贴板",
+  "settingsDpi": "本机鼠标的 DPI",
+  "settingsDpiHint": "每台设备的光标速度以它为准",
+  "settingsPerDevice": "按键映射、滚动方向",
+  "settingsPerDeviceHint": "在“设备”里逐台设置",
+  "settingsClipboard": "同步剪贴板",
+  "settingsClipboardHint": "光标切过去时，对方才来取最新的内容",
+  "settingsClipLimit": "单项大小上限",
+  "settingsClipLimitHint": "图片、文字等每一项超过这么大就不同步",
+  "settingsGeneral": "通用",
+  "settingsAutostart": "开机自动启动",
+  "settingsAnnounce": "在局域网里广播本机",
+  "settingsAnnounceHint": "另一台电脑不用填地址就能找到本机",
+  "settingsDataDir": "数据目录",
+  "settingsAbout": "关于 ScreenFerry",
+  "settingsVersion": "版本 {version}",
+  "@settingsVersion": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "commonComma": "，",
+  "@commonComma": {
+    "description": "并列的短句之间"
+  },
+  "commonEnum": "、",
+  "@commonEnum": {
+    "description": "并列的词之间"
+  },
+  "commonConnected": "已连接",
+  "commonNotConnected": "未连接",
+  "commonThisComputer": "本机",
+  "layoutTitle": "布局",
+  "layoutSetOnServer": "屏幕位置在 {name} 上设置",
+  "@layoutSetOnServer": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "layoutSetOnServerHint": "键盘鼠标在那台电脑上，由它决定从哪条边切过来。",
+  "layoutSwitchMode": "切换方式",
+  "layoutSwitchModeHint": "停留一下再切换，可以避免鼠标甩到边缘时误切 · 即将支持",
+  "layoutInstant": "立即",
+  "layoutDwell": "停留 0.15 秒",
+  "layoutNoDragSwitch": "拖拽时不切换",
+  "layoutNoDragSwitchHint": "按住鼠标键时，光标不会切到另一台电脑 · 目前始终开启",
+  "layoutBackHere": "回到本机",
+  "layoutBackHereHint": "光标卡在对方屏幕上时，按它立即回来",
+  "layoutGoPair": "去配对",
+  "layoutWhere": "本机{side, select, left{左侧} right{右侧} top{上方} other{下方}}",
+  "@layoutWhere": {
+    "placeholders": {
+      "side": {
+        "type": "String"
+      }
+    }
+  },
+  "layoutWhereNth": "本机{side, select, left{左侧从上往下} right{右侧从上往下} top{上方从左往右} other{下方从左往右}}第 {n} 台",
+  "@layoutWhereNth": {
+    "placeholders": {
+      "side": {
+        "type": "String"
+      },
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "layoutPeerAt": "{name}，在{where}",
+  "@layoutPeerAt": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "where": {
+        "type": "String"
+      }
+    }
+  },
+  "layoutCursorOnIt": "光标在这台上",
+  "layoutMovable": "可以拖动",
+  "layoutEmpty": "还没有配对的设备。在另一台电脑上运行 ScreenFerry 并配对后，它会出现在本机旁边",
+  "layoutDropAt": "松手后放到{where}",
+  "@layoutDropAt": {
+    "placeholders": {
+      "where": {
+        "type": "String"
+      }
+    }
+  },
+  "layoutSingle": "{name} 在{where}，光标从相接的那条边穿过去",
+  "@layoutSingle": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "where": {
+        "type": "String"
+      }
+    }
+  },
+  "layoutSideCount": "{side, select, left{左侧} right{右侧} top{上方} other{下方}} {n} 台",
+  "@layoutSideCount": {
+    "placeholders": {
+      "side": {
+        "type": "String"
+      },
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "layoutMany": "本机{parts}。同一侧已连接的几台按先后平分那条边，光标从哪一段穿过去就到哪台",
+  "@layoutMany": {
+    "placeholders": {
+      "parts": {
+        "type": "String"
+      }
+    }
+  },
+  "layoutCursorHere": "光标在这里",
+  "devicesThisName": "本机的名字",
+  "devicesComputerName": "电脑名",
+  "devicesNameHint": "别的电脑上看到的就是这个名字。留空就用电脑名。",
+  "devicesThisFingerprint": "本机 · 指纹 ",
+  "devicesCopyFingerprint": "复制指纹",
+  "devicesFingerprintCopied": "指纹已复制",
+  "devicesPaired": "已配对",
+  "devicesCount": "{n} 台",
+  "@devicesCount": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "devicesNonePaired": "还没有配对的设备",
+  "devicesNonePairedHint": "在另一台电脑上运行 ScreenFerry，两边核对配对码后会出现在这里。",
+  "devicesFound": "在局域网里发现",
+  "devicesNotPairedYet": "还没配对",
+  "devicesInvite": "邀请一台电脑",
+  "devicesConnectByAddress": "按地址连接",
+  "devicesWaiting": "等另一台电脑来找本机",
+  "devicesWaitingHint": "在另一台电脑上运行 ScreenFerry 并选择本机后，这里会弹出配对码请你核对。",
+  "devicesWaitingHintAddress": "它在局域网里找不到本机时，在那台电脑上按地址连接 {address}；那台电脑没有键盘鼠标时，在这里邀请它连过来。",
+  "@devicesWaitingHintAddress": {
+    "placeholders": {
+      "address": {
+        "type": "String"
+      }
+    }
+  },
+  "devicesNoneFound": "局域网里没有找到其他设备",
+  "devicesNoneFoundHint": "有的网络不支持自动发现（例如公司网络、开了设备隔离的 Wi‑Fi）。可以按地址连接，地址在控制端的「设备」页上。",
+  "devicesThisAddress": "本机地址",
+  "devicesAddressCopied": "地址已复制",
+  "devicesCopy": "复制 {address}",
+  "@devicesCopy": {
+    "placeholders": {
+      "address": {
+        "type": "String"
+      }
+    }
+  },
+  "devicesCopyAddress": "复制本机地址 {address}",
+  "@devicesCopyAddress": {
+    "placeholders": {
+      "address": {
+        "type": "String"
+      }
+    }
+  },
+  "devicesOnlineAt": "在线 · {address}",
+  "@devicesOnlineAt": {
+    "placeholders": {
+      "address": {
+        "type": "String"
+      }
+    }
+  },
+  "devicesSettingsOf": "{name} 的设置",
+  "@devicesSettingsOf": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "devicesFingerprint": "指纹 ",
+  "devicesPlace": "在本机{side, select, left{左侧} right{右侧} top{上方} other{下方}}",
+  "@devicesPlace": {
+    "placeholders": {
+      "side": {
+        "type": "String"
+      }
+    }
+  },
+  "devicesSettings": "设置",
+  "devicesNotPaired": "未配对",
+  "devicesFingerprintShort": "指纹 {short}",
+  "@devicesFingerprintShort": {
+    "placeholders": {
+      "short": {
+        "type": "String"
+      }
+    }
+  },
+  "devicesAnnouncing": "正在广播",
+  "devicesPair": "配对",
+  "overviewTitle": "仪表盘",
+  "overviewSharing": "共享中",
+  "overviewPausedTitle": "已暂停共享",
+  "overviewPaused": "已暂停",
+  "overviewWaitingTitle": "等待对方连接",
+  "overviewWaiting": "等待连接",
+  "overviewSearchingTitle": "正在寻找对方",
+  "overviewSearching": "寻找中",
+  "overviewConnectingTitle": "正在连接…",
+  "overviewConnecting": "连接中",
+  "overviewStartingTitle": "正在启动…",
+  "overviewStarting": "启动中",
+  "overviewStoppedTitle": "暂时无法共享",
+  "overviewStopped": "已停止",
+  "overviewPausedHint": "键鼠留在本机。点右边的按钮继续共享",
+  "overviewAnnouncingHint": "已在局域网里广播本机，另一台电脑会自动找到这里",
+  "overviewNotAnnouncingHint": "没有广播本机，另一台电脑需要手动填写本机地址",
+  "overviewSearchingHint": "在局域网里寻找已配对的电脑",
+  "overviewConnectingHint": "找到了对方，正在建立加密连接",
+  "overviewStartingHint": "稍等片刻",
+  "overviewProblemHint": "后台遇到了问题",
+  "overviewStatus": "状态",
+  "overviewLatencyGreat": "延迟 优",
+  "overviewLatencyGood": "延迟 良好",
+  "overviewLatencyHigh": "延迟 较高",
+  "overviewCursorOn": "光标在 {name}",
+  "@overviewCursorOn": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "overviewCursorHere": "光标在本机",
+  "overviewConnectedCount": "已连接 {n} 台",
+  "@overviewConnectedCount": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "overviewAddress": "地址",
+  "overviewEncryption": "加密",
+  "overviewFingerprint": "指纹",
+  "overviewPause": "暂停共享",
+  "overviewResume": "继续共享",
+  "overviewRtt": "往返延迟",
+  "overviewPeak": "峰值 {ms}",
+  "@overviewPeak": {
+    "placeholders": {
+      "ms": {
+        "type": "String"
+      }
+    }
+  },
+  "overviewRttEmpty": "连上对方后显示",
+  "overviewRttAverage": "最近 {n} 秒平均 {ms} ms",
+  "@overviewRttAverage": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      },
+      "ms": {
+        "type": "String"
+      }
+    }
+  },
+  "overviewClipboard": "剪贴板",
+  "overviewNoClip": "还没有同步过剪贴板",
+  "overviewNoClipHint": "复制后把光标切过去，对方就能直接粘贴。",
+  "overviewClipOffHint": "剪贴板同步已关闭，可以在设置里打开。",
+  "overviewClipImage": "图片 · {width}×{height} · {size}",
+  "@overviewClipImage": {
+    "placeholders": {
+      "width": {
+        "type": "int"
+      },
+      "height": {
+        "type": "int"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "overviewClipRich": "带格式的文本 · {n} 字",
+  "@overviewClipRich": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "overviewClipText": "文本 · {n} 字",
+  "@overviewClipText": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "overviewAnImage": "一张图片",
+  "overviewNotText": "（不是文字）",
+  "overviewClipImageLabel": "剪贴板图片 {width}×{height}",
+  "@overviewClipImageLabel": {
+    "placeholders": {
+      "width": {
+        "type": "int"
+      },
+      "height": {
+        "type": "int"
+      }
+    }
+  },
+  "overviewClipSync": "剪贴板同步",
+  "overviewAutostart": "开机自动启动",
+  "overviewAnnounce": "局域网广播",
+  "overviewOn": "已开启",
+  "overviewOff": "已关闭",
+  "overviewManage": "管理",
+  "overviewFoundNew": "局域网里发现 {n} 台新设备",
+  "@overviewFoundNew": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "overviewThisName": "{name} · 本机",
+  "@overviewThisName": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "overviewCopyFingerprint": "复制本机指纹",
+  "overviewToday": "今日",
+  "overviewSwitches": "次屏幕切换",
+  "@overviewSwitches": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "overviewClips": "次剪贴板同步",
+  "@overviewClips": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "overviewHours": "小时连接",
+  "deviceLater": "本机控制它时生效",
+  "deviceBack": "返回设备列表",
+  "deviceMouse": "鼠标",
+  "deviceInvertVertical": "垂直滚动反向",
+  "deviceInvertVerticalHint": "上下滚动的方向反过来",
+  "deviceInvertHorizontal": "水平滚动反向",
+  "deviceInvertHorizontalHint": "左右滚动的方向反过来",
+  "deviceScrollSpeed": "滚动速度",
+  "deviceScrollSpeedHint": "触控板的细小滚动到了这台上偏慢或偏快时调",
+  "deviceSlow": "慢",
+  "deviceNormal": "标准",
+  "deviceFast": "快",
+  "deviceNaturalTip": "本机开着“自然滚动”，在这台上也按自然方向滚。想和普通鼠标一样，打开“垂直滚动反向”。",
+  "deviceKeys": "按键",
+  "deviceModifiers": "修饰键",
+  "deviceModifierPreset": "修饰键方案",
+  "deviceMacHabit": "Mac 习惯",
+  "deviceWindowsHabit": "Windows 习惯",
+  "deviceAsIs": "原样",
+  "deviceCustom": "自定义",
+  "deviceOtherKeys": "其他按键映射",
+  "deviceOtherKeysHint": "把一个键换成另一个键，或者不发送",
+  "deviceTextMac": "文本编辑快捷键按 Mac 习惯",
+  "deviceTextWindows": "文本编辑快捷键按 Windows 习惯",
+  "deviceTextMacHint": "⌘← ⌘→ 到行首行尾，⌥← ⌥→ 按词移动，⌘⌫ 删到行首",
+  "deviceTextWindowsHint": "Home End 到行首行尾，Ctrl+← Ctrl+→ 按词移动",
+  "deviceTextShortcuts": "文本编辑快捷键",
+  "deviceSwitching": "切换与共享",
+  "deviceDwell": "防止误切过去",
+  "deviceDwellServerHint": "光标在边上停一会儿才切到这台",
+  "deviceDwellClientHint": "本机控制它时，光标在边上停一会儿才切过去",
+  "deviceDwellLabel": "切过去前在边上停多久",
+  "deviceOff": "关",
+  "deviceSeconds": "{s} 秒",
+  "@deviceSeconds": {
+    "placeholders": {
+      "s": {
+        "type": "String"
+      }
+    }
+  },
+  "deviceClipboardHint": "和这台之间同步复制的内容",
+  "deviceClipboardOffHint": "“设置”里的剪贴板总开关关着",
+  "deviceClipboardLabel": "和这台同步剪贴板",
+  "deviceDropFiles": "拖文件给它",
+  "deviceDropFilesHint": "把文件拖到朝向它的屏幕边上就发过去",
+  "deviceConnection": "连接",
+  "deviceThisDevice": "这台设备",
+  "devicePresetMacDiffer": "在 {name} 上按 ⌘C、⌘V 就是复制、粘贴",
+  "@devicePresetMacDiffer": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "devicePresetWinDiffer": "在 {name} 上按 Ctrl+C、Ctrl+V 就是复制、粘贴",
+  "@devicePresetWinDiffer": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "devicePresetSame": "两台是同一种键盘，原样发送",
+  "devicePresetPlainMac": "原样发送：⌘ 到了那边是 Win 键",
+  "devicePresetPlainWin": "原样发送：Win 键到了那边是 ⌘",
+  "devicePresetPlain": "原样发送",
+  "devicePresetCustom": "按下面的对照表逐个对应",
+  "deviceAlias": "在本机上叫它",
+  "deviceAliasHint": "只改本机上显示的名字，那台电脑自己的名字不变。留空就用原名。",
+  "deviceOriginalName": "原名 {name}",
+  "@deviceOriginalName": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "deviceSystemFingerprint": "{system} · 指纹 ",
+  "@deviceSystemFingerprint": {
+    "placeholders": {
+      "system": {
+        "type": "String"
+      }
+    }
+  },
+  "deviceControlsThis": "控制着本机",
+  "devicePlaceAdjust": "在本机{side, select, left{左侧} right{右侧} top{上方} other{下方}} · 调整位置",
+  "@devicePlaceAdjust": {
+    "placeholders": {
+      "side": {
+        "type": "String"
+      }
+    }
+  },
+  "deviceControlled": "本机现在是被控制的一方",
+  "deviceControlledHint": "鼠标、按键和防误切在本机控制它时才生效。被它控制时的滚动方向和按键，要在 {name} 上改。",
+  "@deviceControlledHint": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "deviceOpenOn": "在 {name} 上打开",
+  "@deviceOpenOn": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "devicePointerSpeed": "光标速度",
+  "deviceBaseHere": "{dpi} · 本机",
+  "@deviceBaseHere": {
+    "placeholders": {
+      "dpi": {
+        "type": "int"
+      }
+    }
+  },
+  "deviceReset": "还原",
+  "deviceLocalPress": "本机按",
+  "devicePeerGets": "{name} 收到",
+  "@devicePeerGets": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "deviceModifierBecomes": "{key} 在 {name} 上变成",
+  "@deviceModifierBecomes": {
+    "placeholders": {
+      "key": {
+        "type": "String"
+      },
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "deviceDeleteMapping": "删除这条映射",
+  "deviceLastAddress": "上次连上的地址",
+  "deviceLastAddressServerHint": "它上次从这个地址连过来",
+  "deviceLastAddressClientHint": "局域网里找不到它时，先试这个地址",
+  "deviceNotYet": "还没有",
+  "deviceInvite": "邀请它连过来",
+  "deviceInviteOnlineHint": "它已经连着本机",
+  "deviceInviteHint": "它在局域网里找不到本机、身边又没有键盘鼠标时用",
+  "deviceInviteButton": "邀请",
+  "deviceConnectMode": "连接方式",
+  "deviceFixedHint": "只连下面这个地址，不在局域网里找",
+  "deviceAutoHint": "在局域网里找控制端，找不到时用上次连上的地址",
+  "deviceAuto": "自动寻找",
+  "deviceFixed": "固定地址",
+  "deviceServerAddress": "控制端的地址",
+  "deviceAddressExample": "例如 192.168.2.12 或 192.168.2.12:24810",
+  "deviceRestoreDefaults": "恢复默认设置",
+  "deviceRestoreDefaultsHint": "鼠标、按键、切换与共享都回到默认，名字保留",
+  "deviceRestore": "恢复",
+  "deviceRemove": "移除这台设备",
+  "deviceRemoveConfirm": "确定吗？移除后需要重新配对，这台的设置一并删除",
+  "deviceRemoveHint": "移除后需要重新配对",
+  "deviceRemoveButton": "移除",
+  "phStarted": "ScreenFerry 已启动",
+  "phStartedServer": "{name} · 键鼠在本机",
+  "@phStartedServer": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "phStartedClient": "{name} · 由另一台电脑控制",
+  "@phStartedClient": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "phCannotShare": "无法开始共享",
+  "phListening": "已开始共享",
+  "phListeningAnnounced": "等待另一台电脑连接 · 端口 {port}",
+  "@phListeningAnnounced": {
+    "placeholders": {
+      "port": {
+        "type": "String"
+      }
+    }
+  },
+  "phListeningQuiet": "端口 {port} · 没有在局域网里广播",
+  "@phListeningQuiet": {
+    "placeholders": {
+      "port": {
+        "type": "String"
+      }
+    }
+  },
+  "phConnected": "已连接 {name}",
+  "@phConnected": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "phDisconnected": "与 {name} 断开",
+  "@phDisconnected": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "phPeerClosed": "对方已断开",
+  "phPeerOpenedSettings": "{name} 请本机打开设置",
+  "@phPeerOpenedSettings": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "phShowingItsSettings": "已翻到它的设置页",
+  "phCursorToPeer": "光标切到 {name}",
+  "@phCursorToPeer": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "phAcrossEdge": "从本机{side, select, left{左侧} right{右侧} top{上方} other{下方}}边缘",
+  "@phAcrossEdge": {
+    "placeholders": {
+      "side": {
+        "type": "String"
+      }
+    }
+  },
+  "phCursorBack": "光标回到本机",
+  "phShortcut": "快捷键 {keys}",
+  "@phShortcut": {
+    "placeholders": {
+      "keys": {
+        "type": "String"
+      }
+    }
+  },
+  "phFromPeerEdge": "从对方屏幕边缘",
+  "phCursorHere": "光标来到本机",
+  "phFrom": "从 {name}",
+  "@phFrom": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "phCursorReturned": "光标回到 {name}",
+  "@phCursorReturned": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "phClipToPeer": "剪贴板同步到 {name}",
+  "@phClipToPeer": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "phClipHere": "剪贴板同步到本机",
+  "phClipTooBigToPeer": "剪贴板里的{format, select, image{图片} text{文本} other{带格式的内容}}太大，没有同步到 {name}",
+  "@phClipTooBigToPeer": {
+    "placeholders": {
+      "format": {
+        "type": "String"
+      },
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "phClipTooBigHere": "{name} 剪贴板里的{format, select, image{图片} text{文本} other{带格式的内容}}太大，没有同步过来",
+  "@phClipTooBigHere": {
+    "placeholders": {
+      "format": {
+        "type": "String"
+      },
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "phClipLimit": "{size}，超过了 {limit} 的上限 · 可以在设置里调大",
+  "@phClipLimit": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      },
+      "limit": {
+        "type": "String"
+      }
+    }
+  },
+  "phPaired": "已与 {name} 配对",
+  "@phPaired": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "phRejectedByPeer": "{name} 拒绝了配对",
+  "@phRejectedByPeer": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "phRejected": "已拒绝 {name} 的配对请求",
+  "@phRejected": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "phPairingRequest": "{name} 请求配对",
+  "@phPairingRequest": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "phPairingCode": "配对码 {code}",
+  "@phPairingCode": {
+    "placeholders": {
+      "code": {
+        "type": "String"
+      }
+    }
+  },
+  "phItems": "{file} 等 {items} 项",
+  "@phItems": {
+    "placeholders": {
+      "file": {
+        "type": "String"
+      },
+      "items": {
+        "type": "int"
+      },
+      "more": {
+        "type": "int"
+      }
+    }
+  },
+  "phFiles": "{files} 个文件 · {size}",
+  "@phFiles": {
+    "placeholders": {
+      "files": {
+        "type": "int"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "phSending": "发送 {what} 到 {name}",
+  "@phSending": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "what": {
+        "type": "String"
+      }
+    }
+  },
+  "phReceiving": "{name} 发来 {what}",
+  "@phReceiving": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "what": {
+        "type": "String"
+      }
+    }
+  },
+  "phSent": "已发送 {what}",
+  "@phSent": {
+    "placeholders": {
+      "what": {
+        "type": "String"
+      }
+    }
+  },
+  "phSentTo": "到 {name} · {size}",
+  "@phSentTo": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "phReceived": "已收到 {what}",
+  "@phReceived": {
+    "placeholders": {
+      "what": {
+        "type": "String"
+      }
+    }
+  },
+  "phSavedIn": "保存在 {folder}",
+  "@phSavedIn": {
+    "placeholders": {
+      "folder": {
+        "type": "String"
+      }
+    }
+  },
+  "phInterrupted": "传输中断：{what}",
+  "@phInterrupted": {
+    "placeholders": {
+      "what": {
+        "type": "String"
+      }
+    }
+  },
+  "phResumesLater": "重新连上后接着传",
+  "phCancelled": "已取消：{what}",
+  "@phCancelled": {
+    "placeholders": {
+      "what": {
+        "type": "String"
+      }
+    }
+  },
+  "phCancelledByPeer": "对方取消了",
+  "phCancelledHere": "本机取消了",
+  "phFailed": "传输失败：{what}",
+  "@phFailed": {
+    "placeholders": {
+      "what": {
+        "type": "String"
+      }
+    }
+  },
+  "phSharingResumed": "继续共享",
+  "phSharingResumedHint": "键鼠可以切到对方",
+  "phSharingPaused": "暂停共享",
+  "phSharingPausedHint": "键鼠留在本机",
+  "phArranged": "调整了设备的位置",
+  "phLayoutSaved": "布局已保存",
+  "phOtherDevices": "其他设备",
+  "phMoved": "{name} 移到{where}",
+  "@phMoved": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "where": {
+        "type": "String"
+      }
+    }
+  },
+  "phNowServer": "改为控制别的电脑",
+  "phNowServerHint": "键盘鼠标在本机，等另一台电脑来连接",
+  "phNowClient": "改为由另一台电脑控制",
+  "phNowClientHint": "在局域网里寻找键盘鼠标所在的那台",
+  "phRemoved": "已移除 {name}",
+  "@phRemoved": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "phPairAgain": "下次连接需要重新配对",
+  "toastPeerSettingsOpened": "已在 {name} 上打开设置，把光标移过去就能改",
+  "@toastPeerSettingsOpened": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "toastPeerSettingsUnsupported": "{name} 上的 ScreenFerry 版本较旧，请在那台电脑上打开设置",
+  "@toastPeerSettingsUnsupported": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "toastDiagnosticsMissing": "诊断文件已经不在了，请重新导出",
+  "toastNotConnectedPeer": "还没有连上对方，或者对方不支持传文件",
+  "toastFilesDisabled": "已在设置里关掉了拖文件给 {name}",
+  "@toastFilesDisabled": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "toastSending": "开始发给 {name}",
+  "@toastSending": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "toastSharingResumed": "已继续共享",
+  "toastSharingPaused": "已暂停共享",
+  "toastAutostartFailed": "无法修改开机自启：{message}",
+  "@toastAutostartFailed": {
+    "placeholders": {
+      "message": {
+        "type": "String"
+      }
+    }
+  },
+  "toastSaveFailed": "保存设置失败：{message}",
+  "@toastSaveFailed": {
+    "placeholders": {
+      "message": {
+        "type": "String"
+      }
+    }
+  },
+  "toastPeerOffline": "{name} 现在没连着",
+  "@toastPeerOffline": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "toastPeersReadFailed": "读取已配对设备失败：{message}",
+  "@toastPeersReadFailed": {
+    "placeholders": {
+      "message": {
+        "type": "String"
+      }
+    }
+  },
+  "toastRemoveFailed": "移除失败：{message}",
+  "@toastRemoveFailed": {
+    "placeholders": {
+      "message": {
+        "type": "String"
+      }
+    }
+  },
+  "toastServerGone": "这台电脑已经不在局域网里了",
+  "toastPausedConnectLater": "已暂停共享，继续共享后再连接",
+  "toastNotSharingInviteLater": "还没开始共享，开始后再邀请",
+  "toastDiagnosticsFailed": "导出诊断文件失败：{message}",
+  "@toastDiagnosticsFailed": {
+    "placeholders": {
+      "message": {
+        "type": "String"
+      }
+    }
+  },
+  "layoutDropAtNth": "松手后放到本机{side, select, left{左侧，从上往下} right{右侧，从上往下} top{上方，从左往右} other{下方，从左往右}}第 {n} 台",
+  "@layoutDropAtNth": {
+    "placeholders": {
+      "side": {
+        "type": "String"
+      },
+      "n": {
+        "type": "int"
+      }
+    }
+  }
+}

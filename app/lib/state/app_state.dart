@@ -8,11 +8,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../ipc/messages.dart';
+import '../l10n/l10n.dart';
 import 'arrangement.dart';
 import 'backend.dart';
 import 'demo_backend.dart';
 import 'dial_text.dart';
 import 'links.dart';
+import 'phrases.dart';
 
 export '../ipc/messages.dart';
 export 'arrangement.dart';
@@ -22,22 +24,22 @@ export 'demo_backend.dart' show DemoBackend;
 enum SfPage { overview, devices, layout, log, settings, about }
 
 extension ScreenSideLabel on ScreenSide {
-  String get label => switch (this) {
-    ScreenSide.left => '左侧',
-    ScreenSide.right => '右侧',
-    ScreenSide.top => '上方',
-    ScreenSide.bottom => '下方',
+  String label(AppLocalizations l) => switch (this) {
+    ScreenSide.left => l.sideLeft,
+    ScreenSide.right => l.sideRight,
+    ScreenSide.top => l.sideTop,
+    ScreenSide.bottom => l.sideBottom,
   };
 }
 
 enum SwitchMode { instant, dwell }
 
 extension LogKindLabel on LogKind {
-  String get label => switch (this) {
-    LogKind.cursor => '光标',
-    LogKind.clip => '剪贴板',
-    LogKind.link => '设备与连接',
-    LogKind.file => '文件',
+  String label(AppLocalizations l) => switch (this) {
+    LogKind.cursor => l.logCursor,
+    LogKind.clip => l.logClipboard,
+    LogKind.link => l.logLinks,
+    LogKind.file => l.logFiles,
   };
 }
 
@@ -63,18 +65,34 @@ extension LogIconData on LogIcon {
 class Appearance extends ChangeNotifier {
   ThemeMode _mode = ThemeMode.system;
   int _accent = 0;
+  UiLanguage _language = UiLanguage.system;
 
   ThemeMode get mode => _mode;
   int get accent => _accent;
+  UiLanguage get language => _language;
 
-  void apply({ThemeMode? mode, int? accent}) {
+  void apply({ThemeMode? mode, int? accent, UiLanguage? language}) {
     final m = mode ?? _mode;
     final a = accent ?? _accent;
-    if (m == _mode && a == _accent) return;
+    final l = language ?? _language;
+    if (m == _mode && a == _accent && l == _language) return;
     _mode = m;
     _accent = a;
+    _language = l;
     notifyListeners();
   }
+
+  /// 系统的语言变了：跟随系统时要换语言。
+  void refresh() => notifyListeners();
+}
+
+class _LocaleWatch with WidgetsBindingObserver {
+  _LocaleWatch(this.onChange);
+
+  final VoidCallback onChange;
+
+  @override
+  void didChangeLocales(List<Locale>? locales) => onChange();
 }
 
 /// 底部提示。`id` 递增，同一句话连续出现也会重新弹出。
@@ -146,7 +164,11 @@ class AppState extends ChangeNotifier {
     _link = this.backend.link.value;
     this.backend.link.addListener(_onLink);
     _subscription = this.backend.notices.listen(_onNotice);
+    WidgetsBinding.instance.addObserver(_localeWatch);
   }
+
+  /// 跟随系统时，系统换了语言就重画。
+  late final _localeWatch = _LocaleWatch(appearance.refresh);
 
   final Backend backend;
   final LinkOpener _openLink;
@@ -249,7 +271,7 @@ class AppState extends ChangeNotifier {
   String get peerName {
     final ref = peer;
     if (ref != null) return displayNameOf(ref.fingerprint, ref.name);
-    return peers.firstOrNull?.displayName ?? '对方';
+    return peers.firstOrNull?.displayName ?? l10n.peerFallback;
   }
 
   /// 一台设备显示给用户的名字；不是已配对的设备时用 [fallback]。
@@ -390,14 +412,14 @@ class AppState extends ChangeNotifier {
   Future<void> openLink(String url) async {
     if (await _openLink(url)) return;
     await Clipboard.setData(ClipboardData(text: url));
-    showToast('打不开浏览器，链接已复制');
+    showToast(l10n.toastLinkCopied);
   }
 
   // ── 命令 ──
 
   bool _send(Request request) {
     if (online && backend.send(request)) return true;
-    showToast('还没连上后台，稍后再试');
+    showToast(l10n.toastNotConnected);
     return false;
   }
 
@@ -418,6 +440,14 @@ class AppState extends ChangeNotifier {
   }
 
   void setTheme(ThemeMode mode) => updateSettings(SettingsPatch(theme: UiTheme.values.byName(mode.name)));
+
+  void setLanguage(UiLanguage language) => updateSettings(SettingsPatch(language: language));
+
+  /// 实际用的语言：设置里选的，跟随系统时看系统的首选语言。
+  Locale get locale => resolveLocale(appearance.language, WidgetsBinding.instance.platformDispatcher.locale);
+
+  /// 当前语言的文字，给没有 BuildContext 的地方用（提示、日志）。
+  AppLocalizations get l10n => lookupAppLocalizations(locale);
 
   void setAccent(int accent) => updateSettings(SettingsPatch(accent: accent));
 
@@ -488,7 +518,7 @@ class AppState extends ChangeNotifier {
   }
 
   void connectTo(FoundDevice device) {
-    if (_send(ConnectRequest(device.fingerprint))) showToast('正在连接 ${device.name}…');
+    if (_send(ConnectRequest(device.fingerprint))) showToast(l10n.toastConnectingTo(device.name));
   }
 
   void replyPairing(int id, {required bool accept}) => _send(PairReplyRequest(id, accept: accept));
@@ -582,8 +612,8 @@ class AppState extends ChangeNotifier {
           ..add(prompt);
       case PairingClosedNotice(:final id):
         _prompts.removeWhere((p) => p.id == id);
-      case ToastNotice(:final text):
-        showToast(text);
+      case ToastNotice(:final text, :final phrase):
+        showToast((phrase == null ? null : toastText(l10n, phrase)) ?? text);
       case ShowDeviceNotice(:final fingerprint):
         openDevice(fingerprint);
         return;
@@ -594,7 +624,7 @@ class AppState extends ChangeNotifier {
           _dial = DialAttempt(address: d.address, invite: invite, done: true, error: error);
         } else if (error != null) {
           // 没有对话框在等（例如点了局域网里发现的设备）：失败时提示一下。
-          showToast(dialFailure(error, address: address, invite: invite).title);
+          showToast(dialFailure(l10n, error, address: address, invite: invite).title);
         }
       case QuitNotice():
         // 后台退出了（托盘里的“退出”或安装程序升级、卸载），设置界面跟着关闭。
@@ -613,7 +643,7 @@ class AppState extends ChangeNotifier {
         lastExport = ExportedDiagnostics(path: path, bytes: bytes);
       case DiagnosticsSummaryNotice(:final text):
         unawaited(Clipboard.setData(ClipboardData(text: text)));
-        showToast('已复制摘要：版本、系统和最近 200 行，可以直接贴进问题描述');
+        showToast(l10n.diagCopied);
         return;
       case WelcomeNotice():
         return;
@@ -645,13 +675,14 @@ class AppState extends ChangeNotifier {
 
   void _applyAppearance() {
     final s = settings;
-    appearance.apply(mode: ThemeMode.values.byName(s.theme.name), accent: s.accent);
+    appearance.apply(mode: ThemeMode.values.byName(s.theme.name), accent: s.accent, language: s.language);
   }
 
   @override
   void dispose() {
     _dialTimer?.cancel();
     _runLogTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(_localeWatch);
     unawaited(_subscription.cancel());
     backend.link.removeListener(_onLink);
     unawaited(backend.dispose());
@@ -662,20 +693,20 @@ class AppState extends ChangeNotifier {
 }
 
 /// “12 秒前”这样的相对时间。
-String timeAgo(DateTime at) {
+String timeAgo(AppLocalizations l, DateTime at) {
   final s = DateTime.now().difference(at).inSeconds;
-  if (s < 5) return '刚刚';
-  if (s < 60) return '$s 秒前';
-  if (s < 3600) return '${s ~/ 60} 分钟前';
-  if (s < 86400) return '${s ~/ 3600} 小时前';
-  return '${s ~/ 86400} 天前';
+  if (s < 5) return l.timeJustNow;
+  if (s < 60) return l.timeSecondsAgo(s);
+  if (s < 3600) return l.timeMinutesAgo(s ~/ 60);
+  if (s < 86400) return l.timeHoursAgo(s ~/ 3600);
+  return l.timeDaysAgo(s ~/ 86400);
 }
 
 /// 已配对设备的在线情况：“在线”“5 分钟前连接过”“离线”。
-String seenText(PeerInfo p) {
-  if (p.online) return '在线';
+String seenText(AppLocalizations l, PeerInfo p) {
+  if (p.online) return l.seenOnline;
   final at = p.lastSeen;
-  return at == null ? '离线' : '${timeAgo(at)}连接过';
+  return at == null ? l.seenOffline : l.seenAgo(timeAgo(l, at));
 }
 
 /// “14:32:05”这样的时刻。
@@ -685,11 +716,11 @@ String clockTime(DateTime at) {
 }
 
 /// “1 小时 12 分”这样的时长。
-String durationText(Duration d) {
+String durationText(AppLocalizations l, Duration d) {
   final m = d.inMinutes;
-  if (m < 1) return '不到 1 分钟';
-  if (m < 60) return '$m 分钟';
-  return '${m ~/ 60} 小时 ${m % 60} 分';
+  if (m < 1) return l.durationUnderMinute;
+  if (m < 60) return l.durationMinutes(m);
+  return l.durationHours(m ~/ 60, m % 60);
 }
 
 /// 字节数写成“93 B”“1.2 MB”。

@@ -18,6 +18,7 @@ pub use endpoint::Endpoint;
 pub use error::{Error, Result};
 pub use message::{
     ClipboardImage, ClipboardSync, DialError, FoundDevice, HourActivity, Link, LinkStatus, Local,
-    LogEntry, LogIcon, LogKind, MAX_LINE, Notice, PairingPrompt, PeerInfo, PeerRef, Problem,
-    ProblemKind, Request, RunLogLevel, RunLogLine, Settings, SettingsPatch, State, VERSION,
+    LogEntry, LogIcon, LogKind, MAX_LINE, Notice, PairingPrompt, PeerInfo, PeerRef, Phrase,
+    Problem, ProblemKind, Request, RunLogLevel, RunLogLine, Settings, SettingsPatch, State,
+    VERSION,
 };

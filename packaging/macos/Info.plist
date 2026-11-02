@@ -4,11 +4,17 @@
   ScreenFerry.app 的 Info.plist，由 `cargo xtask bundle` 填入版本号（{{VERSION}}）。
   主程序是后台 screenferry：LSUIElement 让它不出现在程序坞里，只有菜单栏图标；
   设置界面是嵌在 Contents/Helpers/ 里的另一个应用，按需打开。
+  界面有英文和简体中文（ADR 0013）：系统自带的文字（例如权限对话框里的按钮）也按这两种语言选。
 -->
 <plist version="1.0">
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
-	<string>zh_CN</string>
+	<string>en</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>zh_CN</string>
+	</array>
 	<key>CFBundleDisplayName</key>
 	<string>ScreenFerry</string>
 	<key>CFBundleExecutable</key>

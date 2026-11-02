@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'l10n/l10n.dart';
 import 'shell/home_shell.dart';
 import 'state/app_scope.dart';
 import 'state/app_state.dart';
@@ -25,6 +26,9 @@ class ScreenFerryApp extends StatelessWidget {
           return MaterialApp(
             title: 'ScreenFerry',
             debugShowCheckedModeBanner: false,
+            locale: state.locale,
+            supportedLocales: AppLocalizations.supportedLocales,
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
             themeMode: state.appearance.mode,
             theme: buildTheme(SfColors.light.withAccent(accent.light, dark: false), Brightness.light),
             darkTheme: buildTheme(SfColors.dark.withAccent(accent.dark, dark: true), Brightness.dark),

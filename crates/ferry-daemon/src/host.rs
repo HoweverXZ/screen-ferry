@@ -25,6 +25,13 @@ fn exe_dir() -> Option<PathBuf> {
     exe_path()?.parent().map(PathBuf::from)
 }
 
+/// 系统的界面语言：中文的用简体中文，其他用英文。
+fn system_language() -> ferry_types::Lang {
+    sys_locale::get_locale().map_or(ferry_types::Lang::En, |tag| {
+        ferry_types::Lang::from_tag(&tag)
+    })
+}
+
 /// 处理器架构，写进诊断文件：`arm64`、`x64` 等。
 fn arch() -> &'static str {
     match std::env::consts::ARCH {
@@ -193,6 +200,10 @@ mod mac {
             Some(ferry_platform_macos::natural_scrolling())
         }
 
+        fn system_language(&self) -> ferry_types::Lang {
+            super::system_language()
+        }
+
         fn system(&self) -> String {
             let version = Command::new("sw_vers")
                 .arg("-productVersion")
@@ -351,6 +362,10 @@ mod win {
         }
 
         fn open_permission_settings(&self) {}
+
+        fn system_language(&self) -> ferry_types::Lang {
+            super::system_language()
+        }
 
         fn system(&self) -> String {
             // `ver` 输出“Microsoft Windows [版本 10.0.26100.4652]”：各种语言的系统里这串数字都一样。

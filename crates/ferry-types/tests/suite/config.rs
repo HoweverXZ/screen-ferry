@@ -1,4 +1,4 @@
-use ferry_types::{Config, DeviceSettings, ModifierPreset, Role, Side};
+use ferry_types::{Config, DeviceSettings, Lang, Language, ModifierPreset, Role, Side};
 
 #[test]
 fn defaults_match_the_documented_config() {
@@ -10,6 +10,25 @@ fn defaults_match_the_documented_config() {
     assert!(c.devices.is_empty());
     assert!(c.name.is_empty() && c.server.is_empty());
     assert_eq!(c.role, Role::native());
+    assert_eq!(c.language, Language::System);
+}
+
+#[test]
+fn the_language_follows_the_system_unless_chosen() {
+    for (tag, lang) in [
+        ("zh-Hans-CN", Lang::Zh),
+        ("zh_TW", Lang::Zh),
+        ("ZH", Lang::Zh),
+        ("en-US", Lang::En),
+        ("ja-JP", Lang::En),
+        ("", Lang::En),
+    ] {
+        assert_eq!(Lang::from_tag(tag), lang, "{tag}");
+    }
+    assert_eq!(Language::System.resolve(Lang::En), Lang::En);
+    assert_eq!(Language::Zh.resolve(Lang::En), Lang::Zh);
+    assert_eq!(Language::En.resolve(Lang::Zh), Lang::En);
+    assert_eq!(Lang::En.pick("中文", "English"), "English");
 }
 
 #[test]

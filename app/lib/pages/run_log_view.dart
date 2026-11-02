@@ -3,6 +3,7 @@
 
 import 'package:flutter/material.dart';
 
+import '../l10n/l10n.dart';
 import '../state/app_scope.dart';
 import '../state/app_state.dart';
 import '../theme/tokens.dart';
@@ -35,12 +36,9 @@ class _ExportCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text('提问题时附上诊断文件', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+                Text(context.l10n.diagTitle, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
                 const SizedBox(height: 4),
-                Text(
-                  '包含版本、系统、设置和最近的运行日志。设备名、用户名和文件名会换成代号，不含剪贴板内容和密钥。',
-                  style: TextStyle(fontSize: 14, height: 1.55, color: c.muted),
-                ),
+                Text(context.l10n.diagBody, style: TextStyle(fontSize: 14, height: 1.55, color: c.muted)),
               ],
             ),
             trailing: Column(
@@ -52,13 +50,13 @@ class _ExportCard extends StatelessWidget {
                   runSpacing: 8,
                   children: [
                     PillButton(
-                      label: '复制摘要',
+                      label: context.l10n.diagCopySummary,
                       icon: Icons.copy_rounded,
                       soft: true,
                       onPressed: online ? state.copyDiagnostics : null,
                     ),
                     PillButton(
-                      label: '导出诊断文件',
+                      label: context.l10n.diagExport,
                       icon: Icons.download_rounded,
                       primary: true,
                       onPressed: online ? state.exportDiagnostics : null,
@@ -69,8 +67,8 @@ class _ExportCard extends StatelessWidget {
                 Wrap(
                   spacing: 16,
                   children: [
-                    TextLink(label: '打开日志文件夹', onPressed: online ? state.openLogsFolder : null),
-                    TextLink(label: '去 GitHub 提问题', chevron: true, onPressed: state.openIssue),
+                    TextLink(label: context.l10n.diagOpenFolder, onPressed: online ? state.openLogsFolder : null),
+                    TextLink(label: context.l10n.diagReport, chevron: true, onPressed: state.openIssue),
                   ],
                 ),
               ],
@@ -88,7 +86,7 @@ class _ExportCard extends StatelessWidget {
                   Expanded(
                     child: Text.rich(
                       TextSpan(
-                        text: '已存到“下载”：',
+                        text: context.l10n.diagSaved,
                         children: [
                           TextSpan(
                             text: exported.name,
@@ -106,7 +104,7 @@ class _ExportCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 10),
                   TextLink(
-                    label: state.localIsMac ? '在访达中显示' : '在资源管理器中显示',
+                    label: state.localIsMac ? context.l10n.diagShowInFinder : context.l10n.diagShowInExplorer,
                     onPressed: online ? state.revealDiagnostics : null,
                   ),
                 ],
@@ -129,18 +127,22 @@ class _VerboseRow extends StatelessWidget {
     final since = state.verboseSince;
     final String subtitle;
     if (since == null) {
-      subtitle = '排查连接问题时打开，会多记一些细节。重启 ScreenFerry 后自动关闭';
+      subtitle = context.l10n.diagVerboseOff;
     } else {
       final minutes = DateTime.now().difference(since).inMinutes;
-      subtitle = '${minutes < 1 ? '刚刚打开' : '已打开 $minutes 分钟'}。问题出现后导出，再把它关掉';
+      subtitle = minutes < 1 ? context.l10n.diagVerboseJustOn : context.l10n.diagVerboseOnFor(minutes);
     }
     return SfGroup(
       children: [
         SfRow(
           icon: Icons.manage_search_rounded,
-          title: '详细记录',
+          title: context.l10n.diagVerbose,
           subtitle: subtitle,
-          trailing: SfSwitch(value: since != null, label: '详细记录', onChanged: state.online ? state.setVerbose : null),
+          trailing: SfSwitch(
+            value: since != null,
+            label: context.l10n.diagVerbose,
+            onChanged: state.online ? state.setVerbose : null,
+          ),
         ),
       ],
     );
@@ -179,16 +181,19 @@ class _RunLogCardState extends State<_RunLogCard> {
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text('最近的运行日志', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                  Text(context.l10n.diagRecent, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
                   const SizedBox(width: 10),
                   StatusDot(on: state.online),
                   const SizedBox(width: 6),
-                  Text(state.online ? '实时' : '未连接', style: TextStyle(fontSize: 12, color: c.muted)),
+                  Text(
+                    state.online ? context.l10n.diagLive : context.l10n.diagNotConnected,
+                    style: TextStyle(fontSize: 12, color: c.muted),
+                  ),
                 ],
               ),
               SfSegmented<bool>(
-                label: '日志级别',
-                segments: const [(false, '全部'), (true, '警告和错误')],
+                label: context.l10n.diagLevel,
+                segments: [(false, context.l10n.logAll), (true, context.l10n.diagProblemsOnly)],
                 value: _problemsOnly,
                 onChanged: (v) => setState(() => _problemsOnly = v),
               ),
@@ -199,7 +204,10 @@ class _RunLogCardState extends State<_RunLogCard> {
             height: 420,
             child: lines.isEmpty
                 ? Center(
-                    child: Text(_problemsOnly ? '最近没有警告和错误' : '还没有运行日志', style: TextStyle(color: c.muted)),
+                    child: Text(
+                      _problemsOnly ? context.l10n.diagNoProblems : context.l10n.diagNoLog,
+                      style: TextStyle(color: c.muted),
+                    ),
                   )
                 : SelectionArea(
                     child: ListView.builder(
@@ -227,10 +235,10 @@ class _RunLogRow extends StatelessWidget {
     final dark = Theme.of(context).brightness == Brightness.dark;
     final warn = dark ? const Color(0xFFFDBA74) : const Color(0xFF9A3412);
     final (label, labelColor, textColor) = switch (line.level) {
-      RunLogLevel.debug => ('调试', c.muted, c.muted),
-      RunLogLevel.info => ('信息', c.muted, c.fg),
-      RunLogLevel.warn => ('警告', warn, warn),
-      RunLogLevel.error => ('错误', c.danger, c.danger),
+      RunLogLevel.debug => (context.l10n.diagLevelDebug, c.muted, c.muted),
+      RunLogLevel.info => (context.l10n.diagLevelInfo, c.muted, c.fg),
+      RunLogLevel.warn => (context.l10n.diagLevelWarn, warn, warn),
+      RunLogLevel.error => (context.l10n.diagLevelError, c.danger, c.danger),
     };
     const mono = TextStyle(fontFamily: monoFont, fontFamilyFallback: monoFallback, fontSize: 12.5, height: 1.65);
     final strong = line.level == RunLogLevel.warn || line.level == RunLogLevel.error;

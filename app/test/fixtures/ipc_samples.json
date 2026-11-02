@@ -123,6 +123,7 @@
               "text_shortcuts": true
             }
           ],
+          "language": "en",
           "layout": [
             {
               "fingerprint": "3f9a12c477e0b1d2aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55",
@@ -239,6 +240,7 @@
               "text_shortcuts": true
             }
           ],
+          "language": "en",
           "layout": [
             {
               "fingerprint": "3f9a12c477e0b1d2aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55",
@@ -263,6 +265,13 @@
           "icon": "cursor",
           "id": 9,
           "kind": "cursor",
+          "phrase": {
+            "args": {
+              "name": "办公室 PC",
+              "side": "right"
+            },
+            "key": "cursor_to_peer"
+          },
           "text": "光标切到 办公室 PC"
         }
       ],
@@ -275,6 +284,13 @@
         "icon": "cursor",
         "id": 9,
         "kind": "cursor",
+        "phrase": {
+          "args": {
+            "name": "办公室 PC",
+            "side": "right"
+          },
+          "key": "cursor_to_peer"
+        },
         "text": "光标切到 办公室 PC"
       },
       "type": "log"
@@ -294,6 +310,9 @@
       "type": "pairing_closed"
     },
     {
+      "phrase": {
+        "key": "sharing_paused"
+      },
       "text": "已暂停共享",
       "type": "toast"
     },
@@ -359,6 +378,7 @@
       "settings": {
         "autostart": true,
         "clipboard_limit_mb": 16,
+        "language": "zh",
         "mouse_dpi": 800,
         "side": "left",
         "theme": "light"

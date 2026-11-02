@@ -5,6 +5,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../l10n/l10n.dart';
 import '../state/app_scope.dart';
 import '../state/app_state.dart';
 import '../theme/tokens.dart';
@@ -58,7 +59,7 @@ Future<void> _show(BuildContext context, PairingPrompt prompt) {
   return showGeneralDialog<void>(
     context: context,
     barrierDismissible: false,
-    barrierLabel: '配对',
+    barrierLabel: context.l10n.pairingTitle,
     barrierColor: Colors.black.withValues(alpha: 0.34),
     transitionDuration: const Duration(milliseconds: 400),
     pageBuilder: (context, _, _) => _PairingDialog(prompt: prompt),
@@ -178,19 +179,22 @@ class _PairingDialogState extends State<_PairingDialog> with TickerProviderState
             ),
             const SizedBox(width: 14),
             Expanded(
-              child: Text('与“${_p.peerName}”配对', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
+              child: Text(
+                context.l10n.pairingWith(_p.peerName),
+                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
+              ),
             ),
           ],
         ),
         const SizedBox(height: 12),
-        Text('请确认两台电脑上显示的是同一个配对码，一致才确认。', style: TextStyle(color: c.muted, height: 1.6)),
+        Text(context.l10n.pairingCheck, style: TextStyle(color: c.muted, height: 1.6)),
         const SizedBox(height: 26),
         Center(child: _digits(c)),
         const SizedBox(height: 16),
         Center(
           child: Text.rich(
             TextSpan(
-              text: '对方指纹 ',
+              text: context.l10n.pairingPeerFingerprint,
               children: [
                 TextSpan(
                   text: _p.short,
@@ -208,7 +212,7 @@ class _PairingDialogState extends State<_PairingDialog> with TickerProviderState
             children: [
               SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2.2, color: c.accent)),
               const SizedBox(width: 10),
-              Text('已确认，等待对方确认…', style: TextStyle(color: c.muted)),
+              Text(context.l10n.pairingWaiting, style: TextStyle(color: c.muted)),
             ],
           )
         else ...[
@@ -236,7 +240,7 @@ class _PairingDialogState extends State<_PairingDialog> with TickerProviderState
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    left > 0 ? '$left 秒后自动拒绝' : '已超时',
+                    left > 0 ? context.l10n.pairingAutoReject(left) : context.l10n.pairingTimedOut,
                     style: TextStyle(fontSize: 13, color: c.muted, fontFeatures: tabular),
                   ),
                 ],
@@ -249,8 +253,13 @@ class _PairingDialogState extends State<_PairingDialog> with TickerProviderState
             spacing: 10,
             runSpacing: 10,
             children: [
-              PillButton(label: '拒绝', soft: true, onPressed: () => _reply(false)),
-              PillButton(label: '数字一致，配对', icon: Icons.check_rounded, primary: true, onPressed: () => _reply(true)),
+              PillButton(label: context.l10n.pairingReject, soft: true, onPressed: () => _reply(false)),
+              PillButton(
+                label: context.l10n.pairingAccept,
+                icon: Icons.check_rounded,
+                primary: true,
+                onPressed: () => _reply(true),
+              ),
             ],
           ),
         ],
@@ -299,7 +308,7 @@ class _PairingDialogState extends State<_PairingDialog> with TickerProviderState
       );
     }
     return Semantics(
-      label: '配对码 ${_p.code}',
+      label: context.l10n.pairingCodeLabel(_p.code),
       child: ExcludeSemantics(
         child: FittedBox(
           fit: BoxFit.scaleDown,
@@ -329,9 +338,12 @@ class _PairingDialogState extends State<_PairingDialog> with TickerProviderState
             ),
           ),
           const SizedBox(height: 14),
-          Text('已与“${_p.peerName}”配对', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+          Text(
+            context.l10n.pairingDone(_p.peerName),
+            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+          ),
           const SizedBox(height: 4),
-          Text('以后连接不再询问', style: TextStyle(color: c.muted)),
+          Text(context.l10n.pairingNoMoreAsking, style: TextStyle(color: c.muted)),
         ],
       ),
     );

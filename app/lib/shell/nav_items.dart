@@ -1,22 +1,30 @@
 // 导航项：侧栏和窄窗口底部的标签栏共用。
 
+import '../l10n/l10n.dart';
 import '../state/app_state.dart';
 import '../widgets/glyph.dart';
 
 class NavItem {
-  const NavItem(this.page, this.glyph, this.label);
+  const NavItem(this.page, this.glyph);
 
   final SfPage page;
   final Glyph glyph;
-  final String label;
+
+  String label(AppLocalizations l) => switch (page) {
+    SfPage.overview => l.navOverview,
+    SfPage.devices => l.navDevices,
+    SfPage.layout => l.navLayout,
+    SfPage.log => l.navLog,
+    SfPage.settings || SfPage.about => l.navSettings,
+  };
 }
 
 const navItems = [
-  NavItem(SfPage.overview, Glyph.dashboard, '仪表盘'),
-  NavItem(SfPage.devices, Glyph.devices, '设备'),
-  NavItem(SfPage.layout, Glyph.layout, '布局'),
-  NavItem(SfPage.log, Glyph.log, '日志'),
-  NavItem(SfPage.settings, Glyph.settings, '设置'),
+  NavItem(SfPage.overview, Glyph.dashboard),
+  NavItem(SfPage.devices, Glyph.devices),
+  NavItem(SfPage.layout, Glyph.layout),
+  NavItem(SfPage.log, Glyph.log),
+  NavItem(SfPage.settings, Glyph.settings),
 ];
 
 /// 当前页面对应第几个导航项。“关于”从“设置”进入，归在“设置”下。

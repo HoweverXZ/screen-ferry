@@ -39,6 +39,7 @@ pub(crate) fn parse(path: &Path, data: &[u8]) -> Result<Parsed> {
     // 版本 2 → 3：只新增了 `clipboard_limit_mb`（缺省 32，与之前固定的上限相同），读进来即等价。
     // 版本 3 → 4：`swap_cmd_ctrl` 改成每台设备的修饰键方案，由调用方按已配对的设备展开；
     // 新增的 `mouse_dpi`、`devices` 取缺省值。
+    // 版本 4 → 5：只新增了 `language`（缺省跟随系统），读进来即等价。
     let legacy_swap_cmd_ctrl = if config.schema_version < 4 {
         toml::from_str::<Legacy>(text)
             .map_err(|e| format(e.to_string()))?

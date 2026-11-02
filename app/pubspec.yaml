@@ -30,6 +30,10 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  # 多语言：Flutter 官方的 gen-l10n，语言文件在 lib/l10n/（ADR 0013）。
+  flutter_localizations:
+    sdk: flutter
+  intl: any
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
@@ -54,6 +58,9 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  # 按 l10n.yaml 生成多语言代码。
+  generate: true
 
   # To add assets to your application, add an assets section, like this:
   # assets:

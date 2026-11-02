@@ -5,6 +5,7 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 
+import '../l10n/l10n.dart';
 import '../state/app_scope.dart';
 import '../state/app_state.dart';
 import '../theme/tokens.dart';
@@ -26,7 +27,7 @@ class DevicesPage extends StatelessWidget {
     final peer = opened == null ? null : state.peerOf(opened);
     if (peer != null) return DevicePage(key: ValueKey('d-${peer.fingerprint}'), peer: peer);
     return PageScaffold(
-      title: '设备',
+      title: context.l10n.navDevices,
       children: [
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 22),
@@ -44,15 +45,15 @@ class DevicesPage extends StatelessWidget {
               children: [
                 NameEditor(
                   name: state.localName,
-                  label: '本机的名字',
-                  placeholder: '电脑名',
-                  hint: '别的电脑上看到的就是这个名字。留空就用电脑名。',
+                  label: context.l10n.devicesThisName,
+                  placeholder: context.l10n.devicesComputerName,
+                  hint: context.l10n.devicesNameHint,
                   enabled: state.online,
                   onSave: (v) => state.updateSettings(SettingsPatch(name: v)),
                 ),
                 Text.rich(
                   TextSpan(
-                    text: '本机 · 指纹 ',
+                    text: context.l10n.devicesThisFingerprint,
                     children: [
                       TextSpan(
                         text: state.localFingerprint,
@@ -66,29 +67,29 @@ class DevicesPage extends StatelessWidget {
               ],
             ),
             trailing: PillButton(
-              label: '复制指纹',
+              label: context.l10n.devicesCopyFingerprint,
               icon: Icons.copy_rounded,
-              onPressed: () => copyText(context, state.localFingerprint, '指纹已复制'),
+              onPressed: () => copyText(context, state.localFingerprint, context.l10n.devicesFingerprintCopied),
             ),
           ),
         ),
-        SectionTitle('已配对', note: '${state.peers.length} 台'),
+        SectionTitle(context.l10n.devicesPaired, note: context.l10n.devicesCount(state.peers.length)),
         _CardWall(
           // 服务端的卡片多一行“在本机哪一侧”。
           height: state.isServer ? 240 : 220,
-          empty: const _Empty(
+          empty: _Empty(
             icon: Icons.link_rounded,
-            title: '还没有配对的设备',
-            text: '在另一台电脑上运行 ScreenFerry，两边核对配对码后会出现在这里。',
+            title: context.l10n.devicesNonePaired,
+            text: context.l10n.devicesNonePairedHint,
           ),
           children: [for (final d in state.peers) _PairedCard(key: ValueKey('p-${d.fingerprint}'), device: d)],
         ),
         Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            const Expanded(child: SectionTitle('在局域网里发现', note: '还没配对')),
+            Expanded(child: SectionTitle(context.l10n.devicesFound, note: context.l10n.devicesNotPairedYet)),
             _HeaderAction(
-              label: state.isServer ? '邀请一台电脑' : '按地址连接',
+              label: state.isServer ? context.l10n.devicesInvite : context.l10n.devicesConnectByAddress,
               icon: state.isServer ? Icons.login_rounded : Icons.link_rounded,
               onPressed: state.online ? () => showAddressDialog(context, invite: state.isServer) : null,
             ),
@@ -97,18 +98,17 @@ class DevicesPage extends StatelessWidget {
         if (state.isServer)
           _Empty(
             icon: Icons.radar_rounded,
-            title: '等另一台电脑来找本机',
+            title: context.l10n.devicesWaiting,
             text: state.localAddresses.isEmpty
-                ? '在另一台电脑上运行 ScreenFerry 并选择本机后，这里会弹出配对码请你核对。'
-                : '它在局域网里找不到本机时，在那台电脑上按地址连接 ${state.localAddresses.first}；'
-                      '那台电脑没有键盘鼠标时，在这里邀请它连过来。',
+                ? context.l10n.devicesWaitingHint
+                : context.l10n.devicesWaitingHintAddress(state.localAddresses.first),
           )
         else
           _CardWall(
-            empty: const _Empty(
+            empty: _Empty(
               icon: Icons.radar_rounded,
-              title: '局域网里没有找到其他设备',
-              text: '有的网络不支持自动发现（例如公司网络、开了设备隔离的 Wi‑Fi）。可以按地址连接，地址在控制端的「设备」页上。',
+              title: context.l10n.devicesNoneFound,
+              text: context.l10n.devicesNoneFoundHint,
             ),
             children: [for (final d in state.found) _FoundCard(key: ValueKey('f-${d.fingerprint}'), device: d)],
           ),
@@ -130,15 +130,15 @@ class _LocalAddresses extends StatelessWidget {
       runSpacing: 6,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        Text('本机地址', style: TextStyle(fontSize: 14, color: c.muted)),
+        Text(context.l10n.devicesThisAddress, style: TextStyle(fontSize: 14, color: c.muted)),
         for (final address in state.localAddresses.take(3))
           Pressable(
-            onTap: () => copyText(context, address, '地址已复制'),
+            onTap: () => copyText(context, address, context.l10n.devicesAddressCopied),
             color: c.card,
             hoverColor: c.card2,
             radius: 10,
-            tooltip: '复制 $address',
-            semanticLabel: '复制本机地址 $address',
+            tooltip: context.l10n.devicesCopy(address),
+            semanticLabel: context.l10n.devicesCopyAddress(address),
             padding: const EdgeInsets.symmetric(horizontal: 10),
             child: SizedBox(
               height: 30,
@@ -279,7 +279,7 @@ class _PairedCardState extends State<_PairedCard> {
     final c = SfColors.of(context);
     final state = AppScope.of(context);
     final addr = state.peer?.fingerprint == d.fingerprint ? state.peer?.addr ?? '' : '';
-    final seen = d.online && addr.isNotEmpty ? '在线 · $addr' : seenText(d);
+    final seen = d.online && addr.isNotEmpty ? context.l10n.devicesOnlineAt(addr) : seenText(context.l10n, d);
     // 服务端：这台设备贴在本机哪一侧（布局页里改）。
     final place = state.isServer ? state.placeOf(d.fingerprint) : null;
     void open() => state.openDevice(d.fingerprint);
@@ -287,7 +287,7 @@ class _PairedCardState extends State<_PairedCard> {
       onTap: open,
       radius: 26,
       pressScale: 0.985,
-      semanticLabel: '${d.displayName} 的设置',
+      semanticLabel: context.l10n.devicesSettingsOf(d.displayName),
       child: SfCard(
         padding: const EdgeInsets.all(20),
         child: Column(
@@ -297,7 +297,10 @@ class _PairedCardState extends State<_PairedCard> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 IconTile(state.peerIconOf(d), size: 52, radius: 18, emphasized: d.online),
-                Pill(d.online ? '在线' : '离线', tone: d.online ? PillTone.good : PillTone.plain),
+                Pill(
+                  d.online ? context.l10n.seenOnline : context.l10n.seenOffline,
+                  tone: d.online ? PillTone.good : PillTone.plain,
+                ),
               ],
             ),
             const SizedBox(height: 12),
@@ -310,7 +313,7 @@ class _PairedCardState extends State<_PairedCard> {
             const SizedBox(height: 2),
             Text.rich(
               TextSpan(
-                text: '指纹 ',
+                text: context.l10n.devicesFingerprint,
                 children: [
                   TextSpan(
                     text: d.short,
@@ -330,7 +333,7 @@ class _PairedCardState extends State<_PairedCard> {
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
-                      '在本机${place.side.label}',
+                      context.l10n.devicesPlace(place.side.name),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(fontSize: 13, color: c.muted),
@@ -354,7 +357,7 @@ class _PairedCardState extends State<_PairedCard> {
                       style: TextStyle(fontSize: 13, color: c.muted),
                     ),
                   ),
-                  TextLink(label: '设置', chevron: true, onPressed: open),
+                  TextLink(label: context.l10n.devicesSettings, chevron: true, onPressed: open),
                 ],
               ),
             ),
@@ -395,7 +398,7 @@ class _FoundCard extends StatelessWidget {
           children: [
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [IconTile(state.peerIcon, size: 52, radius: 18), const Pill('未配对')],
+              children: [IconTile(state.peerIcon, size: 52, radius: 18), Pill(context.l10n.devicesNotPaired)],
             ),
             const SizedBox(height: 12),
             Text(
@@ -406,7 +409,7 @@ class _FoundCard extends StatelessWidget {
             ),
             const SizedBox(height: 2),
             Text(
-              device.addr.isEmpty ? '指纹 ${device.short}' : device.addr,
+              device.addr.isEmpty ? context.l10n.devicesFingerprintShort(device.short) : device.addr,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 14, color: c.muted),
@@ -417,10 +420,10 @@ class _FoundCard extends StatelessWidget {
             Row(
               children: [
                 Expanded(
-                  child: Text('正在广播', style: TextStyle(fontSize: 13, color: c.muted)),
+                  child: Text(context.l10n.devicesAnnouncing, style: TextStyle(fontSize: 13, color: c.muted)),
                 ),
                 SmallButton(
-                  label: '配对',
+                  label: context.l10n.devicesPair,
                   tone: PillTone.accent,
                   onPressed: state.online ? () => state.connectTo(device) : null,
                 ),

@@ -15,6 +15,8 @@ import 'package:screenferry_settings/widgets/key_map_dialog.dart';
 import 'package:screenferry_settings/widgets/page_scaffold.dart';
 import 'package:screenferry_settings/widgets/surface.dart';
 
+import 'support.dart';
+
 /// 花朵一直在转，等不到“全部动画停下”，所以按固定时长推进。
 Future<void> settle(WidgetTester tester, {int steps = 6}) async {
   for (var i = 0; i < steps; i++) {
@@ -24,7 +26,15 @@ Future<void> settle(WidgetTester tester, {int steps = 6}) async {
 
 /// 用演示后台启动界面。默认不让演示数据自己跳动，测试结果才稳定。
 /// 测试里不真的打开浏览器：[opened] 记下打开过的链接。
-Future<AppState> launch(WidgetTester tester, Size size, {Backend? backend, List<String>? opened}) async {
+/// [system]：系统语言，默认中文。
+Future<AppState> launch(
+  WidgetTester tester,
+  Size size, {
+  Backend? backend,
+  List<String>? opened,
+  Locale system = const Locale('zh'),
+}) async {
+  useLocale(tester, system);
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
@@ -103,6 +113,13 @@ void main() {
       expect(find.text('仪表盘'), findsWidgets);
       await visitAll(tester, state);
       expect(find.text('往返延迟'), findsOneWidget);
+    });
+
+    testWidgets('$name下所有页面用英文也能正常显示', (tester) async {
+      final state = await launch(tester, size, system: const Locale('en', 'US'));
+      expect(find.text('Dashboard'), findsWidgets);
+      await visitAll(tester, state);
+      expect(find.text('Round-Trip Time'), findsOneWidget);
     });
   }
 
@@ -1011,6 +1028,7 @@ void main() {
     addTearDown(tester.view.reset);
     final backend = DemoBackend(animate: false);
     var quits = 0;
+    useLocale(tester);
     final state = AppState(backend: backend, onQuit: () => quits++);
     addTearDown(state.dispose);
     await tester.pumpWidget(ScreenFerryApp(state: state));
@@ -1151,6 +1169,52 @@ void main() {
       await settle(tester);
       expect(tester.takeException(), isNull);
       await leave(tester);
+    });
+  });
+
+  group('多语言', () {
+    testWidgets('系统是英文时界面用英文，活动记录也按英文说', (tester) async {
+      final state = await launch(tester, const Size(1160, 780), system: const Locale('en', 'US'));
+      expect(navItem('Devices'), findsOneWidget);
+      expect(find.text('Status'), findsOneWidget);
+
+      state.go(SfPage.log);
+      await settle(tester);
+      expect(find.text('Across the right edge'), findsOneWidget);
+      expect(find.textContaining('Shortcut Ctrl + '), findsOneWidget);
+      expect(find.text('Clipboard synced here'), findsOneWidget);
+      expect(find.textContaining('光标'), findsNothing);
+    });
+
+    testWidgets('在设置里选语言，界面马上换过去，并把选择发给后台', (tester) async {
+      final backend = DemoBackend(animate: false);
+      final state = await launch(tester, const Size(1160, 780), backend: backend, system: const Locale('en'));
+      state.go(SfPage.settings);
+      await settle(tester);
+      expect(find.text('Language'), findsOneWidget);
+
+      await tester.tap(find.text('简体中文'));
+      await settle(tester);
+      expect(backend.sent.whereType<UpdateSettingsRequest>().last.settings.toJson(), {'language': 'zh'});
+      expect(state.locale, const Locale('zh'));
+      expect(find.text('语言'), findsOneWidget);
+
+      await tester.tap(find.text('跟随系统').last);
+      await settle(tester);
+      expect(state.settings.language, UiLanguage.system);
+      expect(find.text('Language'), findsOneWidget);
+    });
+
+    testWidgets('后台的提示按当前语言显示，认不出的照原话显示', (tester) async {
+      final backend = DemoBackend(animate: false);
+      final state = await launch(tester, const Size(1160, 780), backend: backend, system: const Locale('en'));
+      backend.emit(const ToastNotice('已暂停共享', phrase: Phrase('sharing_paused')));
+      await tester.pump();
+      expect(state.toast.value?.text, 'Sharing paused');
+      backend.emit(const ToastNotice('后台新加的提示', phrase: Phrase('from_the_future')));
+      await tester.pump();
+      expect(state.toast.value?.text, '后台新加的提示');
+      await settle(tester);
     });
   });
 }

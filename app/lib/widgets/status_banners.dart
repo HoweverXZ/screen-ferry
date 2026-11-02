@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 
+import '../l10n/l10n.dart';
 import '../state/app_scope.dart';
 import '../state/app_state.dart';
 import '../theme/tokens.dart';
@@ -13,10 +14,10 @@ List<Widget> statusBanners(BuildContext context) {
   final problem = state.problem;
   return [
     if (state.disconnected)
-      const _Banner(
-        key: ValueKey('banner-disconnected'),
+      _Banner(
+        key: const ValueKey('banner-disconnected'),
         icon: Icons.sync_problem_rounded,
-        title: '与后台的连接已断开，正在重连…',
+        title: context.l10n.bannerDaemonLost,
         busy: true,
       )
     else if (problem != null)
@@ -24,18 +25,29 @@ List<Widget> statusBanners(BuildContext context) {
         key: const ValueKey('banner-problem'),
         icon: problem.kind == ProblemKind.permission ? Icons.back_hand_rounded : Icons.warning_amber_rounded,
         title: switch (problem.kind) {
-          ProblemKind.permission => '需要键鼠控制权限',
-          ProblemKind.portInUse => '端口被占用',
-          ProblemKind.other => '后台遇到了问题',
+          ProblemKind.permission => context.l10n.bannerPermission,
+          ProblemKind.portInUse => context.l10n.bannerPortInUse,
+          ProblemKind.other => context.l10n.bannerOther,
         },
-        text: problem.message,
+        text: problemText(context.l10n, problem),
         warn: true,
         action: problem.kind == ProblemKind.permission
-            ? PillButton(label: '打开系统设置', icon: Icons.open_in_new_rounded, onPressed: state.openPermissionSettings)
+            ? PillButton(
+                label: context.l10n.bannerOpenSystemSettings,
+                icon: Icons.open_in_new_rounded,
+                onPressed: state.openPermissionSettings,
+              )
             : null,
       ),
   ];
 }
+
+/// 后台遇到的问题，用当前语言说明。认不出的问题照后台给的原话显示。
+String problemText(AppLocalizations l, Problem problem) => switch (problem.kind) {
+  ProblemKind.permission => l.problemPermission,
+  ProblemKind.portInUse when problem.port != null => l.problemPortInUse(problem.port!),
+  _ => problem.message,
+};
 
 class _Banner extends StatelessWidget {
   const _Banner({

@@ -12,12 +12,14 @@ use ferry_core::Redactor;
 
 use ferry_ipc::{
     ClipboardImage, ClipboardSync, DialError as IpcDialError, FoundDevice, Link, LinkStatus, Local,
-    LogIcon, LogKind, Notice, PairingPrompt, PeerInfo, PeerRef, Problem, ProblemKind, Request,
-    Settings, SettingsPatch, State,
+    LogIcon, LogKind, Notice, PairingPrompt, PeerInfo, PeerRef, Phrase, Problem, ProblemKind,
+    Request, Settings, SettingsPatch, State,
 };
 use ferry_store::Store;
 use ferry_trust::{Fingerprint, PeerList};
-use ferry_types::{ClipboardFormat, Config, DeviceSettings, Role, Side, mark, uses_command_key};
+use ferry_types::{
+    ClipboardFormat, Config, DeviceSettings, Lang, Role, Side, mark, uses_command_key,
+};
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
@@ -136,6 +138,8 @@ pub(crate) struct Runtime<H> {
     verbose_since: Option<i64>,
     /// 最近导出的诊断文件。
     last_export: Option<PathBuf>,
+    /// 实际用的界面语言（托盘、屏幕边缘的胶囊）。
+    lang: Lang,
 }
 
 impl<H: Host> Runtime<H> {
@@ -151,8 +155,14 @@ impl<H: Host> Runtime<H> {
         let peers = store.peers()?;
         let autostart = host.autostart();
         let system = host.system();
+        let lang = config.language.resolve(host.system_language());
         let files = Files::new(&store, events.clone());
-        let edge = EdgeDrop::spawn(host.overlay(), files.clone(), accent_color(config.accent));
+        let edge = EdgeDrop::spawn(
+            host.overlay(),
+            files.clone(),
+            accent_color(config.accent),
+            lang,
+        );
         let clip_limit = ClipLimit::new(config.clipboard_limit_bytes());
         // 上次留下的剪贴板图片预览。
         if let Err(e) = store.clear_blobs() {
@@ -202,14 +212,19 @@ impl<H: Host> Runtime<H> {
             system,
             verbose_since: None,
             last_export: None,
+            lang,
         };
-        let role = match runtime.config.role {
-            Role::Server => "键鼠在本机",
-            Role::Client => "由另一台电脑控制",
+        let (role, role_key) = match runtime.config.role {
+            Role::Server => ("键鼠在本机", "server"),
+            Role::Client => ("由另一台电脑控制", "client"),
         };
+        let phrase = Phrase::new("started")
+            .arg("name", &runtime.name)
+            .arg("role", role_key);
         runtime.log(
             LogKind::Link,
             LogIcon::Power,
+            phrase,
             "ScreenFerry 已启动",
             format!("{} · {role}", mark::device(&runtime.name)),
         );
@@ -386,15 +401,32 @@ impl<H: Host> Runtime<H> {
             ),
             ProblemKind::Other => e.to_string(),
         };
+        let port = (kind == ProblemKind::PortInUse).then(|| self.host.listen_port());
         if self.problem.as_ref().is_none_or(|p| p.message != message) {
+            let key = match kind {
+                ProblemKind::Permission => "permission",
+                ProblemKind::PortInUse => "port_in_use",
+                ProblemKind::Other => "other",
+            };
+            let mut phrase = Phrase::new("cannot_share")
+                .arg("problem", key)
+                .arg("message", &message);
+            if let Some(port) = port {
+                phrase = phrase.arg("port", port);
+            }
             self.log(
                 LogKind::Link,
                 LogIcon::Warning,
+                phrase,
                 "无法开始共享",
                 message.clone(),
             );
         }
-        self.problem = Some(Problem { kind, message });
+        self.problem = Some(Problem {
+            kind,
+            message,
+            port,
+        });
         self.status = LinkStatus::Stopped;
         self.retry_at = Some(Instant::now() + delay);
     }
@@ -500,7 +532,10 @@ impl<H: Host> Runtime<H> {
                 } else {
                     format!("端口 {port} · 没有在局域网里广播")
                 };
-                self.log(LogKind::Link, LogIcon::Power, "已开始共享", detail);
+                let phrase = Phrase::new("listening")
+                    .arg("port", port)
+                    .arg("announced", announced);
+                self.log(LogKind::Link, LogIcon::Power, phrase, "已开始共享", detail);
                 self.invite_known(port);
             }
             Event::InviteListening { port } => self.invite_port = Some(port),
@@ -555,9 +590,13 @@ impl<H: Host> Runtime<H> {
                 }
                 self.refresh_peers();
                 let name = self.alias_of(&fingerprint).unwrap_or(name);
+                let phrase = Phrase::new("connected")
+                    .arg("name", &name)
+                    .arg("ip", addr.ip());
                 self.log(
                     LogKind::Link,
                     LogIcon::Link,
+                    phrase,
                     format!("已连接 {}", mark::device(&name)),
                     format!("TLS 1.3 · {}", addr.ip()),
                 );
@@ -577,9 +616,14 @@ impl<H: Host> Runtime<H> {
                     (true, Role::Server) => LinkStatus::Waiting,
                     (true, Role::Client) => LinkStatus::Searching,
                 };
+                let mut phrase = Phrase::new("disconnected").arg("name", &name);
+                if let Some(reason) = &reason {
+                    phrase = phrase.arg("reason", reason);
+                }
                 self.log(
                     LogKind::Link,
                     LogIcon::Unlink,
+                    phrase,
                     format!("与 {} 断开", mark::device(&name)),
                     reason.unwrap_or_else(|| "对方已断开".into()),
                 );
@@ -595,6 +639,7 @@ impl<H: Host> Runtime<H> {
                 self.log(
                     LogKind::Link,
                     LogIcon::Settings,
+                    Phrase::new("peer_opened_settings").arg("name", &name),
                     format!("{} 请本机打开设置", mark::device(&name)),
                     "已翻到它的设置页",
                 );
@@ -611,11 +656,15 @@ impl<H: Host> Runtime<H> {
             Event::PeerSettings { peer, sent } => {
                 let name = self.peer_name(&peer);
                 if sent {
-                    self.toast(format!("已在 {name} 上打开设置，把光标移过去就能改"));
+                    self.toast(
+                        Phrase::new("peer_settings_opened").arg("name", &name),
+                        format!("已在 {name} 上打开设置，把光标移过去就能改"),
+                    );
                 } else {
-                    self.toast(format!(
-                        "{name} 上的 ScreenFerry 版本较旧，请在那台电脑上打开设置"
-                    ));
+                    self.toast(
+                        Phrase::new("peer_settings_unsupported").arg("name", &name),
+                        format!("{name} 上的 ScreenFerry 版本较旧，请在那台电脑上打开设置"),
+                    );
                 }
             }
             Event::Cursor { here, hotkey, peer } => {
@@ -624,16 +673,21 @@ impl<H: Host> Runtime<H> {
                     self.focus = Some(peer);
                 }
                 let side = self.side_of(&peer);
-                let peer = mark::device(&self.peer_name(&peer)).to_string();
-                let (text, detail) = match (self.config.role, here) {
+                let name = self.peer_name(&peer);
+                let peer = mark::device(&name).to_string();
+                let (phrase, text, detail) = match (self.config.role, here) {
                     (Role::Server, false) => {
                         self.activity.switched();
                         (
+                            Phrase::new("cursor_to_peer")
+                                .arg("name", &name)
+                                .arg("side", side_key(side)),
                             format!("光标切到 {peer}"),
                             format!("从本机{}边缘", side_label(side)),
                         )
                     }
                     (Role::Server, true) => (
+                        Phrase::new("cursor_back").arg("hotkey", hotkey),
                         "光标回到本机".to_owned(),
                         if hotkey {
                             "快捷键 Ctrl + Option + Esc"
@@ -644,11 +698,19 @@ impl<H: Host> Runtime<H> {
                     ),
                     (Role::Client, true) => {
                         self.activity.switched();
-                        ("光标来到本机".to_owned(), format!("从 {peer}"))
+                        (
+                            Phrase::new("cursor_here").arg("name", &name),
+                            "光标来到本机".to_owned(),
+                            format!("从 {peer}"),
+                        )
                     }
-                    (Role::Client, false) => (format!("光标回到 {peer}"), String::new()),
+                    (Role::Client, false) => (
+                        Phrase::new("cursor_returned").arg("name", &name),
+                        format!("光标回到 {peer}"),
+                        String::new(),
+                    ),
                 };
-                self.log(LogKind::Cursor, LogIcon::Cursor, text, detail);
+                self.log(LogKind::Cursor, LogIcon::Cursor, phrase, text, detail);
             }
             Event::Clipboard {
                 peer,
@@ -658,6 +720,7 @@ impl<H: Host> Runtime<H> {
                 self.clipboard_peer = Some(peer);
                 let peer = self.peer_name(&peer);
                 self.activity.clipped();
+                let png_bytes = summary.image.as_ref().map(|i| i.png.len() as u64);
                 let detail = match (&summary.image, summary.chars) {
                     (Some(image), _) => format!(
                         "图片 · {}×{} · {}",
@@ -689,7 +752,25 @@ impl<H: Host> Runtime<H> {
                 } else {
                     "剪贴板同步到本机".to_owned()
                 };
-                self.log(LogKind::Clip, LogIcon::Clipboard, text, detail);
+                let mut phrase = Phrase::new("clipboard_synced")
+                    .arg("name", &peer)
+                    .arg("to_peer", to_peer)
+                    .arg("bytes", summary.bytes);
+                phrase = match (
+                    &self.clipboard.as_ref().and_then(|c| c.image.as_ref()),
+                    summary.chars,
+                ) {
+                    (Some(image), _) => phrase
+                        .arg("content", "image")
+                        .arg("bytes", png_bytes.unwrap_or(summary.bytes))
+                        .arg("width", image.width)
+                        .arg("height", image.height),
+                    (None, Some(n)) => phrase
+                        .arg("content", if summary.rich { "rich" } else { "text" })
+                        .arg("chars", n),
+                    (None, None) => phrase.arg("content", "data"),
+                };
+                self.log(LogKind::Clip, LogIcon::Clipboard, phrase, text, detail);
             }
             Event::ClipboardSkipped {
                 peer,
@@ -714,17 +795,32 @@ impl<H: Host> Runtime<H> {
                     size_text(bytes),
                     size_text(limit)
                 );
-                self.log(LogKind::Clip, LogIcon::Warning, text, detail);
+                let format_key = match format {
+                    ClipboardFormat::PNG => "image",
+                    ClipboardFormat::TEXT => "text",
+                    _ => "rich",
+                };
+                let phrase = Phrase::new("clipboard_skipped")
+                    .arg("name", &peer)
+                    .arg("to_peer", to_peer)
+                    .arg("format", format_key)
+                    .arg("bytes", bytes)
+                    .arg("limit", limit);
+                self.log(LogKind::Clip, LogIcon::Warning, phrase, text, detail);
             }
             Event::Paired { name, fingerprint } => {
                 self.refresh_peers();
+                let phrase = Phrase::new("paired")
+                    .arg("name", &name)
+                    .arg("short", fingerprint.short());
                 self.log(
                     LogKind::Link,
                     LogIcon::Lock,
+                    phrase.clone(),
                     format!("已与 {} 配对", mark::device(&name)),
                     format!("指纹 {}", fingerprint.short()),
                 );
-                self.toast(format!("已与 {name} 配对"));
+                self.toast(phrase, format!("已与 {name} 配对"));
             }
             Event::PairingRejected { name, by_peer } => {
                 let text = if by_peer {
@@ -732,7 +828,10 @@ impl<H: Host> Runtime<H> {
                 } else {
                     format!("已拒绝 {} 的配对请求", mark::device(&name))
                 };
-                self.log(LogKind::Link, LogIcon::Warning, text, "");
+                let phrase = Phrase::new("pairing_rejected")
+                    .arg("name", &name)
+                    .arg("by_peer", by_peer);
+                self.log(LogKind::Link, LogIcon::Warning, phrase, text, "");
             }
         }
     }
@@ -750,9 +849,13 @@ impl<H: Host> Runtime<H> {
             short: request.peer_fingerprint.short(),
             code: request.code.to_string(),
         };
+        let phrase = Phrase::new("pairing_request")
+            .arg("name", &request.peer_name)
+            .arg("code", request.code);
         self.log(
             LogKind::Link,
             LogIcon::Lock,
+            phrase,
             format!("{} 请求配对", mark::device(&request.peer_name)),
             format!("配对码 {}", request.code),
         );
@@ -872,6 +975,7 @@ impl<H: Host> Runtime<H> {
                     from,
                     Notice::Toast {
                         text: "诊断文件已经不在了，请重新导出".into(),
+                        phrase: Some(Phrase::new("diagnostics_missing")),
                     },
                 ),
             },
@@ -910,25 +1014,35 @@ impl<H: Host> Runtime<H> {
             None => self.focus_link().map(|l| l.fingerprint),
         };
         let Some(peer) = target else {
-            return self.toast(Error::NotConnected.to_string());
+            return self.toast(
+                Phrase::new("not_connected"),
+                Error::NotConnected.to_string(),
+            );
         };
         if !self.config.device(&peer.to_hex()).files {
             let name = self.peer_name(&peer);
-            return self.toast(format!("已在设置里关掉了拖文件给 {name}"));
+            return self.toast(
+                Phrase::new("files_disabled").arg("name", &name),
+                format!("已在设置里关掉了拖文件给 {name}"),
+            );
         }
         match self.files.send(peer, paths).await {
             Ok(_) => {
                 let name = self.peer_name(&peer);
-                self.toast(format!("开始发给 {name}"));
+                self.toast(
+                    Phrase::new("sending").arg("name", &name),
+                    format!("开始发给 {name}"),
+                );
             }
-            Err(e) => self.toast(e.to_string()),
+            Err(e) => self.toast(Phrase::new("error").arg("message", &e), e.to_string()),
         }
     }
 
     /// 文件传输有了进展：开始、结束、中断都记进日志，过程中的进度不记。
     fn on_transfer(&mut self, update: TransferUpdate) {
         self.edge.transfer(update.clone());
-        let peer = mark::device(&self.peer_name(&update.peer)).to_string();
+        let name = self.peer_name(&update.peer);
+        let peer = mark::device(&name).to_string();
         let what = if update.items > 1 {
             format!("{} 等 {} 项", mark::file(&update.name), update.items)
         } else {
@@ -936,24 +1050,48 @@ impl<H: Host> Runtime<H> {
         };
         let size = size_text(update.bytes);
         let files = format!("{} 个文件 · {size}", update.files);
-        let (text, detail) = match (&update.state, update.outgoing) {
+        // 界面按当前语言说：文件名、项数、文件数、字节数都带上。
+        let base = |key: &str| {
+            Phrase::new(key)
+                .arg("name", &name)
+                .arg("file", &update.name)
+                .arg("items", update.items)
+                .arg("files", update.files)
+                .arg("bytes", update.bytes)
+        };
+        let (phrase, text, detail) = match (&update.state, update.outgoing) {
             (TransferState::Running, _) => return,
-            (TransferState::Waiting, true) => (format!("发送 {what} 到 {peer}"), files),
-            (TransferState::Waiting, false) => (format!("{peer} 发来 {what}"), files),
-            (TransferState::Done { .. }, true) => {
-                (format!("已发送 {what}"), format!("到 {peer} · {size}"))
-            }
+            (TransferState::Waiting, true) => (
+                base("transfer_sending"),
+                format!("发送 {what} 到 {peer}"),
+                files,
+            ),
+            (TransferState::Waiting, false) => (
+                base("transfer_receiving"),
+                format!("{peer} 发来 {what}"),
+                files,
+            ),
+            (TransferState::Done { .. }, true) => (
+                base("transfer_sent"),
+                format!("已发送 {what}"),
+                format!("到 {peer} · {size}"),
+            ),
             (TransferState::Done { saved }, false) => {
-                let place = saved
-                    .first()
-                    .and_then(|p| p.parent())
-                    .map_or_else(String::new, |p| format!("保存在 {}", p.display()));
-                (format!("已收到 {what}"), place)
+                let folder = saved.first().and_then(|p| p.parent());
+                let place = folder.map_or_else(String::new, |p| format!("保存在 {}", p.display()));
+                let mut phrase = base("transfer_received");
+                if let Some(folder) = folder {
+                    phrase = phrase.arg("folder", folder.display());
+                }
+                (phrase, format!("已收到 {what}"), place)
             }
-            (TransferState::Interrupted, _) => {
-                (format!("传输中断：{what}"), "重新连上后接着传".into())
-            }
+            (TransferState::Interrupted, _) => (
+                base("transfer_interrupted"),
+                format!("传输中断：{what}"),
+                "重新连上后接着传".into(),
+            ),
             (TransferState::Cancelled { by_peer }, _) => (
+                base("transfer_cancelled").arg("by_peer", by_peer),
                 format!("已取消：{what}"),
                 if *by_peer {
                     "对方取消了"
@@ -962,9 +1100,13 @@ impl<H: Host> Runtime<H> {
                 }
                 .into(),
             ),
-            (TransferState::Failed { reason }, _) => (format!("传输失败：{what}"), reason.clone()),
+            (TransferState::Failed { reason }, _) => (
+                base("transfer_failed").arg("reason", reason),
+                format!("传输失败：{what}"),
+                reason.clone(),
+            ),
         };
-        self.log(LogKind::File, LogIcon::File, text, detail);
+        self.log(LogKind::File, LogIcon::File, phrase, text, detail);
     }
 
     fn open_settings(&mut self) {
@@ -989,13 +1131,27 @@ impl<H: Host> Runtime<H> {
         self.dirty = true;
         if on {
             self.start_engine();
-            self.log(LogKind::Link, LogIcon::Play, "继续共享", "键鼠可以切到对方");
-            self.toast("已继续共享");
+            let phrase = Phrase::new("sharing_resumed");
+            self.log(
+                LogKind::Link,
+                LogIcon::Play,
+                phrase.clone(),
+                "继续共享",
+                "键鼠可以切到对方",
+            );
+            self.toast(phrase, "已继续共享");
         } else {
             self.stop_engine().await;
             self.status = LinkStatus::Paused;
-            self.log(LogKind::Link, LogIcon::Pause, "暂停共享", "键鼠留在本机");
-            self.toast("已暂停共享");
+            let phrase = Phrase::new("sharing_paused");
+            self.log(
+                LogKind::Link,
+                LogIcon::Pause,
+                phrase.clone(),
+                "暂停共享",
+                "键鼠留在本机",
+            );
+            self.toast(phrase, "已暂停共享");
         }
     }
 
@@ -1043,6 +1199,11 @@ impl<H: Host> Runtime<H> {
         if let Some(theme) = patch.theme {
             next.theme = theme;
         }
+        if let Some(language) = patch.language {
+            next.language = language;
+            self.lang = language.resolve(self.host.system_language());
+            self.edge.set_lang(self.lang);
+        }
         if let Some(accent) = patch.accent {
             next.accent = accent;
             self.edge.set_accent(accent_color(accent));
@@ -1050,14 +1211,20 @@ impl<H: Host> Runtime<H> {
         if let Some(on) = patch.autostart {
             match self.host.set_autostart(on) {
                 Ok(()) => self.autostart = self.host.autostart(),
-                Err(e) => self.toast(format!("无法修改开机自启：{e}")),
+                Err(e) => self.toast(
+                    Phrase::new("autostart_failed").arg("message", &e),
+                    format!("无法修改开机自启：{e}"),
+                ),
             }
             self.dirty = true;
         }
 
         if next != self.config {
             if let Err(e) = self.store.save_config(&next) {
-                self.toast(format!("保存设置失败：{e}"));
+                self.toast(
+                    Phrase::new("save_failed").arg("message", &e),
+                    format!("保存设置失败：{e}"),
+                );
                 return;
             }
             self.config = next;
@@ -1068,17 +1235,25 @@ impl<H: Host> Runtime<H> {
             self.log(
                 LogKind::Link,
                 LogIcon::Layout,
+                Phrase::new("layout_arranged"),
                 "调整了设备的位置",
                 "布局已保存",
             );
         } else if let Some(side) = moved {
-            let peer = match self.links.as_slice() {
-                [only] => mark::device(&only.peer.name).to_string(),
-                _ => "其他设备".to_owned(),
+            let (name, peer) = match self.links.as_slice() {
+                [only] => (
+                    only.peer.name.clone(),
+                    mark::device(&only.peer.name).to_string(),
+                ),
+                _ => (String::new(), "其他设备".to_owned()),
             };
+            let phrase = Phrase::new("layout_moved")
+                .arg("name", &name)
+                .arg("side", side_key(side));
             self.log(
                 LogKind::Link,
                 LogIcon::Layout,
+                phrase,
                 format!("{peer} 移到本机{}", side_label(side)),
                 "布局已保存",
             );
@@ -1086,11 +1261,20 @@ impl<H: Host> Runtime<H> {
         if let Some(role) = role_changed {
             // 另一种角色用不上之前发现的服务端。
             self.found.clear();
-            let (text, detail) = match role {
-                Role::Server => ("改为控制别的电脑", "键盘鼠标在本机，等另一台电脑来连接"),
-                Role::Client => ("改为由另一台电脑控制", "在局域网里寻找键盘鼠标所在的那台"),
+            let (key, text, detail) = match role {
+                Role::Server => (
+                    "server",
+                    "改为控制别的电脑",
+                    "键盘鼠标在本机，等另一台电脑来连接",
+                ),
+                Role::Client => (
+                    "client",
+                    "改为由另一台电脑控制",
+                    "在局域网里寻找键盘鼠标所在的那台",
+                ),
             };
-            self.log(LogKind::Link, LogIcon::Settings, text, detail);
+            let phrase = Phrase::new("role_changed").arg("role", key);
+            self.log(LogKind::Link, LogIcon::Settings, phrase, text, detail);
         }
         if restart {
             self.name = resolve_name(&self.config, &self.host);
@@ -1118,7 +1302,10 @@ impl<H: Host> Runtime<H> {
         let mut next = self.config.clone();
         next.set_device(device.clone());
         if let Err(e) = self.store.save_config(&next) {
-            return self.toast(format!("保存设置失败：{e}"));
+            return self.toast(
+                Phrase::new("save_failed").arg("message", &e),
+                format!("保存设置失败：{e}"),
+            );
         }
         self.config = next;
         self.dirty = true;
@@ -1146,7 +1333,10 @@ impl<H: Host> Runtime<H> {
             }
             _ => {
                 let name = self.peer_name(&fingerprint);
-                self.toast(format!("{name} 现在没连着"));
+                self.toast(
+                    Phrase::new("peer_offline").arg("name", &name),
+                    format!("{name} 现在没连着"),
+                );
             }
         }
     }
@@ -1169,14 +1359,22 @@ impl<H: Host> Runtime<H> {
         };
         let mut peers = match self.store.peers() {
             Ok(peers) => peers,
-            Err(e) => return self.toast(format!("读取已配对设备失败：{e}")),
+            Err(e) => {
+                return self.toast(
+                    Phrase::new("peers_read_failed").arg("message", &e),
+                    format!("读取已配对设备失败：{e}"),
+                );
+            }
         };
         let Some(name) = peers.get(&fingerprint).map(|p| p.name.clone()) else {
             return;
         };
         peers.remove(&fingerprint);
         if let Err(e) = self.store.save_peers(&peers) {
-            return self.toast(format!("移除失败：{e}"));
+            return self.toast(
+                Phrase::new("remove_failed").arg("message", &e),
+                format!("移除失败：{e}"),
+            );
         }
         self.refresh_peers();
         // 它的位置安排和单独设置也不再需要。
@@ -1192,13 +1390,15 @@ impl<H: Host> Runtime<H> {
                 Err(e) => warn!("保存设置失败：{e}"),
             }
         }
+        let phrase = Phrase::new("removed").arg("name", &name);
         self.log(
             LogKind::Link,
             LogIcon::Unlink,
+            phrase.clone(),
             format!("已移除 {}", mark::device(&name)),
             "下次连接需要重新配对",
         );
-        self.toast(format!("已移除 {name}"));
+        self.toast(phrase, format!("已移除 {name}"));
         // 正连着这台：断开它，它下次来要重新配对。
         if self.links.iter().any(|l| l.fingerprint == fingerprint) {
             self.restart_engine().await;
@@ -1219,7 +1419,7 @@ impl<H: Host> Runtime<H> {
             .find(|f| f.fingerprint == fingerprint)
             .and_then(|f| f.addrs.first().copied())
         else {
-            return self.toast("这台电脑已经不在局域网里了");
+            return self.toast(Phrase::new("server_gone"), "这台电脑已经不在局域网里了");
         };
         self.dial(addr);
     }
@@ -1234,7 +1434,10 @@ impl<H: Host> Runtime<H> {
             });
         }
         let Some(commands) = self.engine.as_ref().and_then(|t| t.client.clone()) else {
-            self.toast("已暂停共享，继续共享后再连接");
+            self.toast(
+                Phrase::new("paused_connect_later"),
+                "已暂停共享，继续共享后再连接",
+            );
             return self.broadcast(Notice::Dialed {
                 address,
                 invite: false,
@@ -1261,7 +1464,10 @@ impl<H: Host> Runtime<H> {
             Some(commands) => {
                 let _ = commands.send(ClientCommand::Connect(addr));
             }
-            None => self.toast("已暂停共享，继续共享后再连接"),
+            None => self.toast(
+                Phrase::new("paused_connect_later"),
+                "已暂停共享，继续共享后再连接",
+            ),
         }
     }
 
@@ -1276,7 +1482,10 @@ impl<H: Host> Runtime<H> {
             return self.broadcast(refuse(IpcDialError::WrongRole));
         }
         let Some(port) = self.port else {
-            self.toast("还没开始共享，开始后再邀请");
+            self.toast(
+                Phrase::new("not_sharing_invite_later"),
+                "还没开始共享，开始后再邀请",
+            );
             return self.broadcast(refuse(IpcDialError::Unreachable));
         };
         let (store, name, events) = (self.store.clone(), self.name.clone(), self.events.clone());
@@ -1374,10 +1583,12 @@ impl<H: Host> Runtime<H> {
 
     // ── 输出 ─────────────────────────────────────
 
+    /// 记一条日志：`phrase` 给界面按当前语言说，`text`、`detail` 是中文（写进运行日志，旧版界面也显示它）。
     fn log(
         &mut self,
         kind: LogKind,
         icon: LogIcon,
+        phrase: Phrase,
         text: impl Into<String>,
         detail: impl Into<String>,
     ) {
@@ -1386,7 +1597,7 @@ impl<H: Host> Runtime<H> {
         info!(target: "screenferry", "{text} {detail}");
         let entry = self
             .log
-            .push(kind, icon, mark::strip(&text), mark::strip(&detail));
+            .push(kind, icon, mark::strip(&text), mark::strip(&detail), phrase);
         self.broadcast(Notice::Log { entry });
     }
 
@@ -1440,6 +1651,7 @@ impl<H: Host> Runtime<H> {
                     from,
                     Notice::Toast {
                         text: format!("导出诊断文件失败：{e}"),
+                        phrase: Some(Phrase::new("diagnostics_failed").arg("message", &e)),
                     },
                 );
             }
@@ -1586,8 +1798,12 @@ impl<H: Host> Runtime<H> {
         )
     }
 
-    fn toast(&mut self, text: impl Into<String>) {
-        self.broadcast(Notice::Toast { text: text.into() });
+    /// 给所有界面一句提示：`phrase` 按当前语言说，`text` 是中文。
+    fn toast(&mut self, phrase: Phrase, text: impl Into<String>) {
+        self.broadcast(Notice::Toast {
+            text: text.into(),
+            phrase: Some(phrase),
+        });
     }
 
     /// 发给所有界面。某个界面积压太多就断开它，它重连后会重新同步。
@@ -1603,6 +1819,7 @@ impl<H: Host> Runtime<H> {
     }
 
     pub(crate) fn summary(&self) -> Summary {
+        let lang = self.lang;
         Summary {
             sharing: !self.paused,
             connected_to: (!self.links.is_empty()).then(|| {
@@ -1610,9 +1827,20 @@ impl<H: Host> Runtime<H> {
                     .iter()
                     .map(|l| self.peer_name(&l.fingerprint))
                     .collect::<Vec<_>>()
-                    .join("、")
+                    .join(lang.pick("、", ", "))
             }),
-            problem: self.problem.as_ref().map(|p| p.message.clone()),
+            problem: self.problem.as_ref().map(|p| match (p.kind, lang) {
+                (ProblemKind::Permission, Lang::En) => {
+                    "Allow ScreenFerry to control the keyboard and mouse in System Settings"
+                        .to_owned()
+                }
+                (ProblemKind::PortInUse, Lang::En) => format!(
+                    "Port {} is in use: another copy of ScreenFerry may be running",
+                    p.port.unwrap_or_default()
+                ),
+                _ => p.message.clone(),
+            }),
+            lang,
         }
     }
 
@@ -1700,6 +1928,7 @@ impl<H: Host> Runtime<H> {
                 autostart: self.autostart,
                 theme: self.config.theme,
                 accent: self.config.accent,
+                language: self.config.language,
                 devices: self.config.devices.clone(),
             },
             activity: self.activity.recent(),
@@ -1779,6 +2008,16 @@ fn ipc_dial_error(error: DialError) -> IpcDialError {
         DialError::NotScreenFerry => IpcDialError::NotScreenFerry,
         DialError::Incompatible => IpcDialError::Incompatible,
         DialError::Busy => IpcDialError::Busy,
+    }
+}
+
+/// 方向写进 `Phrase` 的参数：`left`、`right`、`top`、`bottom`。
+fn side_key(side: Side) -> &'static str {
+    match side {
+        Side::Left => "left",
+        Side::Right => "right",
+        Side::Top => "top",
+        Side::Bottom => "bottom",
     }
 }
 

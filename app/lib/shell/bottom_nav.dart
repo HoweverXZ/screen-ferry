@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 
+import '../l10n/l10n.dart';
 import '../state/app_scope.dart';
 import '../theme/tokens.dart';
 import '../widgets/glyph.dart';
@@ -54,7 +55,7 @@ class _Tab extends StatelessWidget {
       radius: 14,
       pressScale: 0.94,
       selected: selected,
-      semanticLabel: item.label,
+      semanticLabel: item.label(context.l10n),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
@@ -79,7 +80,7 @@ class _Tab extends StatelessWidget {
               color: ink,
               fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
             ),
-            child: Text(item.label, maxLines: 1, softWrap: false, overflow: TextOverflow.fade),
+            child: Text(item.label(context.l10n), maxLines: 1, softWrap: false, overflow: TextOverflow.fade),
           ),
         ],
       ),

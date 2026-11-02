@@ -1,0 +1,7 @@
+# 多语言（ADR 0013）：简体中文是源语言，英文照着翻。改了 lib/l10n/*.arb 后 flutter pub get 会重新生成。
+arb-dir: lib/l10n
+template-arb-file: app_zh.arb
+output-localization-file: app_localizations.dart
+output-class: AppLocalizations
+nullable-getter: false
+format: true

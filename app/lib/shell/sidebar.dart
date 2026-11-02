@@ -6,6 +6,7 @@ import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
 
+import '../l10n/l10n.dart';
 import '../state/app_scope.dart';
 import '../state/app_state.dart';
 import '../theme/tokens.dart';
@@ -65,8 +66,8 @@ class Sidebar extends StatelessWidget {
                 onTap: () => state.update(() => state.sidebarCollapsed = !state.sidebarCollapsed),
                 hoverColor: c.navHover,
                 radius: 14,
-                tooltip: collapsed ? '展开侧栏' : '收起侧栏',
-                semanticLabel: collapsed ? '展开侧栏' : '收起侧栏',
+                tooltip: collapsed ? context.l10n.sidebarExpand : context.l10n.sidebarCollapse,
+                semanticLabel: collapsed ? context.l10n.sidebarExpand : context.l10n.sidebarCollapse,
                 child: SizedBox.square(
                   dimension: _toggleSize,
                   child: Center(child: GlyphIcon(Glyph.sidebar, color: c.fg)),
@@ -251,8 +252,8 @@ class _NavButton extends StatelessWidget {
       hoverColor: selected ? c.navHover.withValues(alpha: 0) : c.navHover,
       radius: 16,
       selected: selected,
-      semanticLabel: item.label,
-      tooltip: collapsed ? item.label : null,
+      semanticLabel: item.label(context.l10n),
+      tooltip: collapsed ? item.label(context.l10n) : null,
       child: SizedBox(
         height: _itemHeight,
         child: Padding(
@@ -269,7 +270,7 @@ class _NavButton extends StatelessWidget {
                     child: Padding(
                       padding: const EdgeInsets.only(left: 14),
                       child: Text(
-                        item.label,
+                        item.label(context.l10n),
                         maxLines: 1,
                         softWrap: false,
                         overflow: TextOverflow.clip,
@@ -289,18 +290,19 @@ class _NavButton extends StatelessWidget {
 
 /// 侧栏底部的一句话状态。
 String _footer(AppState state) {
+  final l = state.l10n;
   if (state.daemon == null) {
-    return state.daemonLink == DaemonLink.connecting ? '正在连接后台' : '后台未运行';
+    return state.daemonLink == DaemonLink.connecting ? l.statusConnectingDaemon : l.statusDaemonNotRunning;
   }
-  if (state.disconnected) return '与后台断开';
+  if (state.disconnected) return l.statusDaemonLost;
   final rtt = state.latestRtt;
   return switch (state.status) {
-    LinkStatus.connected => rtt == null ? '共享中' : '共享中 · ${rtt.toStringAsFixed(2)} ms',
-    LinkStatus.paused => '已暂停共享',
-    LinkStatus.waiting => '等待对方连接',
-    LinkStatus.searching => '正在寻找对方',
-    LinkStatus.connecting => '正在连接',
-    LinkStatus.starting => '正在启动',
-    LinkStatus.stopped => '已停止',
+    LinkStatus.connected => rtt == null ? l.statusSharing : l.statusSharingRtt(rtt.toStringAsFixed(2)),
+    LinkStatus.paused => l.statusPaused,
+    LinkStatus.waiting => l.statusWaiting,
+    LinkStatus.searching => l.statusSearching,
+    LinkStatus.connecting => l.statusConnecting,
+    LinkStatus.starting => l.statusStarting,
+    LinkStatus.stopped => l.statusStopped,
   };
 }

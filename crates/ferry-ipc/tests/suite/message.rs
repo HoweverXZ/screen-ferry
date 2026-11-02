@@ -7,12 +7,12 @@ use std::path::PathBuf;
 
 use ferry_ipc::{
     ClipboardImage, ClipboardSync, DialError, FoundDevice, HourActivity, Link, LinkStatus, Local,
-    LogEntry, LogIcon, LogKind, Notice, PairingPrompt, PeerInfo, PeerRef, Problem, ProblemKind,
-    Request, RunLogLevel, RunLogLine, Settings, SettingsPatch, State, VERSION,
+    LogEntry, LogIcon, LogKind, Notice, PairingPrompt, PeerInfo, PeerRef, Phrase, Problem,
+    ProblemKind, Request, RunLogLevel, RunLogLine, Settings, SettingsPatch, State, VERSION,
 };
 use ferry_types::{
-    DeviceSettings, KeyMapping, ModifierPreset, ModifierTarget, Placement, Role, ScrollSpeed, Side,
-    Theme,
+    DeviceSettings, KeyMapping, Language, ModifierPreset, ModifierTarget, Placement, Role,
+    ScrollSpeed, Side, Theme,
 };
 use serde_json::{Value, json};
 
@@ -64,6 +64,7 @@ fn requests() -> Vec<Request> {
                 side: Some(Side::Left),
                 autostart: Some(true),
                 theme: Some(Theme::Light),
+                language: Some(Language::Zh),
                 clipboard_limit_mb: Some(16),
                 mouse_dpi: Some(800),
                 ..SettingsPatch::default()
@@ -221,6 +222,7 @@ fn state() -> State {
             autostart: false,
             theme: Theme::Dark,
             accent: 2,
+            language: Language::En,
             devices: vec![device()],
         },
         activity: vec![HourActivity {
@@ -240,12 +242,18 @@ fn notices() -> Vec<Notice> {
         text: "光标切到 办公室 PC".into(),
         detail: "从本机右侧边缘".into(),
         at: 1_793_480_200_000,
+        phrase: Some(
+            Phrase::new("cursor_to_peer")
+                .arg("name", "办公室 PC")
+                .arg("side", "right"),
+        ),
     };
     let stopped = State {
         sharing: false,
         problem: Some(Problem {
             kind: ProblemKind::Permission,
             message: "需要在“隐私与安全性”中允许 ScreenFerry 控制电脑".into(),
+            port: None,
         }),
         link: Link {
             status: LinkStatus::Stopped,
@@ -281,6 +289,7 @@ fn notices() -> Vec<Notice> {
         Notice::PairingClosed { id: 3 },
         Notice::Toast {
             text: "已暂停共享".into(),
+            phrase: Some(Phrase::new("sharing_paused")),
         },
         Notice::ShowDevice {
             fingerprint: FP_PC.into(),

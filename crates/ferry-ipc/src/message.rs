@@ -3,7 +3,9 @@
 //! 设置界面（Dart）手写了对应的类型，两边靠 `app/test/fixtures/ipc_samples.json` 中的样例保持一致：
 //! 改动这里的任何结构，都要同时改 Dart 侧并重新生成样例，见 `docs/ipc.md`。
 
-use ferry_types::{DeviceSettings, Placement, Role, Side, Theme};
+use std::collections::BTreeMap;
+
+use ferry_types::{DeviceSettings, Language, Placement, Role, Side, Theme};
 use serde::{Deserialize, Serialize};
 
 /// 协议版本。不兼容的改动才递增。
@@ -88,8 +90,12 @@ pub enum Notice {
     Pairing { prompt: PairingPrompt },
     /// 配对请求已结束（任何一方已决定、超时或连接断开），关闭对应的对话框。
     PairingClosed { id: u64 },
-    /// 给用户的简短提示。
-    Toast { text: String },
+    /// 给用户的简短提示。`phrase` 让界面用当前语言说出来；界面不认识时显示 `text`（中文）。
+    Toast {
+        text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        phrase: Option<Phrase>,
+    },
     /// 请界面翻到这台设备（证书指纹）的设置页。另一台设备请本机打开设置时发送。
     ShowDevice { fingerprint: String },
     /// 按地址连接（`invite` 为假）或邀请（为真）的结果。`error` 为 `null` 表示成了：
@@ -214,7 +220,11 @@ pub struct Local {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Problem {
     pub kind: ProblemKind,
+    /// 中文说明。`permission`、`port_in_use` 由界面用当前语言说；`other` 是引擎给的原话。
     pub message: String,
+    /// `port_in_use`：被占用的端口。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -367,6 +377,9 @@ pub struct Settings {
     /// 设置界面的配色与强调色，由后台保存，重启后不变。
     pub theme: Theme,
     pub accent: u8,
+    /// 界面语言：设置界面、托盘菜单、屏幕边缘的胶囊都用它。
+    #[serde(default)]
+    pub language: Language,
     /// 单独设置过的设备；没列出的用缺省设置。
     #[serde(default)]
     pub devices: Vec<DeviceSettings>,
@@ -404,6 +417,8 @@ pub struct SettingsPatch {
     pub theme: Option<Theme>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub accent: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<Language>,
 }
 
 /// 一小时内的活动。
@@ -425,10 +440,38 @@ pub struct LogEntry {
     pub id: u64,
     pub kind: LogKind,
     pub icon: LogIcon,
+    /// 中文的两行。界面认识 `phrase` 时用它按当前语言说，否则显示这两行。
     pub text: String,
     pub detail: String,
     /// Unix 毫秒。
     pub at: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phrase: Option<Phrase>,
+}
+
+/// 一句给用户看的话：界面按 `key` 选当前语言的说法，把 `args` 填进去（ADR 0013）。
+/// 有哪些 `key`、各带什么参数，见 docs/ipc.md。
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Phrase {
+    pub key: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub args: BTreeMap<String, String>,
+}
+
+impl Phrase {
+    pub fn new(key: &str) -> Self {
+        Self {
+            key: key.to_owned(),
+            args: BTreeMap::new(),
+        }
+    }
+
+    /// 加一个参数。数字照原样写（例如字节数），由界面按语言排版。
+    #[must_use]
+    pub fn arg(mut self, name: &str, value: impl ToString) -> Self {
+        self.args.insert(name.to_owned(), value.to_string());
+        self
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

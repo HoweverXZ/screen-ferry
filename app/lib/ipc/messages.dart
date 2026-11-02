@@ -42,6 +42,9 @@ enum ScreenSide { left, right, top, bottom }
 /// 设置界面的配色，取值与 Flutter 的 ThemeMode 同名。
 enum UiTheme { system, light, dark }
 
+/// 界面语言：跟随系统、简体中文、英文。
+enum UiLanguage { system, zh, en }
+
 enum LinkStatus { paused, starting, waiting, searching, connecting, connected, stopped }
 
 enum ProblemKind { permission, portInUse, other }
@@ -171,13 +174,43 @@ class Local {
 }
 
 class Problem {
-  const Problem({required this.kind, required this.message});
+  const Problem({required this.kind, required this.message, this.port});
 
-  factory Problem.fromJson(Json j) =>
-      Problem(kind: _enum(ProblemKind.values, _camel(j['kind']), ProblemKind.other), message: _str(j['message']));
+  factory Problem.fromJson(Json j) => Problem(
+    kind: _enum(ProblemKind.values, _camel(j['kind']), ProblemKind.other),
+    message: _str(j['message']),
+    port: j['port'] is num ? _int(j['port']) : null,
+  );
 
   final ProblemKind kind;
+
+  /// 后台给的中文说明。[ProblemKind.permission]、[ProblemKind.portInUse] 由界面按当前语言说。
   final String message;
+
+  /// [ProblemKind.portInUse]：被占用的端口。
+  final int? port;
+}
+
+/// 一句给用户看的话：界面按 [key] 选当前语言的说法，把 [args] 填进去。
+class Phrase {
+  const Phrase(this.key, [this.args = const {}]);
+
+  static Phrase? fromJson(Object? v) {
+    if (v is! Json) return null;
+    final args = v['args'];
+    return Phrase(_str(v['key']), {
+      if (args is Json)
+        for (final e in args.entries)
+          if (e.value is String) e.key: e.value as String,
+    });
+  }
+
+  final String key;
+  final Map<String, String> args;
+
+  String arg(String name) => args[name] ?? '';
+  int number(String name) => int.tryParse(args[name] ?? '') ?? 0;
+  bool flag(String name) => args[name] == 'true';
 }
 
 class Link {
@@ -399,6 +432,7 @@ class DaemonSettings {
     required this.autostart,
     required this.theme,
     required this.accent,
+    this.language = UiLanguage.system,
     this.devices = const [],
   });
 
@@ -420,6 +454,7 @@ class DaemonSettings {
     autostart: _bool(j['autostart']),
     theme: _enum(UiTheme.values, j['theme'], UiTheme.system),
     accent: _int(j['accent']),
+    language: _enum(UiLanguage.values, j['language'], UiLanguage.system),
     devices: [for (final d in _list(j['devices'])) DeviceSettings.fromJson(d)],
   );
 
@@ -444,6 +479,9 @@ class DaemonSettings {
   final UiTheme theme;
   final int accent;
 
+  /// 界面语言。
+  final UiLanguage language;
+
   /// 单独设置过的设备；没列出的用缺省设置。
   final List<DeviceSettings> devices;
 
@@ -464,6 +502,7 @@ class DaemonSettings {
     autostart: p.autostart ?? autostart,
     theme: p.theme ?? theme,
     accent: p.accent ?? accent,
+    language: p.language ?? language,
     devices: devices,
   );
 
@@ -483,6 +522,7 @@ class DaemonSettings {
       autostart: autostart,
       theme: theme,
       accent: accent,
+      language: language,
       devices: [
         for (final x in next)
           if (!x.isDefault) x,
@@ -748,6 +788,7 @@ class LogEntry {
     required this.text,
     required this.detail,
     required this.at,
+    this.phrase,
   });
 
   factory LogEntry.fromJson(Json j) => LogEntry(
@@ -757,14 +798,18 @@ class LogEntry {
     text: _str(j['text']),
     detail: _str(j['detail']),
     at: _time(j['at']) ?? DateTime.fromMillisecondsSinceEpoch(0),
+    phrase: Phrase.fromJson(j['phrase']),
   );
 
   final int id;
   final LogKind kind;
   final LogIcon icon;
+
+  /// 后台给的中文两行；认识 [phrase] 时按当前语言说，不认识时显示它们。
   final String text;
   final String detail;
   final DateTime at;
+  final Phrase? phrase;
 }
 
 /// 请用户核对的配对码。
@@ -810,7 +855,7 @@ sealed class Notice {
     'log' => LogNotice(LogEntry.fromJson(j['entry'] as Json? ?? const {})),
     'pairing' => PairingNotice(PairingPrompt.fromJson(j['prompt'] as Json? ?? const {})),
     'pairing_closed' => PairingClosedNotice(_int(j['id'])),
-    'toast' => ToastNotice(_str(j['text'])),
+    'toast' => ToastNotice(_str(j['text']), phrase: Phrase.fromJson(j['phrase'])),
     'show_device' => ShowDeviceNotice(_str(j['fingerprint'])),
     'dialed' => DialedNotice(
       address: _str(j['address']),
@@ -864,8 +909,11 @@ class PairingClosedNotice extends Notice {
 }
 
 class ToastNotice extends Notice {
-  const ToastNotice(this.text);
+  const ToastNotice(this.text, {this.phrase});
+
+  /// 后台给的中文；认识 [phrase] 时按当前语言说。
   final String text;
+  final Phrase? phrase;
 }
 
 /// 翻到这台设备的设置页：它请本机打开了设置。
@@ -1135,6 +1183,7 @@ class SettingsPatch {
     this.autostart,
     this.theme,
     this.accent,
+    this.language,
   });
 
   final String? name;
@@ -1153,6 +1202,7 @@ class SettingsPatch {
   final bool? autostart;
   final UiTheme? theme;
   final int? accent;
+  final UiLanguage? language;
 
   Json toJson() => {
     'name': ?name,
@@ -1167,6 +1217,7 @@ class SettingsPatch {
     'autostart': ?autostart,
     'theme': ?theme?.name,
     'accent': ?accent,
+    'language': ?language?.name,
   };
 
   /// 后面的补丁覆盖前面的。
@@ -1183,6 +1234,7 @@ class SettingsPatch {
     autostart: o.autostart ?? autostart,
     theme: o.theme ?? theme,
     accent: o.accent ?? accent,
+    language: o.language ?? language,
   );
 
   /// 去掉已经与 `s` 一致的字段：后台确认过的改动不再需要覆盖。
@@ -1203,6 +1255,7 @@ class SettingsPatch {
     autostart: autostart == s.autostart ? null : autostart,
     theme: theme == s.theme ? null : theme,
     accent: accent == s.accent ? null : accent,
+    language: language == s.language ? null : language,
   );
 
   bool get isEmpty => toJson().isEmpty;

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/l10n.dart';
 import '../state/app_scope.dart';
 import '../state/app_state.dart';
 import '../theme/tokens.dart';
@@ -16,14 +17,14 @@ class AboutPage extends StatelessWidget {
     final state = AppScope.of(context);
     final c = SfColors.of(context);
     return PageScaffold(
-      title: '关于',
+      title: context.l10n.aboutTitle,
       leading: Pressable(
         onTap: () => state.go(SfPage.settings),
         color: c.card,
         hoverColor: c.card2,
         radius: 22,
-        tooltip: '返回设置',
-        semanticLabel: '返回设置',
+        tooltip: context.l10n.aboutBack,
+        semanticLabel: context.l10n.aboutBack,
         child: const SizedBox.square(dimension: 44, child: Icon(Icons.arrow_back_ios_new_rounded, size: 18)),
       ),
       children: [
@@ -50,14 +51,14 @@ class AboutPage extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 6),
-                Text('在 Mac 与 Windows 之间共享一套键盘鼠标', style: TextStyle(color: c.muted, height: 1.5)),
+                Text(context.l10n.aboutTagline, style: TextStyle(color: c.muted, height: 1.5)),
               ],
             ),
             trailing: PillButton(
-              label: '检查更新',
+              label: context.l10n.aboutCheckUpdates,
               icon: Icons.refresh_rounded,
               soft: true,
-              onPressed: () => state.showToast('自动检查更新即将支持'),
+              onPressed: () => state.showToast(context.l10n.aboutUpdatesSoon),
             ),
           ),
         ),
@@ -65,12 +66,12 @@ class AboutPage extends StatelessWidget {
           children: [
             SfRow(
               icon: Icons.code_rounded,
-              title: '作者主页',
+              title: context.l10n.aboutAuthor,
               subtitle: 'github.com/icloudza',
               trailing: Icon(Icons.open_in_new_rounded, size: 18, color: c.muted),
               onTap: () => state.openLink('https://github.com/icloudza'),
             ),
-            const SfRow(icon: Icons.info_outline_rounded, title: '许可证', subtitle: 'MIT OR Apache-2.0'),
+            SfRow(icon: Icons.info_outline_rounded, title: context.l10n.aboutLicense, subtitle: 'MIT OR Apache-2.0'),
           ],
         ),
       ],

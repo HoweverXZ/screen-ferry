@@ -2,6 +2,8 @@
 
 import 'package:flutter/material.dart';
 
+import '../l10n/l10n.dart';
+
 import '../state/app_scope.dart';
 import '../state/app_state.dart';
 import '../theme/tokens.dart';
@@ -20,47 +22,67 @@ class SettingsPage extends StatelessWidget {
     final state = AppScope.of(context);
     final c = SfColors.of(context);
     final s = state.settings;
+    final l = context.l10n;
     // 没连上后台时开关不可点（返回 null）。
     ValueChanged<bool>? set(SettingsPatch Function(bool) patch) =>
         state.online ? (v) => state.updateSettings(patch(v)) : null;
     return PageScaffold(
-      title: '设置',
+      title: l.navSettings,
       children: [
-        const SectionTitle('这台电脑'),
+        SectionTitle(l.settingsThisComputer),
         SfGroup(
           children: [
             SfRow(
               icon: Icons.swap_horiz_rounded,
-              title: '角色',
-              subtitle: state.isServer ? '键盘鼠标接在这台上，用它控制别的电脑' : '由另一台电脑的键盘鼠标控制 · 切换后重新连接',
+              title: l.settingsRole,
+              subtitle: state.isServer ? l.settingsRoleServerHint : l.settingsRoleClientHint,
               trailing: SfSegmented<Role>(
-                label: '角色',
-                segments: const [(Role.server, '控制别的电脑'), (Role.client, '被控制')],
+                label: l.settingsRole,
+                segments: [(Role.server, l.settingsRoleServer), (Role.client, l.settingsRoleClient)],
                 value: state.role,
                 onChanged: state.online ? state.setRole : null,
               ),
             ),
           ],
         ),
-        const SectionTitle('外观'),
+        SectionTitle(l.settingsAppearance),
         ListenableBuilder(
           listenable: state.appearance,
           builder: (context, _) => SfGroup(
             children: [
               SfRow(
                 icon: Icons.contrast_rounded,
-                title: '主题',
+                title: l.settingsTheme,
                 trailing: SfSegmented<ThemeMode>(
-                  label: '主题',
-                  segments: const [(ThemeMode.system, '跟随系统'), (ThemeMode.light, '浅色'), (ThemeMode.dark, '深色')],
+                  label: l.settingsTheme,
+                  segments: [
+                    (ThemeMode.system, l.settingsFollowSystem),
+                    (ThemeMode.light, l.settingsLight),
+                    (ThemeMode.dark, l.settingsDark),
+                  ],
                   value: state.appearance.mode,
                   onChanged: state.online ? state.setTheme : null,
                 ),
               ),
               SfRow(
+                icon: Icons.translate_rounded,
+                title: l.settingsLanguage,
+                trailing: SfSegmented<UiLanguage>(
+                  label: l.settingsLanguage,
+                  // 语言名用它自己的文字写，换到看不懂的语言时也认得出来。
+                  segments: [
+                    (UiLanguage.system, l.settingsFollowSystem),
+                    (UiLanguage.zh, '简体中文'),
+                    (UiLanguage.en, 'English'),
+                  ],
+                  value: state.appearance.language,
+                  onChanged: state.online ? state.setLanguage : null,
+                ),
+              ),
+              SfRow(
                 icon: Icons.palette_outlined,
-                title: '强调色',
-                subtitle: '开关、选中项和按钮的颜色',
+                title: l.settingsAccent,
+                subtitle: l.settingsAccentHint,
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -78,17 +100,17 @@ class SettingsPage extends StatelessWidget {
             ],
           ),
         ),
-        const SectionTitle('鼠标与剪贴板'),
+        SectionTitle(l.settingsMouseClipboard),
         SfGroup(
           children: [
             if (state.isServer) ...[
               SfRow(
                 icon: Icons.mouse_outlined,
-                title: '本机鼠标的 DPI',
-                subtitle: '每台设备的光标速度以它为准',
+                title: l.settingsDpi,
+                subtitle: l.settingsDpiHint,
                 trailing: DpiField(
                   value: s.mouseDpi,
-                  label: '本机鼠标的 DPI',
+                  label: l.settingsDpi,
                   min: DaemonSettings.mouseDpiRange.min,
                   max: DaemonSettings.mouseDpiRange.max,
                   onChanged: state.online ? (v) => state.updateSettings(SettingsPatch(mouseDpi: v)) : null,
@@ -96,26 +118,26 @@ class SettingsPage extends StatelessWidget {
               ),
               SfRow(
                 icon: Icons.devices_rounded,
-                title: '按键映射、滚动方向',
-                subtitle: '在“设备”里逐台设置',
+                title: l.settingsPerDevice,
+                subtitle: l.settingsPerDeviceHint,
                 trailing: Icon(Icons.chevron_right_rounded, color: c.muted),
                 onTap: () => state.go(SfPage.devices),
               ),
             ],
             SfRow(
               icon: Icons.content_paste_rounded,
-              title: '同步剪贴板',
-              subtitle: '光标切过去时，对方才来取最新的内容',
+              title: l.settingsClipboard,
+              subtitle: l.settingsClipboardHint,
               trailing: SfSwitch(
                 value: s.clipboard,
-                label: '同步剪贴板',
+                label: l.settingsClipboard,
                 onChanged: set((v) => SettingsPatch(clipboard: v)),
               ),
             ),
             SfRow(
               icon: Icons.storage_rounded,
-              title: '单项大小上限',
-              subtitle: '图片、文字等每一项超过这么大就不同步',
+              title: l.settingsClipLimit,
+              subtitle: l.settingsClipLimitHint,
               trailing: _LimitSlider(
                 value: s.clipboardLimitMb,
                 onChanged: state.online ? (mb) => state.updateSettings(SettingsPatch(clipboardLimitMb: mb)) : null,
@@ -123,34 +145,34 @@ class SettingsPage extends StatelessWidget {
             ),
           ],
         ),
-        const SectionTitle('通用'),
+        SectionTitle(l.settingsGeneral),
         SfGroup(
           children: [
             SfRow(
               icon: Icons.power_settings_new_rounded,
-              title: '开机自动启动',
+              title: l.settingsAutostart,
               trailing: SfSwitch(
                 value: s.autostart,
-                label: '开机自动启动',
+                label: l.settingsAutostart,
                 onChanged: set((v) => SettingsPatch(autostart: v)),
               ),
             ),
             if (state.isServer)
               SfRow(
                 icon: Icons.wifi_tethering_rounded,
-                title: '在局域网里广播本机',
-                subtitle: '另一台电脑不用填地址就能找到本机',
+                title: l.settingsAnnounce,
+                subtitle: l.settingsAnnounceHint,
                 trailing: SfSwitch(
                   value: s.announce,
-                  label: '在局域网里广播本机',
+                  label: l.settingsAnnounce,
                   onChanged: set((v) => SettingsPatch(announce: v)),
                 ),
               ),
-            SfRow(icon: Icons.folder_outlined, title: '数据目录', subtitle: state.dataDir, mono: true),
+            SfRow(icon: Icons.folder_outlined, title: l.settingsDataDir, subtitle: state.dataDir, mono: true),
             SfRow(
               icon: Icons.info_outline_rounded,
-              title: '关于 ScreenFerry',
-              subtitle: state.version.isEmpty ? null : '版本 ${state.version}',
+              title: l.settingsAbout,
+              subtitle: state.version.isEmpty ? null : l.settingsVersion(state.version),
               trailing: Icon(Icons.chevron_right_rounded, color: c.muted),
               onTap: () => state.go(SfPage.about),
             ),
@@ -229,8 +251,8 @@ class _Swatch extends StatelessWidget {
       radius: 999,
       pressScale: 0.9,
       selected: selected,
-      semanticLabel: '${choice.name}色',
-      tooltip: '${choice.name}色',
+      semanticLabel: _accentName(context.l10n, choice),
+      tooltip: _accentName(context.l10n, choice),
       child: AnimatedContainer(
         duration: Motion.fast,
         width: 40,
@@ -247,3 +269,12 @@ class _Swatch extends StatelessWidget {
     );
   }
 }
+
+/// 强调色在当前语言里的名字。
+String _accentName(AppLocalizations l, AccentChoice choice) => switch (choice.name) {
+  'teal' => l.accentTeal,
+  'purple' => l.accentPurple,
+  'orange' => l.accentOrange,
+  'pink' => l.accentPink,
+  _ => l.accentBlue,
+};

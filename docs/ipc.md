@@ -46,7 +46,7 @@
 | `log` | `entry` | 新日志 |
 | `pairing` | `prompt`：`id`、`peer_name`、`fingerprint`、`short`、`code` | 请用户核对配对码 |
 | `pairing_closed` | `id` | 这次配对已结束，关闭对话框 |
-| `toast` | `text` | 简短提示 |
+| `toast` | `text`、`phrase` | 简短提示。`phrase` 见 4.1 节 |
 | `show_device` | `fingerprint` | 翻到这台设备的设置页：它请本机打开了设置（本机是服务端、它被本机控制时） |
 | `dialed` | `address`、`invite`、`error` | 一次 `connect_address`（`invite` 为 false）或 `invite`（为 true）的结果。`error` 为 null 表示成了：按地址连接是已经连上（没配对时接着发 `pairing`），邀请是对方答应了、正在连过来。否则是 `bad_address`（地址不对）、`refused`（那里没有在等的 ScreenFerry）、`unreachable`（连不上）、`not_screen_ferry`、`incompatible`（版本不兼容）、`busy`（对方正连着别的电脑）、`wrong_role`（本机的角色做不了） |
 | `quit` | | 后台要退出了（托盘里的“退出”或 `quit` 命令），界面随之关闭。之后连接断开 |
@@ -63,7 +63,7 @@ local     name · fingerprint · short · role(server|client) · data_dir · ver
           addresses[]（本机的局域网 IPv4 地址，常用的在前）· invite_port（客户端等邀请的端口，否则 null）
           system（本机系统和版本，例如“macOS 15.6 · arm64”）· verbose_since（详细记录从什么时候开着，Unix 毫秒；关着为 null）
 sharing   用户没有暂停共享
-problem   null | { kind(permission|port_in_use|other), message }
+problem   null | { kind(permission|port_in_use|other), message, port（端口被占用时是哪个端口，否则 null） }
 link      status(paused|starting|waiting|searching|connecting|connected|stopped)
           peer(null | { name, fingerprint, short, addr }) · since · cursor_on_peer · rtt_ms[]
           连着几台时是摘要：指光标所在（否则最近连上）的那台；每台是否连着见 peers
@@ -76,7 +76,8 @@ peers[]   { name（它自己报的名字）, fingerprint, short, online, last_se
 found[]   { name, fingerprint, short, addr, paired }        只有客户端会有
 settings  { name, side(left|right|top|bottom), layout[], announce, clipboard,
             clipboard_limit_mb（剪贴板单项上限，1–64）, mouse_dpi（本机鼠标的 DPI，100–12800）,
-            server（客户端：只连这个地址，空为自动寻找）, autostart, theme(system|light|dark), accent, devices[] }
+            server（客户端：只连这个地址，空为自动寻找）, autostart, theme(system|light|dark), accent,
+            language(system|zh|en)（界面语言，system 为跟随系统）, devices[] }
           layout[] { fingerprint, side }：单独安排过位置的设备，按先后排列，同一侧的几台按这个先后
           平分那条边（左右两侧从上到下，上下两侧从左到右）；side 是没有列出的设备放的那一侧
           devices[] 单独设置过的设备，没列出的用缺省值（括号里）：
@@ -89,6 +90,43 @@ settings  { name, side(left|right|top|bottom), layout[], announce, clipboard,
             鼠标、按键、防误切只在本机控制它（本机是服务端）时生效；剪贴板、拖文件两边都生效
 activity[] { hour, switches, clips, connected_secs }         最近 48 小时，只列有活动的小时
 ```
+
+### 4.1 日志条目与 phrase
+
+`history` 和 `log` 里的日志条目是 `{ id, kind(cursor|clip|link|file), icon, text, detail, at, phrase }`。
+
+`text`、`detail` 是后台写好的中文两行。`phrase` 是同一件事的结构化写法 `{ key, args }`（`args` 的值都是字符串，
+数字、真假也写成字符串），界面按当前语言把它说出来，认不出 `key` 时显示 `text`、`detail`（ADR 0013）。
+`toast` 的 `phrase` 同理，对应 `text`。
+
+| 用在 | key | args |
+|---|---|---|
+| 日志 | `started` | `name`、`role`(server\|client) |
+| 日志 | `cannot_share` | `problem`(permission\|port_in_use\|other)、`message`、`port`（端口被占用时） |
+| 日志 | `listening` | `port`、`announced` |
+| 日志 | `connected` | `name`、`ip` |
+| 日志 | `disconnected` | `name`、`reason`（可选） |
+| 日志 | `peer_opened_settings` | `name` |
+| 日志 | `cursor_to_peer` | `name`、`side`(left\|right\|top\|bottom) |
+| 日志 | `cursor_back` | `hotkey` |
+| 日志 | `cursor_here`、`cursor_returned` | `name` |
+| 日志 | `clipboard_synced` | `name`、`to_peer`、`bytes`、`content`(image\|rich\|text\|data)；图片另有 `width`、`height`，文字另有 `chars` |
+| 日志 | `clipboard_skipped` | `name`、`to_peer`、`format`(image\|text\|rich)、`bytes`、`limit` |
+| 日志、提示 | `paired` | `name`、`short` |
+| 日志 | `pairing_rejected` | `name`、`by_peer` |
+| 日志 | `pairing_request` | `name`、`code` |
+| 日志 | `transfer_sending`、`transfer_receiving`、`transfer_sent`、`transfer_interrupted` | `name`、`file`（第一项的名字）、`items`、`files`、`bytes` |
+| 日志 | `transfer_received` | 同上，另有 `folder`（保存的文件夹） |
+| 日志 | `transfer_cancelled` | 同上，另有 `by_peer` |
+| 日志 | `transfer_failed` | 同上，另有 `reason` |
+| 日志、提示 | `sharing_resumed`、`sharing_paused` | |
+| 日志 | `layout_arranged` | |
+| 日志 | `layout_moved` | `name`（空为几台设备）、`side` |
+| 日志 | `role_changed` | `role` |
+| 日志、提示 | `removed` | `name` |
+| 提示 | `peer_settings_opened`、`peer_settings_unsupported`、`files_disabled`、`sending`、`peer_offline` | `name` |
+| 提示 | `error`、`autostart_failed`、`save_failed`、`peers_read_failed`、`remove_failed`、`diagnostics_failed` | `message` |
+| 提示 | `diagnostics_missing`、`not_connected`、`server_gone`、`paused_connect_later`、`not_sharing_invite_later` | |
 
 ## 5. 界面 → 后台
 

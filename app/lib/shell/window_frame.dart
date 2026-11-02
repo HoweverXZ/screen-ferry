@@ -7,6 +7,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../l10n/l10n.dart';
 import '../theme/tokens.dart';
 import '../widgets/pressable.dart';
 
@@ -109,13 +110,18 @@ class _WindowButtons extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            _WindowButton(glyph: _Glyph.minimize, label: '最小化', onTap: NativeWindow.minimize),
+            _WindowButton(glyph: _Glyph.minimize, label: context.l10n.windowMinimize, onTap: NativeWindow.minimize),
             _WindowButton(
               glyph: maximized ? _Glyph.restore : _Glyph.maximize,
-              label: maximized ? '还原' : '最大化',
+              label: maximized ? context.l10n.windowRestore : context.l10n.windowMaximize,
               onTap: NativeWindow.toggleMaximize,
             ),
-            _WindowButton(glyph: _Glyph.close, label: '关闭', onTap: NativeWindow.close, danger: true),
+            _WindowButton(
+              glyph: _Glyph.close,
+              label: context.l10n.commonClose,
+              onTap: NativeWindow.close,
+              danger: true,
+            ),
           ],
         ),
       ),

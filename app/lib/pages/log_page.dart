@@ -3,8 +3,10 @@
 
 import 'package:flutter/material.dart';
 
+import '../l10n/l10n.dart';
 import '../state/app_scope.dart';
 import '../state/app_state.dart';
+import '../state/phrases.dart';
 import '../theme/tokens.dart';
 import '../widgets/controls.dart';
 import '../widgets/page_scaffold.dart';
@@ -57,13 +59,17 @@ class _LogPageState extends State<LogPage> {
     final items = state.log.where(_match).toList();
     final bytes = state.runLogBytes;
     final count = run
-        ? (bytes == null ? '' : '${sizeText(bytes)} · ${_thousands(state.runLogLines ?? 0)} 行')
-        : '共 ${items.length} 条';
+        ? (bytes == null ? '' : context.l10n.logRunSize(sizeText(bytes), _thousands(state.runLogLines ?? 0)))
+        : context.l10n.logCount(items.length);
     return PageScaffold(
-      title: '日志',
+      title: context.l10n.logTitle,
       actions: [
         if (!run)
-          PillButton(label: '清空', icon: Icons.delete_outline_rounded, onPressed: state.online ? state.clearLog : null),
+          PillButton(
+            label: context.l10n.logClear,
+            icon: Icons.delete_outline_rounded,
+            onPressed: state.online ? state.clearLog : null,
+          ),
       ],
       children: [
         Wrap(
@@ -72,15 +78,15 @@ class _LogPageState extends State<LogPage> {
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             SfSegmented<_Filter>(
-              label: '筛选',
+              label: context.l10n.logFilter,
               onCard: true,
-              segments: const [
-                (_Filter.all, '全部'),
-                (_Filter.cursor, '光标'),
-                (_Filter.clip, '剪贴板'),
-                (_Filter.file, '文件'),
-                (_Filter.link, '设备与连接'),
-                (_Filter.run, '运行日志'),
+              segments: [
+                (_Filter.all, context.l10n.logAll),
+                (_Filter.cursor, context.l10n.logCursor),
+                (_Filter.clip, context.l10n.logClipboard),
+                (_Filter.file, context.l10n.logFiles),
+                (_Filter.link, context.l10n.logLinks),
+                (_Filter.run, context.l10n.logRun),
               ],
               value: _filter,
               onChanged: _select,
@@ -100,7 +106,7 @@ class _LogPageState extends State<LogPage> {
                 ? Padding(
                     padding: const EdgeInsets.symmetric(vertical: 34),
                     child: Center(
-                      child: Text('暂无记录', style: TextStyle(color: c.muted)),
+                      child: Text(context.l10n.logEmpty, style: TextStyle(color: c.muted)),
                     ),
                   )
                 : Column(
@@ -126,6 +132,9 @@ class _LogRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = SfColors.of(context);
+    final phrase = entry.phrase;
+    final local = phrase == null ? null : logLine(context.l10n, phrase, mac: AppScope.of(context).localIsMac);
+    final (text, detail) = local ?? (entry.text, entry.detail);
     Widget row = Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
       child: Row(
@@ -148,13 +157,13 @@ class _LogRow extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(entry.text),
-                Text(entry.detail, style: TextStyle(fontSize: 13, color: c.muted)),
+                Text(text),
+                Text(detail, style: TextStyle(fontSize: 13, color: c.muted)),
               ],
             ),
           ),
           const SizedBox(width: 12),
-          Pill(entry.kind.label),
+          Pill(entry.kind.label(context.l10n)),
         ],
       ),
     );

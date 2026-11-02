@@ -3,6 +3,7 @@
 
 import 'package:flutter/material.dart';
 
+import '../l10n/l10n.dart';
 import '../state/app_scope.dart';
 import '../state/app_state.dart';
 import '../state/dial_text.dart';
@@ -15,7 +16,7 @@ Future<void> showAddressDialog(BuildContext context, {required bool invite, Stri
   await showGeneralDialog<void>(
     context: context,
     barrierDismissible: true,
-    barrierLabel: invite ? '邀请一台电脑' : '按地址连接',
+    barrierLabel: invite ? context.l10n.dialInviteTitle : context.l10n.dialConnectTitle,
     barrierColor: Colors.black.withValues(alpha: 0.34),
     transitionDuration: const Duration(milliseconds: 320),
     pageBuilder: (context, _, _) => AddressDialog(invite: invite, initial: initial),
@@ -73,14 +74,16 @@ class _AddressDialogState extends State<AddressDialog> {
       _closing = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        state.showToast(widget.invite ? '已邀请 ${dial.address}，它正在连过来' : '已连上 ${dial.address}');
+        state.showToast(
+          widget.invite ? context.l10n.dialInvited(dial.address) : context.l10n.dialConnected(dial.address),
+        );
         Navigator.of(context).pop();
       });
     }
-    final failure = error == null ? null : dialFailure(error, address: dial!.address, invite: widget.invite);
-    final hint = widget.invite
-        ? '那台电脑要开着 ScreenFerry，选的是“被控制”。地址在它的「设备」页上；不写端口时用 24811。'
-        : '可以是 IP、IP:端口或电脑名，不写端口时用 24810。地址在那台电脑的「设备」页上。';
+    final failure = error == null
+        ? null
+        : dialFailure(context.l10n, error, address: dial!.address, invite: widget.invite);
+    final hint = widget.invite ? context.l10n.dialInviteHint : context.l10n.dialConnectHint;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -105,13 +108,13 @@ class _AddressDialogState extends State<AddressDialog> {
                             Semantics(
                               header: true,
                               child: Text(
-                                widget.invite ? '邀请一台电脑' : '按地址连接',
+                                widget.invite ? context.l10n.dialInviteTitle : context.l10n.dialConnectTitle,
                                 style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
                               ),
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              widget.invite ? '输入被控制那台的地址，它会自动连过来' : '输入控制端（键盘鼠标所在那台）的地址',
+                              widget.invite ? context.l10n.dialInviteSubtitle : context.l10n.dialConnectSubtitle,
                               style: TextStyle(fontSize: 14, color: c.muted),
                             ),
                           ],
@@ -119,14 +122,14 @@ class _AddressDialogState extends State<AddressDialog> {
                       ),
                       SfIconButton(
                         icon: Icons.close_rounded,
-                        tooltip: '关闭',
+                        tooltip: context.l10n.commonClose,
                         onPressed: () => Navigator.of(context).pop(),
                       ),
                     ],
                   ),
                   const SizedBox(height: 18),
                   Text(
-                    '地址',
+                    context.l10n.dialAddress,
                     style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: c.muted),
                   ),
                   const SizedBox(height: 8),
@@ -143,7 +146,7 @@ class _AddressDialogState extends State<AddressDialog> {
                     ),
                     decoration: InputDecoration(
                       isDense: true,
-                      hintText: widget.invite ? '例如 192.168.2.18' : '例如 192.168.2.12',
+                      hintText: context.l10n.dialExample(widget.invite ? '192.168.2.18' : '192.168.2.12'),
                       hintStyle: TextStyle(color: c.muted, fontWeight: FontWeight.w500),
                       filled: true,
                       fillColor: c.card,
@@ -180,7 +183,9 @@ class _AddressDialogState extends State<AddressDialog> {
                             const SizedBox(width: 12),
                             Expanded(
                               child: Text(
-                                widget.invite ? '正在邀请 ${dial.address}…' : '正在连接 ${dial.address}…',
+                                widget.invite
+                                    ? context.l10n.dialInviting(dial.address)
+                                    : context.l10n.dialConnecting(dial.address),
                                 style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
                               ),
                             ),
@@ -223,10 +228,16 @@ class _AddressDialogState extends State<AddressDialog> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
-                      PillButton(label: '取消', soft: true, onPressed: () => Navigator.of(context).pop()),
+                      PillButton(
+                        label: context.l10n.commonCancel,
+                        soft: true,
+                        onPressed: () => Navigator.of(context).pop(),
+                      ),
                       const SizedBox(width: 10),
                       PillButton(
-                        label: error != null ? '重试' : (widget.invite ? '邀请' : '连接'),
+                        label: error != null
+                            ? context.l10n.dialRetry
+                            : (widget.invite ? context.l10n.dialInvite : context.l10n.dialConnect),
                         primary: true,
                         onPressed: state.online && !connecting && _controller.text.trim().isNotEmpty
                             ? () => _go(state)

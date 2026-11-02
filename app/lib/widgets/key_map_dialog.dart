@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../l10n/l10n.dart';
 import '../ipc/messages.dart';
 import '../state/key_names.dart';
 import '../theme/tokens.dart';
@@ -20,7 +21,7 @@ Future<KeyMapping?> showKeyMapDialog(
   return showGeneralDialog<KeyMapping>(
     context: context,
     barrierDismissible: true,
-    barrierLabel: '添加按键映射',
+    barrierLabel: context.l10n.keyMapTitle,
     barrierColor: Colors.black.withValues(alpha: 0.34),
     transitionDuration: const Duration(milliseconds: 320),
     pageBuilder: (context, _, _) => KeyMapDialog(peerName: peerName, localMac: localMac, peerMac: peerMac),
@@ -91,8 +92,8 @@ class _KeyMapDialogState extends State<KeyMapDialog> {
     return KeyEventResult.handled;
   }
 
-  String _local(int code) => keyName(code, mac: widget.localMac);
-  String _target(int code) => code == 0 ? '不发送' : keyName(code, mac: widget.peerMac);
+  String _local(int code) => keyName(context.l10n, code, mac: widget.localMac);
+  String _target(int code) => code == 0 ? context.l10n.keyMapNothing : keyName(context.l10n, code, mac: widget.peerMac);
 
   /// 网格里列出的目标键：没输入搜索时是常用键，否则是名字里含着输入的键。
   List<int> get _choices {
@@ -132,22 +133,28 @@ class _KeyMapDialogState extends State<KeyMapDialog> {
                           children: [
                             Semantics(
                               header: true,
-                              child: const Text('添加按键映射', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+                              child: Text(
+                                context.l10n.keyMapTitle,
+                                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                              ),
                             ),
                             const SizedBox(height: 4),
-                            Text('只对 ${widget.peerName} 生效', style: TextStyle(fontSize: 14, color: c.muted)),
+                            Text(
+                              context.l10n.keyMapOnlyFor(widget.peerName),
+                              style: TextStyle(fontSize: 14, color: c.muted),
+                            ),
                           ],
                         ),
                       ),
                       SfIconButton(
                         icon: Icons.close_rounded,
-                        tooltip: '关闭',
+                        tooltip: context.l10n.commonClose,
                         onPressed: () => Navigator.of(context).pop(),
                       ),
                     ],
                   ),
                   const SizedBox(height: 18),
-                  _label(c, '① 本机按哪个键'),
+                  _label(c, context.l10n.keyMapStep1),
                   const SizedBox(height: 8),
                   Focus(
                     focusNode: _recorder,
@@ -157,7 +164,7 @@ class _KeyMapDialogState extends State<KeyMapDialog> {
                       color: _recording ? c.accentSoft : c.card2,
                       radius: 16,
                       pressScale: 0.99,
-                      semanticLabel: _recording ? '正在录制，按一个键' : '重新录制',
+                      semanticLabel: _recording ? context.l10n.keyMapRecording : context.l10n.keyMapRerecord,
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       child: SizedBox(
                         height: 60,
@@ -170,22 +177,28 @@ class _KeyMapDialogState extends State<KeyMapDialog> {
                                 decoration: BoxDecoration(color: c.accent, shape: BoxShape.circle),
                               ),
                               const SizedBox(width: 12),
-                              const Expanded(
-                                child: Text('请在键盘上按一个键…', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                              Expanded(
+                                child: Text(
+                                  context.l10n.keyMapPressAKey,
+                                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                                ),
                               ),
-                              Text('Esc 取消', style: TextStyle(fontSize: 13, color: c.muted)),
+                              Text(context.l10n.keyMapEscCancels, style: TextStyle(fontSize: 13, color: c.muted)),
                             ] else if (from != null) ...[
                               KeyCap(_local(from)),
                               const SizedBox(width: 10),
-                              Text('已录下', style: TextStyle(fontSize: 14, color: c.muted)),
+                              Text(context.l10n.keyMapRecorded, style: TextStyle(fontSize: 14, color: c.muted)),
                               const Spacer(),
                               Text(
-                                '重新录制',
+                                context.l10n.keyMapRerecord,
                                 style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: c.accent),
                               ),
                             ] else ...[
                               Expanded(
-                                child: Text('点这里，再按一个键', style: TextStyle(fontSize: 15, color: c.muted)),
+                                child: Text(
+                                  context.l10n.keyMapClickToRecord,
+                                  style: TextStyle(fontSize: 15, color: c.muted),
+                                ),
                               ),
                             ],
                           ],
@@ -194,16 +207,16 @@ class _KeyMapDialogState extends State<KeyMapDialog> {
                     ),
                   ),
                   const SizedBox(height: 6),
-                  Text('也能录单个修饰键，左右分开算。', style: TextStyle(fontSize: 13, color: c.muted)),
+                  Text(context.l10n.keyMapModifiersToo, style: TextStyle(fontSize: 13, color: c.muted)),
                   const SizedBox(height: 18),
-                  _label(c, '② ${widget.peerName} 收到什么'),
+                  _label(c, context.l10n.keyMapStep2(widget.peerName)),
                   const SizedBox(height: 8),
                   TextField(
                     controller: _search,
                     decoration: InputDecoration(
                       isDense: true,
                       prefixIcon: Icon(Icons.search_rounded, size: 20, color: c.muted),
-                      hintText: '搜索按键，例如 Home、F5、音量',
+                      hintText: context.l10n.keyMapSearch,
                       hintStyle: TextStyle(color: c.muted),
                       filled: true,
                       fillColor: c.card2,
@@ -230,13 +243,19 @@ class _KeyMapDialogState extends State<KeyMapDialog> {
                         runSpacing: 8,
                         crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
-                          const Text('按', style: TextStyle(fontWeight: FontWeight.w600)),
+                          Text(context.l10n.keyMapPress, style: const TextStyle(fontWeight: FontWeight.w600)),
                           KeyCap(_local(from)),
                           const Icon(Icons.arrow_forward_rounded, size: 18),
                           if (to == 0)
-                            Text('${widget.peerName} 什么也收不到', style: const TextStyle(fontWeight: FontWeight.w600))
+                            Text(
+                              context.l10n.keyMapGetsNothing(widget.peerName),
+                              style: const TextStyle(fontWeight: FontWeight.w600),
+                            )
                           else ...[
-                            Text('${widget.peerName} 收到', style: const TextStyle(fontWeight: FontWeight.w600)),
+                            Text(
+                              context.l10n.keyMapGets(widget.peerName),
+                              style: const TextStyle(fontWeight: FontWeight.w600),
+                            ),
                             KeyCap(_target(to)),
                           ],
                         ],
@@ -247,10 +266,14 @@ class _KeyMapDialogState extends State<KeyMapDialog> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
-                      PillButton(label: '取消', soft: true, onPressed: () => Navigator.of(context).pop()),
+                      PillButton(
+                        label: context.l10n.commonCancel,
+                        soft: true,
+                        onPressed: () => Navigator.of(context).pop(),
+                      ),
                       const SizedBox(width: 10),
                       PillButton(
-                        label: '添加',
+                        label: context.l10n.keyMapAdd,
                         primary: true,
                         onPressed: from != null && to != null
                             ? () => Navigator.of(context).pop(KeyMapping(from, to))

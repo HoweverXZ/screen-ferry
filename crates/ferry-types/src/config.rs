@@ -43,6 +43,56 @@ pub enum Theme {
     Dark,
 }
 
+/// 界面语言的选择：设置界面、托盘菜单、屏幕边缘的胶囊都用它（ADR 0013）。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Language {
+    /// 跟随系统。
+    #[default]
+    System,
+    /// 简体中文。
+    Zh,
+    En,
+}
+
+impl Language {
+    /// 实际用的语言：跟随系统时用 `system`。
+    pub fn resolve(self, system: Lang) -> Lang {
+        match self {
+            Self::System => system,
+            Self::Zh => Lang::Zh,
+            Self::En => Lang::En,
+        }
+    }
+}
+
+/// 实际用的语言。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Lang {
+    #[default]
+    Zh,
+    En,
+}
+
+impl Lang {
+    /// 系统语言的标签（`zh-Hans-CN`、`zh_TW`、`en-US` 等）对应的语言：中文都用简体中文，其他用英文。
+    pub fn from_tag(tag: &str) -> Self {
+        if tag.to_ascii_lowercase().starts_with("zh") {
+            Self::Zh
+        } else {
+            Self::En
+        }
+    }
+
+    /// 按语言挑一种说法。
+    pub fn pick<T>(self, zh: T, en: T) -> T {
+        match self {
+            Self::Zh => zh,
+            Self::En => en,
+        }
+    }
+}
+
 /// `config.toml`。缺少的字段取缺省值，不认识的字段忽略。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -68,6 +118,8 @@ pub struct Config {
     pub theme: Theme,
     /// 设置界面的强调色，界面预设颜色的序号。
     pub accent: u8,
+    /// 界面语言。
+    pub language: Language,
     /// 服务端：单独安排过位置的设备，按先后排列。同一侧的几台按这个先后平分那条边，
     /// 没有列出的设备放在 `side` 一侧、排在列出的后面。
     ///
@@ -85,7 +137,8 @@ impl Config {
     /// - 3：新增 `clipboard_limit_mb`（缺省 32，与之前固定的上限相同）。
     /// - 4：去掉 `swap_cmd_ctrl`，改为每台设备的 `devices.modifiers`；新增 `mouse_dpi`（缺省 1600）。
     ///   版本 3 里 `swap_cmd_ctrl = false` 的，迁移时给每台已配对的设备写上 `modifiers = "plain"`。
-    pub const SCHEMA_VERSION: u32 = 4;
+    /// - 5：新增 `language`（缺省 `system`，跟随系统；以前总是中文）。
+    pub const SCHEMA_VERSION: u32 = 5;
 
     /// 剪贴板单项大小上限的取值范围（MB）。
     pub const CLIPBOARD_LIMIT_MB: std::ops::RangeInclusive<u32> = 1..=64;
@@ -153,6 +206,7 @@ impl Default for Config {
             server: String::new(),
             theme: Theme::System,
             accent: 0,
+            language: Language::System,
             layout: Vec::new(),
             devices: Vec::new(),
         }

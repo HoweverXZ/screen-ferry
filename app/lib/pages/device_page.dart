@@ -6,6 +6,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../l10n/l10n.dart';
 import '../state/app_scope.dart';
 import '../state/app_state.dart';
 import '../state/key_names.dart';
@@ -37,34 +38,35 @@ class DevicePage extends StatelessWidget {
     ValueChanged<T>? change<T>(DeviceSettings Function(T) next) =>
         state.online ? (v) => state.setDevice(next(v)) : null;
     // 本机被控制时，键鼠方面的设置现在不起作用。
-    final later = server ? null : '本机控制它时生效';
+    final l = context.l10n;
+    final later = server ? null : l.deviceLater;
     return PageScaffold(
-      title: '设备',
-      leading: SfIconButton(icon: Icons.arrow_back_rounded, tooltip: '返回设备列表', onPressed: state.closeDevice),
+      title: l.navDevices,
+      leading: SfIconButton(icon: Icons.arrow_back_rounded, tooltip: l.deviceBack, onPressed: state.closeDevice),
       children: [
         _Header(peer: peer, settings: d),
         if (!server) _ControlledBanner(peer: peer),
-        SectionTitle('鼠标', note: later),
+        SectionTitle(l.deviceMouse, note: later),
         SfGroup(
           children: [
             _PointerSpeed(settings: d),
             SfRow(
               icon: Icons.swap_vert_rounded,
-              title: '垂直滚动反向',
-              subtitle: '上下滚动的方向反过来',
+              title: l.deviceInvertVertical,
+              subtitle: l.deviceInvertVerticalHint,
               trailing: SfSwitch(
                 value: d.reverseVertical,
-                label: '垂直滚动反向',
+                label: l.deviceInvertVertical,
                 onChanged: change((bool v) => d.copyWith(reverseVertical: v)),
               ),
             ),
             SfRow(
               icon: Icons.swap_horiz_rounded,
-              title: '水平滚动反向',
-              subtitle: '左右滚动的方向反过来',
+              title: l.deviceInvertHorizontal,
+              subtitle: l.deviceInvertHorizontalHint,
               trailing: SfSwitch(
                 value: d.reverseHorizontal,
-                label: '水平滚动反向',
+                label: l.deviceInvertHorizontal,
                 onChanged: change((bool v) => d.copyWith(reverseHorizontal: v)),
               ),
             ),
@@ -73,22 +75,25 @@ class DevicePage extends StatelessWidget {
               children: [
                 SfRow(
                   icon: Icons.speed_rounded,
-                  title: '滚动速度',
-                  subtitle: '触控板的细小滚动到了这台上偏慢或偏快时调',
+                  title: l.deviceScrollSpeed,
+                  subtitle: l.deviceScrollSpeedHint,
                   trailing: SfSegmented<ScrollSpeed>(
-                    label: '滚动速度',
-                    segments: const [(ScrollSpeed.slow, '慢'), (ScrollSpeed.normal, '标准'), (ScrollSpeed.fast, '快')],
+                    label: l.deviceScrollSpeed,
+                    segments: [
+                      (ScrollSpeed.slow, l.deviceSlow),
+                      (ScrollSpeed.normal, l.deviceNormal),
+                      (ScrollSpeed.fast, l.deviceFast),
+                    ],
                     value: d.scrollSpeed,
                     onChanged: change((ScrollSpeed v) => d.copyWith(scrollSpeed: v)),
                   ),
                 ),
-                if (server && state.naturalScrolling && !peerMac)
-                  const _Tip('本机开着“自然滚动”，在这台上也按自然方向滚。想和普通鼠标一样，打开“垂直滚动反向”。'),
+                if (server && state.naturalScrolling && !peerMac) _Tip(l.deviceNaturalTip),
               ],
             ),
           ],
         ),
-        SectionTitle('按键', note: later),
+        SectionTitle(l.deviceKeys, note: later),
         SfGroup(
           children: [
             Column(
@@ -96,14 +101,14 @@ class DevicePage extends StatelessWidget {
               children: [
                 SfRow(
                   icon: Icons.keyboard_alt_outlined,
-                  title: '修饰键',
-                  subtitle: _presetNote(d.modifiers, differ: differ, localMac: localMac, name: name),
+                  title: l.deviceModifiers,
+                  subtitle: _presetNote(l, d.modifiers, differ: differ, localMac: localMac, name: name),
                   trailing: SfSegmented<ModifierPreset>(
-                    label: '修饰键方案',
+                    label: l.deviceModifierPreset,
                     segments: [
-                      (ModifierPreset.habit, localMac ? 'Mac 习惯' : 'Windows 习惯'),
-                      (ModifierPreset.plain, '原样'),
-                      (ModifierPreset.custom, '自定义'),
+                      (ModifierPreset.habit, localMac ? l.deviceMacHabit : l.deviceWindowsHabit),
+                      (ModifierPreset.plain, l.deviceAsIs),
+                      (ModifierPreset.custom, l.deviceCustom),
                     ],
                     value: d.modifiers,
                     onChanged: change(
@@ -137,10 +142,10 @@ class DevicePage extends StatelessWidget {
               children: [
                 SfRow(
                   icon: Icons.compare_arrows_rounded,
-                  title: '其他按键映射',
-                  subtitle: '把一个键换成另一个键，或者不发送',
+                  title: l.deviceOtherKeys,
+                  subtitle: l.deviceOtherKeysHint,
                   trailing: SmallButton(
-                    label: '添加',
+                    label: l.keyMapAdd,
                     tone: PillTone.accent,
                     onPressed: state.online ? () => _addMapping(context, localMac: localMac, peerMac: peerMac) : null,
                   ),
@@ -166,55 +171,55 @@ class DevicePage extends StatelessWidget {
             if (differ)
               SfRow(
                 icon: localMac ? Icons.keyboard_command_key_rounded : Icons.keyboard_control_key_rounded,
-                title: localMac ? '文本编辑快捷键按 Mac 习惯' : '文本编辑快捷键按 Windows 习惯',
-                subtitle: localMac ? '⌘← ⌘→ 到行首行尾，⌥← ⌥→ 按词移动，⌘⌫ 删到行首' : 'Home End 到行首行尾，Ctrl+← Ctrl+→ 按词移动',
+                title: localMac ? l.deviceTextMac : l.deviceTextWindows,
+                subtitle: localMac ? l.deviceTextMacHint : l.deviceTextWindowsHint,
                 trailing: SfSwitch(
                   value: d.textShortcuts,
-                  label: '文本编辑快捷键',
+                  label: l.deviceTextShortcuts,
                   onChanged: change((bool v) => d.copyWith(textShortcuts: v)),
                 ),
               ),
           ],
         ),
-        const SectionTitle('切换与共享'),
+        SectionTitle(l.deviceSwitching),
         SfGroup(
           children: [
             SfRow(
               icon: Icons.timer_outlined,
-              title: '防止误切过去',
-              subtitle: server ? '光标在边上停一会儿才切到这台' : '本机控制它时，光标在边上停一会儿才切过去',
+              title: l.deviceDwell,
+              subtitle: server ? l.deviceDwellServerHint : l.deviceDwellClientHint,
               trailing: SfSegmented<int>(
-                label: '切过去前在边上停多久',
-                segments: const [(0, '关'), (200, '0.2 秒'), (500, '0.5 秒')],
+                label: l.deviceDwellLabel,
+                segments: [(0, l.deviceOff), (200, l.deviceSeconds('0.2')), (500, l.deviceSeconds('0.5'))],
                 value: d.edgeDelayMs,
                 onChanged: change((int v) => d.copyWith(edgeDelayMs: v)),
               ),
             ),
             SfRow(
               icon: Icons.content_paste_rounded,
-              title: '同步剪贴板',
-              subtitle: state.settings.clipboard ? '和这台之间同步复制的内容' : '“设置”里的剪贴板总开关关着',
+              title: l.settingsClipboard,
+              subtitle: state.settings.clipboard ? l.deviceClipboardHint : l.deviceClipboardOffHint,
               trailing: SfSwitch(
                 value: d.clipboard && state.settings.clipboard,
-                label: '和这台同步剪贴板',
+                label: l.deviceClipboardLabel,
                 onChanged: state.settings.clipboard ? change((bool v) => d.copyWith(clipboard: v)) : null,
               ),
             ),
             SfRow(
               icon: Icons.upload_file_outlined,
-              title: '拖文件给它',
-              subtitle: '把文件拖到朝向它的屏幕边上就发过去',
+              title: l.deviceDropFiles,
+              subtitle: l.deviceDropFilesHint,
               trailing: SfSwitch(
                 value: d.files,
-                label: '拖文件给它',
+                label: l.deviceDropFiles,
                 onChanged: change((bool v) => d.copyWith(files: v)),
               ),
             ),
           ],
         ),
-        const SectionTitle('连接'),
+        SectionTitle(l.deviceConnection),
         _Connection(peer: peer, server: state.settings.server),
-        const SectionTitle('这台设备'),
+        SectionTitle(l.deviceThisDevice),
         _Manage(peer: peer, settings: d),
       ],
     );
@@ -239,14 +244,19 @@ class DevicePage extends StatelessWidget {
 }
 
 /// 修饰键方案下面的一句说明。
-String _presetNote(ModifierPreset preset, {required bool differ, required bool localMac, required String name}) =>
-    switch (preset) {
-      ModifierPreset.habit when differ => localMac ? '在 $name 上按 ⌘C、⌘V 就是复制、粘贴' : '在 $name 上按 Ctrl+C、Ctrl+V 就是复制、粘贴',
-      ModifierPreset.habit => '两台是同一种键盘，原样发送',
-      ModifierPreset.plain when differ => localMac ? '原样发送：⌘ 到了那边是 Win 键' : '原样发送：Win 键到了那边是 ⌘',
-      ModifierPreset.plain => '原样发送',
-      ModifierPreset.custom => '按下面的对照表逐个对应',
-    };
+String _presetNote(
+  AppLocalizations l,
+  ModifierPreset preset, {
+  required bool differ,
+  required bool localMac,
+  required String name,
+}) => switch (preset) {
+  ModifierPreset.habit when differ => localMac ? l.devicePresetMacDiffer(name) : l.devicePresetWinDiffer(name),
+  ModifierPreset.habit => l.devicePresetSame,
+  ModifierPreset.plain when differ => localMac ? l.devicePresetPlainMac : l.devicePresetPlainWin,
+  ModifierPreset.plain => l.devicePresetPlain,
+  ModifierPreset.custom => l.devicePresetCustom,
+};
 
 // ── 头部与横幅 ───────────────────────────────
 
@@ -276,17 +286,18 @@ class _Header extends StatelessWidget {
               children: [
                 NameEditor(
                   name: peer.displayName,
-                  label: '在本机上叫它',
+                  label: context.l10n.deviceAlias,
                   placeholder: peer.name,
-                  hint: '只改本机上显示的名字，那台电脑自己的名字不变。留空就用原名。',
+                  hint: context.l10n.deviceAliasHint,
                   enabled: state.online,
                   onSave: (v) => state.setDevice(settings.copyWith(alias: v == peer.name ? '' : v)),
                 ),
-                if (renamed) Text('原名 ${peer.name}', style: TextStyle(fontSize: 13, color: c.muted)),
+                if (renamed)
+                  Text(context.l10n.deviceOriginalName(peer.name), style: TextStyle(fontSize: 13, color: c.muted)),
                 const SizedBox(height: 4),
                 Text.rich(
                   TextSpan(
-                    text: '${state.peerIsMac(peer) ? 'macOS' : 'Windows'} · 指纹 ',
+                    text: context.l10n.deviceSystemFingerprint(state.peerIsMac(peer) ? 'macOS' : 'Windows'),
                     children: [
                       TextSpan(
                         text: peer.short,
@@ -302,16 +313,19 @@ class _Header extends StatelessWidget {
                   runSpacing: 8,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    Pill(peer.online ? '在线' : seenText(peer), tone: peer.online ? PillTone.good : PillTone.plain),
+                    Pill(
+                      peer.online ? context.l10n.seenOnline : seenText(context.l10n, peer),
+                      tone: peer.online ? PillTone.good : PillTone.plain,
+                    ),
                     if (peer.online && addr.isNotEmpty)
                       Text(
                         addr,
                         style: TextStyle(fontSize: 13, color: c.muted, fontFeatures: tabular),
                       ),
-                    if (!state.isServer && peer.online) const Pill('控制着本机', tone: PillTone.accent),
+                    if (!state.isServer && peer.online) Pill(context.l10n.deviceControlsThis, tone: PillTone.accent),
                     if (place != null)
                       TextLink(
-                        label: '在本机${place.side.label} · 调整位置',
+                        label: context.l10n.devicePlaceAdjust(place.side.name),
                         chevron: true,
                         onPressed: () => state.go(SfPage.layout),
                       ),
@@ -346,13 +360,13 @@ class _ControlledBanner extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('本机现在是被控制的一方', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+            Text(context.l10n.deviceControlled, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
             const SizedBox(height: 4),
-            Text('鼠标、按键和防误切在本机控制它时才生效。被它控制时的滚动方向和按键，要在 $name 上改。', style: const TextStyle(fontSize: 14, height: 1.5)),
+            Text(context.l10n.deviceControlledHint(name), style: const TextStyle(fontSize: 14, height: 1.5)),
           ],
         ),
         trailing: PillButton(
-          label: '在 $name 上打开',
+          label: context.l10n.deviceOpenOn(name),
           icon: Icons.open_in_new_rounded,
           primary: true,
           onPressed: state.online && peer.online ? () => state.openPeerSettings(peer) : null,
@@ -436,12 +450,12 @@ class _PointerSpeedState extends State<_PointerSpeed> {
             children: [
               const IconTile(Icons.mouse_outlined),
               const SizedBox(width: 14),
-              const Expanded(
+              Expanded(
                 child: Text(
-                  '光标速度',
+                  context.l10n.devicePointerSpeed,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                 ),
               ),
               Text(
@@ -456,7 +470,7 @@ class _PointerSpeedState extends State<_PointerSpeed> {
               const SizedBox(width: 10),
               DpiField(
                 value: shown,
-                label: '光标速度',
+                label: context.l10n.devicePointerSpeed,
                 min: range.min,
                 max: range.max,
                 highlight: changed,
@@ -493,7 +507,7 @@ class _PointerSpeedState extends State<_PointerSpeed> {
                             ),
                             Align(
                               alignment: Alignment(positionOf(base) * 2 - 1, 0),
-                              child: Text('$base · 本机', style: muted),
+                              child: Text(context.l10n.deviceBaseHere(base), style: muted),
                             ),
                             Align(
                               alignment: Alignment.centerRight,
@@ -506,7 +520,10 @@ class _PointerSpeedState extends State<_PointerSpeed> {
                   ),
                 ),
                 const SizedBox(width: 12),
-                SmallButton(label: '还原', onPressed: state.online && d.pointerDpi != 0 ? () => save(base) : null),
+                SmallButton(
+                  label: context.l10n.deviceReset,
+                  onPressed: state.online && d.pointerDpi != 0 ? () => save(base) : null,
+                ),
               ],
             ),
           ),
@@ -556,10 +573,15 @@ class _ModifierTable extends StatelessWidget {
         children: [
           Row(
             children: [
-              Expanded(child: Text('本机按', style: head)),
+              Expanded(child: Text(context.l10n.deviceLocalPress, style: head)),
               const SizedBox(width: 36),
               Expanded(
-                child: Text('$peerName 收到', maxLines: 1, overflow: TextOverflow.ellipsis, style: head),
+                child: Text(
+                  context.l10n.devicePeerGets(peerName),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: head,
+                ),
               ),
             ],
           ),
@@ -580,7 +602,7 @@ class _ModifierTable extends StatelessWidget {
                       value: map[key],
                       changed: map[key] != _same(key),
                       peerMac: peerMac,
-                      label: '${modifierKeyName(key, mac: localMac)} 在 $peerName 上变成',
+                      label: context.l10n.deviceModifierBecomes(modifierKeyName(key, mac: localMac), peerName),
                       onSelected: onChanged == null ? null : (t) => onChanged!(key, t),
                     ),
                   ),
@@ -624,7 +646,7 @@ class _TargetMenu extends StatelessWidget {
           PopupMenuItem(
             value: t,
             child: Text(
-              modifierTargetName(t, mac: peerMac),
+              modifierTargetName(context.l10n, t, mac: peerMac),
               style: const TextStyle(fontWeight: FontWeight.w600),
             ),
           ),
@@ -640,7 +662,7 @@ class _TargetMenu extends StatelessWidget {
           children: [
             Expanded(
               child: Text(
-                modifierTargetName(value, mac: peerMac),
+                modifierTargetName(context.l10n, value, mac: peerMac),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
@@ -683,21 +705,21 @@ class _Mappings extends StatelessWidget {
                       runSpacing: 6,
                       crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        KeyCap(keyName(m.from, mac: localMac)),
+                        KeyCap(keyName(context.l10n, m.from, mac: localMac)),
                         Icon(Icons.arrow_forward_rounded, size: 18, color: c.muted),
                         if (m.to == 0)
                           Text(
-                            '不发送',
+                            context.l10n.keyMapNothing,
                             style: TextStyle(fontWeight: FontWeight.w600, color: c.muted),
                           )
                         else
-                          KeyCap(keyName(m.to, mac: peerMac)),
+                          KeyCap(keyName(context.l10n, m.to, mac: peerMac)),
                       ],
                     ),
                   ),
                   SfIconButton(
                     icon: Icons.close_rounded,
-                    tooltip: '删除这条映射',
+                    tooltip: context.l10n.deviceDeleteMapping,
                     size: 34,
                     onPressed: onRemove == null ? null : () => onRemove!(m),
                   ),
@@ -772,19 +794,21 @@ class _ConnectionState extends State<_Connection> {
       children: [
         SfRow(
           icon: Icons.history_rounded,
-          title: '上次连上的地址',
-          subtitle: state.isServer ? '它上次从这个地址连过来' : '局域网里找不到它时，先试这个地址',
+          title: context.l10n.deviceLastAddress,
+          subtitle: state.isServer
+              ? context.l10n.deviceLastAddressServerHint
+              : context.l10n.deviceLastAddressClientHint,
           trailing: peer.addr.isEmpty
-              ? Text('还没有', style: TextStyle(fontSize: 14, color: c.muted))
+              ? Text(context.l10n.deviceNotYet, style: TextStyle(fontSize: 14, color: c.muted))
               : SelectableText(peer.addr, style: mono),
         ),
         if (state.isServer)
           SfRow(
             icon: Icons.login_rounded,
-            title: '邀请它连过来',
-            subtitle: peer.online ? '它已经连着本机' : '它在局域网里找不到本机、身边又没有键盘鼠标时用',
+            title: context.l10n.deviceInvite,
+            subtitle: peer.online ? context.l10n.deviceInviteOnlineHint : context.l10n.deviceInviteHint,
             trailing: SmallButton(
-              label: '邀请',
+              label: context.l10n.deviceInviteButton,
               tone: PillTone.accent,
               onPressed: state.online && !peer.online
                   ? () => showAddressDialog(context, invite: true, initial: peer.addr)
@@ -797,11 +821,11 @@ class _ConnectionState extends State<_Connection> {
             children: [
               SfRow(
                 icon: Icons.route_rounded,
-                title: '连接方式',
-                subtitle: fixed ? '只连下面这个地址，不在局域网里找' : '在局域网里找控制端，找不到时用上次连上的地址',
+                title: context.l10n.deviceConnectMode,
+                subtitle: fixed ? context.l10n.deviceFixedHint : context.l10n.deviceAutoHint,
                 trailing: SfSegmented<bool>(
-                  label: '连接方式',
-                  segments: const [(false, '自动寻找'), (true, '固定地址')],
+                  label: context.l10n.deviceConnectMode,
+                  segments: [(false, context.l10n.deviceAuto), (true, context.l10n.deviceFixed)],
                   value: fixed,
                   onChanged: state.online ? (v) => _choose(state, v) : null,
                 ),
@@ -817,7 +841,7 @@ class _ConnectionState extends State<_Connection> {
                           padding: const EdgeInsets.symmetric(horizontal: 12),
                           decoration: ShapeDecoration(color: c.card2, shape: continuous(12)),
                           child: Semantics(
-                            label: '控制端的地址',
+                            label: context.l10n.deviceServerAddress,
                             child: TextField(
                               controller: _controller,
                               enabled: state.online,
@@ -826,7 +850,7 @@ class _ConnectionState extends State<_Connection> {
                               decoration: InputDecoration(
                                 isDense: true,
                                 border: InputBorder.none,
-                                hintText: '例如 192.168.2.12 或 192.168.2.12:24810',
+                                hintText: context.l10n.deviceAddressExample,
                                 hintStyle: TextStyle(fontSize: 14, color: c.muted, fontWeight: FontWeight.w500),
                                 contentPadding: const EdgeInsets.symmetric(vertical: 10),
                               ),
@@ -836,7 +860,7 @@ class _ConnectionState extends State<_Connection> {
                       ),
                       const SizedBox(width: 10),
                       SmallButton(
-                        label: '保存',
+                        label: context.l10n.commonSave,
                         tone: PillTone.accent,
                         onPressed: state.online && text.isNotEmpty && text != server
                             ? () => _choose(state, true)
@@ -875,17 +899,17 @@ class _ManageState extends State<_Manage> {
       children: [
         SfRow(
           icon: Icons.restart_alt_rounded,
-          title: '恢复默认设置',
-          subtitle: '鼠标、按键、切换与共享都回到默认，名字保留',
+          title: context.l10n.deviceRestoreDefaults,
+          subtitle: context.l10n.deviceRestoreDefaultsHint,
           trailing: SmallButton(
-            label: '恢复',
+            label: context.l10n.deviceRestore,
             onPressed: state.online && d.reset() != d ? () => state.resetDevice(d.fingerprint) : null,
           ),
         ),
         SfRow(
           icon: Icons.link_off_rounded,
-          title: '移除这台设备',
-          subtitle: _confirming ? '确定吗？移除后需要重新配对，这台的设置一并删除' : '移除后需要重新配对',
+          title: context.l10n.deviceRemove,
+          subtitle: _confirming ? context.l10n.deviceRemoveConfirm : context.l10n.deviceRemoveHint,
           trailing: AnimatedSwitcher(
             duration: Motion.fast,
             child: _confirming
@@ -893,10 +917,13 @@ class _ManageState extends State<_Manage> {
                     key: const ValueKey('confirm'),
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      SmallButton(label: '取消', onPressed: () => setState(() => _confirming = false)),
+                      SmallButton(
+                        label: context.l10n.commonCancel,
+                        onPressed: () => setState(() => _confirming = false),
+                      ),
                       const SizedBox(width: 6),
                       SmallButton(
-                        label: '移除',
+                        label: context.l10n.deviceRemoveButton,
                         danger: true,
                         onPressed: state.online ? () => state.forget(widget.peer) : null,
                       ),
@@ -904,7 +931,7 @@ class _ManageState extends State<_Manage> {
                   )
                 : SmallButton(
                     key: const ValueKey('remove'),
-                    label: '移除',
+                    label: context.l10n.deviceRemoveButton,
                     danger: true,
                     onPressed: state.online ? () => setState(() => _confirming = true) : null,
                   ),

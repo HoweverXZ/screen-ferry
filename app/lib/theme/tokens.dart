@@ -170,16 +170,17 @@ class SfColors extends ThemeExtension<SfColors> {
 class AccentChoice {
   const AccentChoice(this.name, this.light, this.dark);
 
+  /// 颜色的标识（`blue` 等），界面按它显示当前语言的名字。
   final String name;
   final Color light;
   final Color dark;
 
   static const all = [
-    AccentChoice('蓝', Color(0xFF0A6CFF), Color(0xFF1F6FEB)),
-    AccentChoice('青', Color(0xFF00796B), Color(0xFF00796B)),
-    AccentChoice('紫', Color(0xFF6A4BD8), Color(0xFF6A4BD8)),
-    AccentChoice('橙', Color(0xFFC2410C), Color(0xFFC2410C)),
-    AccentChoice('粉', Color(0xFFC2185B), Color(0xFFC2185B)),
+    AccentChoice('blue', Color(0xFF0A6CFF), Color(0xFF1F6FEB)),
+    AccentChoice('teal', Color(0xFF00796B), Color(0xFF00796B)),
+    AccentChoice('purple', Color(0xFF6A4BD8), Color(0xFF6A4BD8)),
+    AccentChoice('orange', Color(0xFFC2410C), Color(0xFFC2410C)),
+    AccentChoice('pink', Color(0xFFC2185B), Color(0xFFC2185B)),
   ];
 }
 

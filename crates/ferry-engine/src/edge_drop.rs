@@ -19,7 +19,7 @@ use ferry_core::Side;
 use ferry_core::capsule::{Action, Avatar, Capsule, Glyph, Look, Tile, hit, place};
 use ferry_platform::{Overlay, OverlayEvent};
 use ferry_proto::{DropHint, HintState};
-use ferry_types::{Frame, Rgba};
+use ferry_types::{Frame, Lang, Rgba};
 use tokio::sync::{mpsc, watch};
 use tokio::time::{Instant, sleep_until};
 use tracing::warn;
@@ -149,6 +149,7 @@ pub struct EdgeDrop {
     feed: EdgeFeed,
     transfers: mpsc::UnboundedSender<TransferUpdate>,
     accent: watch::Sender<Rgba>,
+    lang: watch::Sender<Lang>,
     task: tokio::task::JoinHandle<()>,
 }
 
@@ -160,13 +161,19 @@ impl Drop for EdgeDrop {
 
 impl EdgeDrop {
     /// 在后台启动边缘投递。放下的文件交给 `files` 发送。
-    pub fn spawn<O: Overlay + 'static>(mut overlay: O, files: Files, accent: Rgba) -> Self {
+    pub fn spawn<O: Overlay + 'static>(
+        mut overlay: O,
+        files: Files,
+        accent: Rgba,
+        lang: Lang,
+    ) -> Self {
         let (pointer, pointer_rx) = watch::channel(Pointer::default());
         let (edges, edges_rx) = watch::channel(Vec::new());
         let (outgoing, _) = watch::channel(None);
         let (incoming, incoming_rx) = watch::channel(None);
         let (transfers, transfers_rx) = mpsc::unbounded_channel();
         let (accent_tx, accent_rx) = watch::channel(accent);
+        let (lang_tx, lang_rx) = watch::channel(lang);
         let (events_tx, events_rx) = mpsc::unbounded_channel();
         let started = overlay.start(Box::new(move |event| {
             let _ = events_tx.send(event);
@@ -184,6 +191,7 @@ impl EdgeDrop {
             transfers: transfers_rx,
             events: events_rx,
             accent: accent_rx,
+            lang: lang_rx,
             capsule: Capsule::new(),
             drag: None,
             job: None,
@@ -214,6 +222,7 @@ impl EdgeDrop {
             },
             transfers,
             accent: accent_tx,
+            lang: lang_tx,
             task: tokio::spawn(worker.run()),
         }
     }
@@ -231,6 +240,11 @@ impl EdgeDrop {
     /// 强调色变了。
     pub fn set_accent(&self, accent: Rgba) {
         self.accent.send_replace(accent);
+    }
+
+    /// 界面语言变了。
+    pub fn set_lang(&self, lang: Lang) {
+        self.lang.send_replace(lang);
     }
 }
 
@@ -289,6 +303,7 @@ struct Worker<O> {
     transfers: mpsc::UnboundedReceiver<TransferUpdate>,
     events: mpsc::UnboundedReceiver<OverlayEvent>,
     accent: watch::Receiver<Rgba>,
+    lang: watch::Receiver<Lang>,
     capsule: Capsule,
     drag: Option<Drag>,
     job: Option<Job>,
@@ -352,6 +367,7 @@ impl<O: Overlay> Worker<O> {
                     self.on_remote();
                 }
                 _ = self.accent.changed() => self.dirty = true,
+                _ = self.lang.changed() => self.dirty = true,
                 Some(update) = self.transfers.recv() => self.on_transfer(update),
                 Some(event) = self.events.recv() => self.on_event(event).await,
                 _ = sleep_or_never(wake) => {}
@@ -503,8 +519,12 @@ impl<O: Overlay> Worker<O> {
                         self.pending_along = Some(along);
                     }
                     Err(e) => {
-                        let look =
-                            wide(Avatar::Warn, ["发不出去", &e.to_string(), ""], Action::None);
+                        let lang = *self.lang.borrow();
+                        let look = wide(
+                            Avatar::Warn,
+                            [lang.pick("发不出去", "Couldn't send"), &e.to_string(), ""],
+                            Action::None,
+                        );
                         self.brief = Some(Brief {
                             look,
                             along,
@@ -571,7 +591,8 @@ impl<O: Overlay> Worker<O> {
 
     fn on_transfer(&mut self, update: TransferUpdate) {
         let along = self.transfer_along(&update);
-        let what = name_of(&update);
+        let lang = *self.lang.borrow();
+        let what = name_of(&update, lang);
         let id = update.peer;
         let peer = self.peer_name(&id);
         let brief = |look, until| {
@@ -594,10 +615,14 @@ impl<O: Overlay> Worker<O> {
                 return;
             }
             TransferState::Done { saved } if !update.outgoing => {
+                let size = size_text(update.bytes);
                 let look = Look::Card {
-                    from: format!("来自 {peer}"),
+                    from: lang.pick(format!("来自 {peer}"), format!("From {peer}")),
                     name: what.clone(),
-                    detail: format!("已保存到「下载」· {}", size_text(update.bytes)),
+                    detail: lang.pick(
+                        format!("已保存到「下载」· {size}"),
+                        format!("Saved to Downloads · {size}"),
+                    ),
                     tile: tile_of(&update, saved),
                     chip: true,
                 };
@@ -610,9 +635,10 @@ impl<O: Overlay> Worker<O> {
                 });
             }
             TransferState::Done { .. } => {
+                let to = lang.pick(format!("到 {peer}"), format!("to {peer}"));
                 let look = wide(
                     Avatar::Check,
-                    ["已发送", &format!("到 {peer}"), ""],
+                    [lang.pick("已发送", "Sent"), &to, ""],
                     Action::None,
                 );
                 self.brief = brief(look, BRIEF);
@@ -620,22 +646,34 @@ impl<O: Overlay> Worker<O> {
             TransferState::Interrupted => {
                 let look = wide(
                     Avatar::Warn,
-                    ["传输中断", &what, "重新连上后接着传"],
+                    [
+                        lang.pick("传输中断", "Transfer interrupted"),
+                        &what,
+                        lang.pick("重新连上后接着传", "Resumes after reconnecting"),
+                    ],
                     Action::None,
                 );
                 self.brief = brief(look, NOTICE);
             }
             TransferState::Cancelled { .. } => {
                 let detail = if update.outgoing {
-                    "没有发送"
+                    lang.pick("没有发送", "Nothing was sent")
                 } else {
-                    "临时文件已删除"
+                    lang.pick("临时文件已删除", "Partial files were deleted")
                 };
-                let look = wide(Avatar::Cross, ["已取消", detail, ""], Action::None);
+                let look = wide(
+                    Avatar::Cross,
+                    [lang.pick("已取消", "Cancelled"), detail, ""],
+                    Action::None,
+                );
                 self.brief = brief(look, BRIEF);
             }
             TransferState::Failed { reason } => {
-                let look = wide(Avatar::Warn, ["传输失败", &what, reason], Action::None);
+                let look = wide(
+                    Avatar::Warn,
+                    [lang.pick("传输失败", "Transfer failed"), &what, reason],
+                    Action::None,
+                );
                 self.brief = brief(look, NOTICE);
             }
         }
@@ -686,7 +724,12 @@ impl<O: Overlay> Worker<O> {
         let wanted = dragging
             .or_else(|| {
                 let job = self.job.as_ref()?;
-                Some((progress(&job.update), job.along, of(Some(job.update.peer))?))
+                let lang = *self.lang.borrow();
+                Some((
+                    progress(&job.update, lang),
+                    job.along,
+                    of(Some(job.update.peer))?,
+                ))
             })
             .or_else(|| self.receiving(&edges))
             .or_else(|| {
@@ -717,10 +760,19 @@ impl<O: Overlay> Worker<O> {
         let along = along_of(&edge, pointer);
         let offline = !edge.online;
         if drag.over {
+            let lang = *self.lang.borrow();
             let lines = if offline {
-                ["未连接".into(), edge.peer.clone(), "连上后才能发送".into()]
+                [
+                    lang.pick("未连接", "Not connected").into(),
+                    edge.peer.clone(),
+                    lang.pick("连上后才能发送", "Connect first to send").into(),
+                ]
             } else {
-                ["松手发送到".into(), edge.peer.clone(), files_text(files)]
+                [
+                    lang.pick("松手发送到", "Drop to send to").into(),
+                    edge.peer.clone(),
+                    files_text(files, lang),
+                ]
             };
             let look = Look::Wide {
                 avatar: Avatar::Device(peer_glyph()),
@@ -753,11 +805,8 @@ impl<O: Overlay> Worker<O> {
         let along = along_from(&edge, hint.along);
         let look = match hint.state {
             HintState::Over => {
-                let what = if hint.items > 1 {
-                    format!("{} 等 {} 项", hint.name, hint.items)
-                } else {
-                    hint.name.clone()
-                };
+                let lang = *self.lang.borrow();
+                let what = with_more(&hint.name, hint.items, lang);
                 let detail = if hint.bytes > 0 {
                     format!("{what} · {}", size_text(hint.bytes))
                 } else {
@@ -765,7 +814,11 @@ impl<O: Overlay> Worker<O> {
                 };
                 Look::Wide {
                     avatar: Avatar::Device(peer_glyph()),
-                    lines: [format!("来自 {}", edge.peer), "松手即接收".into(), detail],
+                    lines: [
+                        lang.pick(format!("来自 {}", edge.peer), format!("From {}", edge.peer)),
+                        lang.pick("松手即接收", "Drop to receive").into(),
+                        detail,
+                    ],
                     hot: true,
                     offline: false,
                     action: Action::None,
@@ -908,7 +961,15 @@ impl<O: Overlay> Worker<O> {
             .borrow()
             .iter()
             .find(|e| e.id == *peer)
-            .map_or_else(|| "对方".to_owned(), |e| e.peer.clone())
+            .map_or_else(
+                || {
+                    self.lang
+                        .borrow()
+                        .pick("对方", "the other computer")
+                        .to_owned()
+                },
+                |e| e.peer.clone(),
+            )
     }
 }
 
@@ -1035,7 +1096,7 @@ fn wide(avatar: Avatar, lines: [&str; 3], action: Action) -> Look {
 }
 
 /// 传输中的样子：进度环、百分比、名字、已传多少。
-fn progress(update: &TransferUpdate) -> Look {
+fn progress(update: &TransferUpdate, lang: Lang) -> Look {
     let fraction = if update.bytes == 0 {
         if matches!(update.state, TransferState::Running) {
             1.0
@@ -1047,25 +1108,33 @@ fn progress(update: &TransferUpdate) -> Look {
     };
     let pct = (fraction * 100.0).round() as u32;
     let verb = if update.outgoing {
-        "发送中"
+        lang.pick("发送中", "Sending")
     } else {
-        "接收中"
+        lang.pick("接收中", "Receiving")
     };
     let amount = format!("{} / {}", size_text(update.done), size_text(update.bytes));
     Look::Wide {
         avatar: Avatar::Ring(fraction),
-        lines: [format!("{verb} {pct}%"), name_of(update), amount],
+        lines: [format!("{verb} {pct}%"), name_of(update, lang), amount],
         hot: false,
         offline: false,
         action: Action::Cancel,
     }
 }
 
-fn name_of(update: &TransferUpdate) -> String {
-    if update.items > 1 {
-        format!("{} 等 {} 项", update.name, update.items)
+fn name_of(update: &TransferUpdate, lang: Lang) -> String {
+    with_more(&update.name, update.items, lang)
+}
+
+/// 第一项的名字，几项时带上数量：“报告.pdf 等 3 项”“报告.pdf and 2 more”。
+fn with_more(first: &str, items: u32, lang: Lang) -> String {
+    if items > 1 {
+        lang.pick(
+            format!("{first} 等 {items} 项"),
+            format!("{first} and {} more", items - 1),
+        )
     } else {
-        update.name.clone()
+        first.to_owned()
     }
 }
 
@@ -1094,17 +1163,13 @@ fn tile_of(update: &TransferUpdate, saved: &[PathBuf]) -> Tile {
 }
 
 /// 拖着的文件的说明：一个时是名字，多个时是第一个的名字和数量。
-fn files_text(files: &[PathBuf]) -> String {
+fn files_text(files: &[PathBuf], lang: Lang) -> String {
     let first = files
         .first()
         .and_then(|p| p.file_name())
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    if files.len() > 1 {
-        format!("{first} 等 {} 项", files.len())
-    } else {
-        first
-    }
+    with_more(&first, u32::try_from(files.len()).unwrap_or(u32::MAX), lang)
 }
 
 /// 文件大小，给人看的写法。

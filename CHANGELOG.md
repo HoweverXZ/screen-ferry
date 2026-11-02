@@ -167,6 +167,13 @@
   - 协议：新增能力位 `REMOTE_SETTINGS` 和消息 `OpenSettings`。本机通信升到版本 2：`settings.mouse_dpi`、`settings.devices`、
     `set_device`、`open_peer_settings`、`show_device`、`peers[].alias`、`peers[].platform`、`local.natural_scrolling`，
     去掉 `settings.swap_cmd_ctrl`。
+- 英文界面（ADR 0013）：设置界面、托盘菜单、拖文件的边缘胶囊和 Windows 安装程序都有英文和简体中文。
+  - 缺省跟随系统：系统语言是中文时用中文，其他用英文；可以在“设置 → 外观 → 语言”里改，托盘菜单和边缘胶囊跟着换。
+  - 活动记录和提示由界面按当前语言说：后台另带一个结构化的 `phrase`，原来的中文两行保留，界面认不出时照原文显示。
+  - 配置升到 `schema_version = 5`，新增 `language`；本机通信新增 `settings.language`、日志条目和 `toast` 的 `phrase`、
+    `problem.port`，版本仍是 2。
+  - README 改为英文，中文版移到 `README.zh-CN.md`。
+  - 运行日志、诊断文件和命令行仍是中文。
 - 运行日志与诊断导出（ADR 0012）：提问题时附上诊断文件，不用再去缓存目录里找日志。
   - “日志”页加第 6 个分段“运行日志”：导出诊断文件（存到“下载”）、复制摘要（版本、系统和最近 200 行，能直接贴进问题描述）、
     打开日志文件夹、去 GitHub 提问题（版本和系统预先填好），下面是实时的运行日志，可以只看警告和错误。

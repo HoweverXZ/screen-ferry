@@ -71,6 +71,10 @@ pub trait Host: Send + Sync + 'static {
     fn listen_port(&self) -> u16 {
         crate::DEFAULT_PORT
     }
+    /// 系统的界面语言。设置里选了“跟随系统”时用它。
+    fn system_language(&self) -> ferry_types::Lang {
+        ferry_types::Lang::Zh
+    }
     /// 本机系统和版本，例如“macOS 15.6 · arm64”。启动时问一次；不知道时为空。
     fn system(&self) -> String {
         String::new()
@@ -108,8 +112,10 @@ pub struct Summary {
     pub sharing: bool,
     /// 已连接时是对方的设备名。
     pub connected_to: Option<String>,
-    /// 妨碍工作的问题。
+    /// 妨碍工作的问题，已经按 `lang` 说好。
     pub problem: Option<String>,
+    /// 托盘菜单用的语言。
+    pub lang: ferry_types::Lang,
 }
 
 /// [`run`] 一侧：接收命令、发布简要状态。
@@ -250,7 +256,7 @@ pub async fn send_via_running(store: &Store, paths: Vec<String>) -> Result<Strin
     let reply = async {
         loop {
             match conn.recv::<Notice>().await {
-                Ok(Some(Notice::Toast { text })) => return Ok(text),
+                Ok(Some(Notice::Toast { text, .. })) => return Ok(text),
                 Ok(Some(_)) => {}
                 _ => return Err("ScreenFerry 没有回复".to_owned()),
             }

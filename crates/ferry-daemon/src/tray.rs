@@ -64,6 +64,8 @@ struct Tray {
     icon: TrayIcon,
     status: MenuItem,
     toggle: MenuItem,
+    open: MenuItem,
+    quit: MenuItem,
     connected: Icon,
     disconnected: Icon,
     shown: Option<Summary>,
@@ -128,6 +130,8 @@ pub(crate) fn install(handle: Handle) -> Result<(), Box<dyn std::error::Error>> 
             icon,
             status,
             toggle,
+            open,
+            quit,
             connected,
             disconnected,
             shown: None,
@@ -155,13 +159,17 @@ fn update(summary: &Summary) {
         if tray.shown.as_ref() == Some(summary) {
             return;
         }
+        let lang = summary.lang;
         let status = describe(summary);
         tray.status.set_text(&status);
         tray.toggle.set_text(if summary.sharing {
-            "暂停共享"
+            lang.pick("暂停共享", "Pause Sharing")
         } else {
-            "继续共享"
+            lang.pick("继续共享", "Resume Sharing")
         });
+        tray.open.set_text(lang.pick("打开设置", "Open Settings"));
+        tray.quit
+            .set_text(lang.pick("退出 ScreenFerry", "Quit ScreenFerry"));
         let linked = summary.sharing && summary.problem.is_none() && summary.connected_to.is_some();
         let icon = if linked {
             &tray.connected
@@ -190,10 +198,13 @@ fn describe(summary: &Summary) -> String {
         };
         return format!("⚠︎ {short}{ellipsis}");
     }
+    let lang = summary.lang;
     match (&summary.connected_to, summary.sharing) {
-        (_, false) => "已暂停共享".to_owned(),
-        (Some(peer), true) => format!("已连接 {peer}"),
-        (None, true) => "共享中 · 等待连接".to_owned(),
+        (_, false) => lang.pick("已暂停共享", "Sharing paused").to_owned(),
+        (Some(peer), true) => lang.pick(format!("已连接 {peer}"), format!("Connected to {peer}")),
+        (None, true) => lang
+            .pick("共享中 · 等待连接", "Sharing · Waiting for a connection")
+            .to_owned(),
     }
 }
 

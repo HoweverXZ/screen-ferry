@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../l10n/l10n.dart';
 import '../theme/tokens.dart';
 import 'surface.dart';
 
@@ -75,7 +76,12 @@ class _NameEditorState extends State<NameEditor> {
             child: Text(widget.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: widget.style),
           ),
           const SizedBox(width: 6),
-          SfIconButton(icon: Icons.edit_outlined, tooltip: '改名字', size: 32, onPressed: widget.enabled ? _start : null),
+          SfIconButton(
+            icon: Icons.edit_outlined,
+            tooltip: context.l10n.nameEditorRename,
+            size: 32,
+            onPressed: widget.enabled ? _start : null,
+          ),
         ],
       );
     }
@@ -127,8 +133,8 @@ class _NameEditorState extends State<NameEditor> {
                 ),
               ),
             ),
-            SmallButton(label: '保存', tone: PillTone.accent, onPressed: _save),
-            SmallButton(label: '取消', onPressed: _cancel),
+            SmallButton(label: context.l10n.commonSave, tone: PillTone.accent, onPressed: _save),
+            SmallButton(label: context.l10n.commonCancel, onPressed: _cancel),
           ],
         ),
         if (widget.hint != null) ...[

@@ -1,4 +1,4 @@
-; ScreenFerry 的 Windows 安装包。需要 Inno Setup 7.1 或更高版本（从这一版起自带简体中文）。
+; ScreenFerry 的 Windows 安装包，英文和简体中文两种语言。需要 Inno Setup 7.1 或更高版本（从这一版起自带简体中文）。
 ; 由 `cargo xtask bundle` 编译，它传入：
 ;   AppVersion  版本号，取自 Cargo.toml
 ;   SourceDir   组装好的程序目录：screenferry.exe 和 settings\
@@ -28,7 +28,7 @@ AppSupportURL={#Repo}/issues
 AppUpdatesURL={#Repo}/releases
 AppCopyright=MIT OR Apache-2.0
 VersionInfoVersion={#AppVersion}
-VersionInfoDescription={#AppName} 安装程序
+VersionInfoDescription={#AppName} Setup
 VersionInfoProductName={#AppName}
 ; 装进 Program Files，这台电脑上的所有用户都能用；要管理员权限，同时登记防火墙规则。
 PrivilegesRequired=admin
@@ -50,9 +50,19 @@ CloseApplications=yes
 RestartApplications=no
 ; 开机自启登记在当前用户名下（HKCU）：安装时改成新的位置，卸载时删掉（见 [Code]）。
 UsedUserAreasWarning=no
+; 按 Windows 的显示语言选：中文系统用简体中文，其他都用英文（排在第一个的语言），不弹出选择语言的对话框。
+LanguageDetectionMethod=uilanguage
+ShowLanguageDialog=no
 
 [Languages]
+Name: "en"; MessagesFile: "compiler:Default.isl"
 Name: "chs"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+
+[CustomMessages]
+en.AppComment=Share one keyboard and mouse between Mac and Windows
+chs.AppComment=在 Mac 与 Windows 之间共享一套键盘鼠标
+en.FirewallStatus=Configuring Windows Firewall…
+chs.FirewallStatus=正在设置 Windows 防火墙…
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
@@ -66,13 +76,13 @@ Source: "{#SourceDir}\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\settings\*"; DestDir: "{app}\settings"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"; Comment: "在 Mac 与 Windows 之间共享一套键盘鼠标"
+Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"; Comment: "{cm:AppComment}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
 
 [Run]
 ; 防火墙：允许本程序在专用网络和域网络上接受连接（键鼠、剪贴板、邀请、局域网发现），先删后加，重装不会重复。
 ; 公用网络不放行，连到公用网络时 Windows 会照常询问。
-Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""{#AppName}"""; Flags: runhidden waituntilterminated; StatusMsg: "正在设置 Windows 防火墙…"
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""{#AppName}"""; Flags: runhidden waituntilterminated; StatusMsg: "{cm:FirewallStatus}"
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""{#AppName}"" dir=in action=allow program=""{app}\{#AppExe}"" enable=yes profile=private,domain"; Flags: runhidden waituntilterminated
 ; 安装前正在运行的：装完马上以原来的用户身份重新启动，不弹出设置界面。
 ; 用户可能正从另一台电脑控制这台，这样不用等到点“完成”就能接着用键鼠。

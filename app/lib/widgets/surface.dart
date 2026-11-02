@@ -138,9 +138,13 @@ class Pill extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (icon != null) ...[Icon(icon, size: 15, color: fg), const SizedBox(width: 5)],
-          Text(
-            text,
-            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: fg, fontFeatures: tabular),
+          Flexible(
+            child: Text(
+              text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: fg, fontFeatures: tabular),
+            ),
           ),
         ],
       ),
@@ -208,7 +212,14 @@ class SectionTitle extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.baseline,
         textBaseline: TextBaseline.alphabetic,
         children: [
-          Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+          Flexible(
+            child: Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+            ),
+          ),
           if (note != null) ...[
             const SizedBox(width: 10),
             Flexible(
@@ -299,9 +310,13 @@ class PillButton extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (icon != null) ...[Icon(icon, size: 18, color: fg), const SizedBox(width: 8)],
-            Text(
-              label,
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: fg),
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: fg),
+              ),
             ),
           ],
         ),
@@ -369,9 +384,13 @@ class TextLink extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            label,
-            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: color),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: color),
+            ),
           ),
           if (chevron) Icon(Icons.chevron_right_rounded, size: 18, color: color),
         ],

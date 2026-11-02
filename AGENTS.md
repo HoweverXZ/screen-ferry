@@ -46,7 +46,8 @@ screen-ferry/
 ├─ .gitignore
 ├─ AGENTS.md               # 本规范
 ├─ CLAUDE.md               # 只有一行 @AGENTS.md，供 Claude Code 读取
-├─ README.md
+├─ README.md               # 英文；中文版是 README.zh-CN.md，两份同时改（ADR 0013）
+├─ README.zh-CN.md
 ├─ LICENSE-MIT             # 双许可证：MIT OR Apache-2.0
 ├─ LICENSE-APACHE
 ├─ CHANGELOG.md

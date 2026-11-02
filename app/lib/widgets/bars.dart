@@ -2,6 +2,7 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 
+import '../l10n/l10n.dart';
 import '../theme/tokens.dart';
 
 /// 往返延迟柱状图：最新的一根最亮，其余淡一些。
@@ -57,7 +58,7 @@ class HourBars extends StatelessWidget {
     final now = DateTime.now().hour;
     final top = max(1, counts.reduce(max));
     return Semantics(
-      label: '今日各小时的切换次数',
+      label: context.l10n.chartSwitchesLabel,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -82,9 +83,9 @@ class HourBars extends StatelessWidget {
           const SizedBox(height: 6),
           DefaultTextStyle(
             style: TextStyle(fontSize: 12, color: c.muted),
-            child: const Row(
+            child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [Text('0 时'), Text('12 时'), Text('现在')],
+              children: [Text(context.l10n.chartMidnight), Text(context.l10n.chartNoon), Text(context.l10n.chartNow)],
             ),
           ),
         ],

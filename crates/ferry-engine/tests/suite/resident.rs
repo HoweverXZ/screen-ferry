@@ -207,7 +207,13 @@ async fn the_ui_sees_the_state_and_can_pause_sharing() {
 
     ui.send(Request::SetSharing { on: false }).await;
     ui.wait("暂停的提示", |n| match n {
-        Notice::Toast { text } if text == "已暂停共享" => Some(()),
+        Notice::Toast { text, phrase } if text == "已暂停共享" => {
+            assert_eq!(
+                phrase.as_ref().map(|p| p.key.as_str()),
+                Some("sharing_paused")
+            );
+            Some(())
+        }
         _ => None,
     })
     .await;
@@ -746,5 +752,43 @@ async fn verbose_logging_can_be_switched_on_and_off() {
     ui.state_where("详细记录关闭", |s| s.local.verbose_since.is_none())
         .await;
     assert!(!daemon.host.verbose.load(Ordering::SeqCst));
+    daemon.task.abort();
+}
+
+#[tokio::test]
+async fn the_language_is_saved_and_log_entries_say_what_happened() {
+    use ferry_types::Language;
+
+    let daemon = Daemon::start(MockHost::default()).await;
+    let mut ui = daemon.ui().await;
+    let entries = ui
+        .wait("已有的日志", |n| match n {
+            Notice::History { entries } => Some(entries.clone()),
+            _ => None,
+        })
+        .await;
+    let started = entries
+        .iter()
+        .find_map(|e| e.phrase.as_ref().filter(|p| p.key == "started"))
+        .expect("启动那条日志带着 phrase");
+    assert_eq!(started.args["role"], "server");
+    assert!(!started.args["name"].is_empty());
+
+    let state = ui.state_where("首次状态", |_| true).await;
+    assert_eq!(state.settings.language, Language::System);
+    ui.send(Request::UpdateSettings {
+        settings: SettingsPatch {
+            language: Some(Language::En),
+            ..SettingsPatch::default()
+        },
+    })
+    .await;
+    ui.state_where("改成英文", |s| s.settings.language == Language::En)
+        .await;
+    assert_eq!(
+        daemon.device.store.config().unwrap().language,
+        Language::En,
+        "存进 config.toml"
+    );
     daemon.task.abort();
 }

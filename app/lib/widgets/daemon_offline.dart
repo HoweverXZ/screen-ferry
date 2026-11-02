@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 
+import '../l10n/l10n.dart';
 import '../ipc/launcher.dart';
 import '../state/app_scope.dart';
 import '../state/app_state.dart';
@@ -36,13 +37,13 @@ class DaemonOffline extends StatelessWidget {
               ),
               const SizedBox(height: 22),
               Text(
-                connecting ? '正在连接后台…' : '后台没有运行',
+                connecting ? context.l10n.offlineConnecting : context.l10n.offlineNotRunning,
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
               ),
               const SizedBox(height: 8),
               Text(
-                daemon == null ? '请先启动 ScreenFerry，连上后会自动显示。' : '启动后会自动连上。',
+                daemon == null ? context.l10n.offlineStartHint : context.l10n.offlineAutoConnect,
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 15, color: c.muted, height: 1.6),
               ),
@@ -74,7 +75,7 @@ class _StartButtonState extends State<_StartButton> {
     setState(() => _starting = true);
     final ok = await startDaemon(widget.daemon);
     if (!mounted) return;
-    if (!ok) AppScope.read(context).showToast('启动失败，请在“应用程序”中打开 ScreenFerry');
+    if (!ok) AppScope.read(context).showToast(context.l10n.offlineStartFailed);
     await Future<void>.delayed(const Duration(seconds: 4));
     if (mounted) setState(() => _starting = false);
   }
@@ -82,7 +83,7 @@ class _StartButtonState extends State<_StartButton> {
   @override
   Widget build(BuildContext context) {
     return PillButton(
-      label: _starting ? '正在启动…' : '启动 ScreenFerry',
+      label: _starting ? context.l10n.offlineStarting : context.l10n.offlineStart,
       icon: Icons.play_arrow_rounded,
       onPressed: _starting ? null : _start,
     );
@@ -110,7 +111,7 @@ class _RetryingState extends State<_Retrying> with SingleTickerProviderStateMixi
   Widget build(BuildContext context) {
     final c = SfColors.of(context);
     return Semantics(
-      label: '正在重试',
+      label: context.l10n.offlineRetrying,
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [

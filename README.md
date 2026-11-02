@@ -1,155 +1,160 @@
 # ScreenFerry
 
 [![CI](https://github.com/icloudza/screen-ferry/actions/workflows/ci.yml/badge.svg)](https://github.com/icloudza/screen-ferry/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#许可证)
+[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
 
-一套键盘鼠标控制多台电脑。ScreenFerry 在 macOS 与 Windows 之间共享键鼠，同步剪贴板、互传文件，连接全程 TLS 1.3 加密。
+English | [简体中文](README.zh-CN.md)
 
-## 特性
+One keyboard and mouse for several computers. ScreenFerry shares a keyboard and mouse between macOS and Windows, syncs the clipboard and sends files, all over TLS 1.3.
 
-- **键鼠共享**：光标推出屏幕边缘即切到另一台；按物理键传输，不受键盘布局和输入法影响；同步 Caps Lock，转发媒体键。
-- **多台、双向**：任意一台都能当控制端，一台可以控制多台，按布局摆在上下左右。
-- **剪贴板**：文字、带格式的文字、图片，光标切过去时才同步。
-- **文件**：拖到屏幕边缘即发送，断线后接着传。
-- **每台设备单独设置**：光标速度（DPI）、滚动方向与速度、修饰键与按键映射、防误切。
-- **安全**：首次连接核对 6 位配对码，之后只认对方的证书指纹。
-- **连得上**：局域网自动发现；网络不支持时按地址连接，或从控制端邀请。
-- **轻量**：Rust 编写的后台常驻托盘；设置界面按需启动，关闭即退出。
+## Features
 
-## 工作方式
+- **Keyboard and mouse sharing**: push the cursor off a screen edge to move to the next computer. Keys travel as physical keys, so keyboard layouts and input methods don't get in the way. Caps Lock stays in sync and media keys are forwarded.
+- **Many computers, either direction**: any computer can be the controlling one, and one can control several, arranged on any side.
+- **Clipboard**: plain text, formatted text and images, synced when the cursor moves over.
+- **Files**: drag them to a screen edge to send. Interrupted transfers resume after reconnecting.
+- **Per-device settings**: pointer speed (DPI), scroll direction and speed, modifier keys and key mappings, accidental-switch protection.
+- **Secure**: confirm a 6-digit pairing code the first time, then only the paired certificate fingerprint is trusted.
+- **Easy to connect**: automatic discovery on the local network. Where discovery is blocked, connect by address or invite from the controlling computer.
+- **Lightweight**: a Rust background service in the tray. The settings window starts on demand and exits when closed.
+- **English and Chinese**: the settings window, tray menu and installer come in English and Simplified Chinese. They follow the system language, and you can switch in Settings → Appearance.
+
+## How it works
 
 ```mermaid
 flowchart LR
-  subgraph S["控制端（键鼠所在）"]
-    A["后台<br/>捕获键鼠"]
-    UA["设置界面"]
+  subgraph S["Controlling computer (keyboard and mouse)"]
+    A["Background service<br/>captures input"]
+    UA["Settings window"]
   end
-  subgraph C["被控端"]
-    B["后台<br/>注入键鼠"]
-    UB["设置界面"]
+  subgraph C["Controlled computer"]
+    B["Background service<br/>injects input"]
+    UB["Settings window"]
   end
-  UA -.-|本机通信| A
-  A ==>|"输入连接<br/>键鼠、屏幕切换"| B
-  A <-->|"数据连接<br/>剪贴板、文件"| B
-  B -.-|本机通信| UB
+  UA -.-|local IPC| A
+  A ==>|"Input connection<br/>keys, mouse, switching"| B
+  A <-->|"Data connection<br/>clipboard, files"| B
+  B -.-|local IPC| UB
 ```
 
-每台电脑上常驻一个后台，负责捕获或注入键鼠、网络与同步；设置界面是独立进程，经本机回环连接后台。
-每对设备之间有两条 TLS 1.3 连接，传大文件不会拖慢键鼠。
+Each computer runs a background service that captures or injects input and handles networking and sync. The settings window is a separate process that talks to it over loopback.
+Each pair of devices keeps two TLS 1.3 connections, so a large file transfer never slows down the keyboard and mouse.
 
-首次连接时这样建立信任：
+Trust is set up on the first connection:
 
 ```mermaid
 sequenceDiagram
-  participant C as 被控端
-  participant S as 控制端
-  S -->> C: mDNS 广播（找不到时按地址连接，或由控制端邀请）
-  C ->> S: TLS 1.3 握手，双方出示设备证书
-  opt 第一次连接
-    C ->> S: 配对
-    Note over C,S: 两边显示同一个 6 位配对码，核对后互相记住证书指纹
+  participant C as Controlled
+  participant S as Controlling
+  S -->> C: mDNS announcement (or connect by address, or invite)
+  C ->> S: TLS 1.3 handshake, both sides present device certificates
+  opt First connection
+    C ->> S: Pairing
+    Note over C,S: Both sides show the same 6-digit code. Once confirmed, each remembers the other's certificate fingerprint
   end
-  C ->> S: 建立输入连接、数据连接
+  C ->> S: Open the input and data connections
 ```
 
-## 安装
+## Install
 
-| 系统 | 方式 |
+| System | How |
 |---|---|
-| macOS | 从源码打包（见[从源码构建](#从源码构建)），把 `ScreenFerry.app` 拖进“应用程序”。首次运行时在「系统设置 → 隐私与安全性 → 辅助功能」中允许 ScreenFerry。 |
-| Windows | 在 [Actions](https://github.com/icloudza/screen-ferry/actions/workflows/ci.yml) 最近一次运行的 Artifacts 中下载 `ScreenFerry-windows-setup-<提交号>`，运行其中的安装程序。 |
+| macOS | Build from source (see [Build from source](#build-from-source)) and drag `ScreenFerry.app` into Applications. On first launch, allow ScreenFerry in System Settings → Privacy & Security → Accessibility. |
+| Windows | Download `ScreenFerry-windows-setup-<commit>` from the Artifacts of the latest [Actions](https://github.com/icloudza/screen-ferry/actions/workflows/ci.yml) run and run the installer inside. |
 
-Windows 安装包：
+About the Windows installer:
 
-- 没有代码签名，SmartScreen 拦截时点“更多信息 → 仍要运行”。
-- 装进 Program Files，并在防火墙中放行专用网络和域网络。
-- 升级直接运行新的安装包，正在运行的 ScreenFerry 会自动退出，装完重新启动。卸载在“设置 → 应用”，配置和配对记录保留。
+- It isn't code-signed. If SmartScreen blocks it, choose More info → Run anyway.
+- It installs into Program Files and allows ScreenFerry through the firewall on private and domain networks.
+- To upgrade, run the new installer. A running ScreenFerry quits and restarts after installing. Uninstall from Settings → Apps; your settings and pairings are kept.
 
-## 使用
+## Usage
 
-1. 两台电脑都打开 ScreenFerry。默认 Mac 控制、Windows 被控制，可以在“设置 → 这台电脑”里互换。
-2. 在被控端的“设备”页选中控制端，两边核对 6 位配对码。局域网里找不到时，用“按地址连接”，或在控制端“邀请一台电脑”；地址在对方「设备」页顶部。
-3. 在控制端的“布局”页摆好各台的位置，把光标推出屏幕边缘即可切过去。
+1. Open ScreenFerry on both computers. By default the Mac controls and Windows is controlled; swap them in Settings → This Computer.
+2. On the controlled computer, choose the controlling one on the Devices page and confirm the 6-digit pairing code on both sides. If it isn't found on the network, use Connect by Address, or Invite a Computer from the controlling one. The address is at the top of the other computer's Devices page.
+3. On the controlling computer, arrange the screens on the Layout page, then push the cursor off a screen edge to move over.
 
-出了问题时，在“日志 → 运行日志”里导出诊断文件，[提问题](https://github.com/icloudza/screen-ferry/issues/new?template=bug_report.yml)时附上它。
-设备名、用户名和文件名会换成代号。
+If something goes wrong, export a diagnostics file from Log → Diagnostics and attach it when you [report an issue](https://github.com/icloudza/screen-ferry/issues/new?template=bug_report.yml).
+Device names, user names and file names are replaced with placeholders.
 
-光标在对方屏幕上时，按 <kbd>Ctrl</kbd>+<kbd>Option</kbd>+<kbd>Esc</kbd>（Windows 控制时是 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Esc</kbd>）强制回到本机。
-使用前请退出其他键鼠共享软件，避免争抢键鼠。
+While the cursor is on another screen, press <kbd>Ctrl</kbd>+<kbd>Option</kbd>+<kbd>Esc</kbd> (<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Esc</kbd> when Windows controls) to bring it back.
+Quit other keyboard and mouse sharing tools first so they don't compete for input.
 
-### 命令行
+### Command line
 
-| 命令 | 作用 |
+| Command | What it does |
 |---|---|
-| `screenferry` | 常驻运行：托盘图标，打开设置界面 |
-| `screenferry send <文件>…` | 把文件或文件夹发给连着的电脑 |
-| `screenferry peers` / `forget <设备>` | 查看、删除已配对的设备 |
-| `screenferry quit` | 退出正在运行的 ScreenFerry |
-| `screenferry serve` / `connect [地址]` | 不读配置，在终端里直接运行（调试用） |
+| `screenferry` | Run in the background with a tray icon and open the settings window |
+| `screenferry send <file>…` | Send files or folders to the connected computer |
+| `screenferry peers` / `forget <device>` | List or remove paired devices |
+| `screenferry quit` | Quit the running ScreenFerry |
+| `screenferry serve` / `connect [address]` | Run in the terminal without the saved settings (for debugging) |
 
-完整选项见 `screenferry --help`。
+See `screenferry --help` for all options. The command line and diagnostics log are in Chinese.
 
-### 数据位置
+### Where data lives
 
 | | macOS | Windows |
 |---|---|---|
-| 配置、配对记录 | `~/Library/Application Support/ScreenFerry/` | `%APPDATA%\ScreenFerry\` |
-| 日志、运行时文件 | `~/Library/Caches/ScreenFerry/` | `%LOCALAPPDATA%\ScreenFerry\` |
+| Settings, pairings | `~/Library/Application Support/ScreenFerry/` | `%APPDATA%\ScreenFerry\` |
+| Logs, runtime files | `~/Library/Caches/ScreenFerry/` | `%LOCALAPPDATA%\ScreenFerry\` |
 
-## 从源码构建
+## Build from source
 
-需要 Rust（版本由 `rust-toolchain.toml` 固定，rustup 自动安装）和 Flutter 3.47。
-macOS 另需 Xcode；Windows 另需 Visual Studio 2022（使用 C++ 的桌面开发）和 [Inno Setup](https://jrsoftware.org/isdl.php) 7.1 或更高版本。
+You need Rust (the version is pinned in `rust-toolchain.toml` and installed by rustup) and Flutter 3.47.
+macOS also needs Xcode; Windows also needs Visual Studio 2022 (Desktop development with C++) and [Inno Setup](https://jrsoftware.org/isdl.php) 7.1 or later.
 
 ```bash
 cargo xtask bundle
 ```
 
-在哪个系统上运行就打哪个系统的包，产物在 `target/bundle/`：macOS 是 `ScreenFerry.app`，Windows 是 `ScreenFerry-<版本>-windows-x64-setup.exe`。
-macOS 上钥匙串里有 Developer ID 证书时自动签名（也可以用 `SCREENFERRY_SIGN_IDENTITY` 指定），否则用临时签名，每次重新打包都要重新授予辅助功能权限。
+It builds for the system it runs on and puts the result in `target/bundle/`: `ScreenFerry.app` on macOS, `ScreenFerry-<version>-windows-x64-setup.exe` on Windows.
+On macOS the app is signed with a Developer ID certificate from the keychain when there is one (or the one named by `SCREENFERRY_SIGN_IDENTITY`). Otherwise it gets an ad-hoc signature, and Accessibility permission has to be granted again after every rebuild.
 
-## 开发
+## Development
 
 ```mermaid
 flowchart TB
-  app["设置界面 · Flutter"] -.->|本机通信| L4
-  subgraph L4["L4 应用"]
+  app["Settings window · Flutter"] -.->|local IPC| L4
+  subgraph L4["L4 Applications"]
     daemon["ferry-daemon → screenferry"]
   end
-  subgraph L3["L3 组装"]
+  subgraph L3["L3 Assembly"]
     engine["ferry-engine"]
   end
-  subgraph L2["L2 适配"]
+  subgraph L2["L2 Adapters"]
     direction LR
     pm["platform-macos"] ~~~ pw["platform-windows"] ~~~ net["net"] ~~~ store["store"] ~~~ ipc["ipc"]
   end
-  subgraph L1["L1 纯逻辑"]
+  subgraph L1["L1 Pure logic"]
     direction LR
-    proto["proto"] ~~~ core["core"] ~~~ trust["trust"] ~~~ platform["platform（trait）"]
+    proto["proto"] ~~~ core["core"] ~~~ trust["trust"] ~~~ platform["platform (traits)"]
   end
-  subgraph L0["L0 领域类型"]
+  subgraph L0["L0 Domain types"]
     types["ferry-types"]
   end
   L4 --> L3 --> L2 --> L1 --> L0
 ```
 
-每层只依赖更低的层；`unsafe` 只出现在 `ferry-platform-*` 里，按系统区分的代码只在它们和 L4 应用里。
+Each layer depends only on lower layers. `unsafe` appears only in `ferry-platform-*`, and system-specific code only there and in the L4 applications.
 
 ```bash
 cargo test --workspace
 cargo xtask lint
 ```
 
-设置界面的测试在 `app/` 下运行 `flutter test`。提交前的完整检查见 [AGENTS.md](AGENTS.md)。
+Run `flutter test` in `app/` for the settings window. The full pre-commit checklist is in [AGENTS.md](AGENTS.md).
 
-| 文档 | 内容 |
+The engineering docs are written in Chinese:
+
+| Document | Contents |
 |---|---|
-| [AGENTS.md](AGENTS.md) | 工程规范：目录、分层、命名、测试 |
-| [docs/architecture.md](docs/architecture.md) | 架构总览与 crate 依赖 |
-| [docs/protocol.md](docs/protocol.md) | 线协议 |
-| [docs/ipc.md](docs/ipc.md) | 设置界面与后台之间的本机通信 |
-| [docs/adr/](docs/adr/) | 架构决策记录 |
+| [AGENTS.md](AGENTS.md) | Engineering rules: layout, layers, naming, tests |
+| [docs/architecture.md](docs/architecture.md) | Architecture overview and crate dependencies |
+| [docs/protocol.md](docs/protocol.md) | Wire protocol |
+| [docs/ipc.md](docs/ipc.md) | Local IPC between the settings window and the background service |
+| [docs/adr/](docs/adr/) | Architecture decision records |
 
-## 许可证
+## License
 
-[MIT](LICENSE-MIT) 或 [Apache-2.0](LICENSE-APACHE)，任选其一。除非另有声明，你提交的贡献同样按这两种许可证授权。
+Licensed under either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option. Unless you state otherwise, any contribution you submit is licensed the same way.

@@ -7,6 +7,7 @@ import 'state/app_state.dart';
 const _demo = bool.fromEnvironment('SF_DEMO');
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   final state = AppState(backend: _demo ? DemoBackend() : IpcBackend())..start();
   runApp(ScreenFerryApp(state: state));
 }

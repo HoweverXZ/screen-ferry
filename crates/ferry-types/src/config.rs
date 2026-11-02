@@ -120,6 +120,8 @@ pub struct Config {
     pub accent: u8,
     /// 界面语言。
     pub language: Language,
+    /// 每天检查一次更新，有新版本时在后台下载好（ADR 0014）。
+    pub auto_update: bool,
     /// 服务端：单独安排过位置的设备，按先后排列。同一侧的几台按这个先后平分那条边，
     /// 没有列出的设备放在 `side` 一侧、排在列出的后面。
     ///
@@ -138,7 +140,8 @@ impl Config {
     /// - 4：去掉 `swap_cmd_ctrl`，改为每台设备的 `devices.modifiers`；新增 `mouse_dpi`（缺省 1600）。
     ///   版本 3 里 `swap_cmd_ctrl = false` 的，迁移时给每台已配对的设备写上 `modifiers = "plain"`。
     /// - 5：新增 `language`（缺省 `system`，跟随系统；以前总是中文）。
-    pub const SCHEMA_VERSION: u32 = 5;
+    /// - 6：新增 `auto_update`（缺省开着）。
+    pub const SCHEMA_VERSION: u32 = 6;
 
     /// 剪贴板单项大小上限的取值范围（MB）。
     pub const CLIPBOARD_LIMIT_MB: std::ops::RangeInclusive<u32> = 1..=64;
@@ -207,6 +210,7 @@ impl Default for Config {
             theme: Theme::System,
             accent: 0,
             language: Language::System,
+            auto_update: true,
             layout: Vec::new(),
             devices: Vec::new(),
         }

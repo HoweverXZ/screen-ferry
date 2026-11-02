@@ -20,5 +20,5 @@ pub use message::{
     ClipboardImage, ClipboardSync, DialError, FoundDevice, HourActivity, Link, LinkStatus, Local,
     LogEntry, LogIcon, LogKind, MAX_LINE, Notice, PairingPrompt, PeerInfo, PeerRef, Phrase,
     Problem, ProblemKind, Request, RunLogLevel, RunLogLine, Settings, SettingsPatch, State,
-    VERSION,
+    UpdateError, UpdateInfo, UpdateRelease, UpdateStatus, VERSION,
 };

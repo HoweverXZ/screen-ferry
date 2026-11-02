@@ -61,6 +61,8 @@ bitflags! {
         const COMMAND_KEY = 1 << 4;
         /// 能按对方的请求打开本机的设置界面（`OpenSettings` 消息）。
         const REMOTE_SETTINGS = 1 << 5;
+        /// 握手后互相告诉程序版本（`AppInfo` 消息）。
+        const APP_INFO = 1 << 6;
     }
 }
 

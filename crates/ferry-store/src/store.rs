@@ -12,6 +12,7 @@ use crate::dirs::{default_cache_dir, default_data_dir, default_downloads_dir};
 use crate::error::{Error, Result};
 use crate::file::{self, io};
 use crate::peers;
+use crate::update::UpdateState;
 
 /// 一个数据目录（及其对应的缓存目录）。只读写其中的文件，不缓存内容，多次打开同一目录也不会不一致。
 #[derive(Clone, Debug)]
@@ -135,6 +136,30 @@ impl Store {
     /// 正在接收的文件（缓存目录下的 `partial/`），每次传输一个子目录。可以随时清空。
     pub fn partial_dir(&self) -> PathBuf {
         self.cache.join("partial")
+    }
+
+    /// 版本更新的下载和状态（缓存目录下的 `updates/`，ADR 0014）。可以随时清空，更新包会重新下载。
+    pub fn updates_dir(&self) -> PathBuf {
+        self.cache.join("updates")
+    }
+
+    /// 版本更新的状态。文件不存在或读不懂时为缺省值：它只是缓存。
+    pub fn update_state(&self) -> UpdateState {
+        file::read(&self.update_state_path())
+            .ok()
+            .flatten()
+            .and_then(|data| String::from_utf8(data).ok())
+            .and_then(|text| toml::from_str(&text).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn save_update_state(&self, state: &UpdateState) -> Result<()> {
+        let text = toml::to_string(state).expect("字符串、整数和布尔值总能写成 TOML");
+        file::write(&self.update_state_path(), text.as_bytes())
+    }
+
+    fn update_state_path(&self) -> PathBuf {
+        self.updates_dir().join("state.toml")
     }
 
     /// 收完的文件放在哪里：本机的“下载”文件夹；用 `--data-dir` 打开时为其中的 `received/`。

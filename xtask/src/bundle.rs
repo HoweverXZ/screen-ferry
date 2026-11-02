@@ -13,7 +13,14 @@
 //! 签名：环境变量 `SCREENFERRY_SIGN_IDENTITY` 指定的证书优先，其次钥匙串里第一张
 //! “Developer ID Application”证书，都没有时用临时签名（ad-hoc）。用固定的开发者证书签名后，
 //! 系统按“团队 + bundle id”认这个应用，重新打包也不会丢掉已经授予的辅助功能权限；
-//! 临时签名每次打包都像一个新应用。签名开启 hardened runtime，为以后公证做准备。
+//! 临时签名每次打包都像一个新应用。签名开启 hardened runtime。
+//!
+//! 最后把应用打成 `ScreenFerry-<版本>-macos.zip`，它就是自动更新下载的更新包（ADR 0014）。选项：
+//!
+//! - `--universal`：后台同时编译 arm64 和 x86_64 两份再合成一个（设置界面本来就是通用的）。
+//!   需要先 `rustup target add aarch64-apple-darwin x86_64-apple-darwin`。
+//! - `--notarize`：交给 Apple 公证并装订票据。需要环境变量 `SCREENFERRY_NOTARY_KEY`
+//!   （App Store Connect API 密钥 .p8 文件的路径）、`SCREENFERRY_NOTARY_KEY_ID`、`SCREENFERRY_NOTARY_ISSUER`。
 //!
 //! Windows 先组装 `target/bundle/windows/ScreenFerry/` 目录，再用 Inno Setup 打成安装包
 //! `target/bundle/windows/ScreenFerry-<版本>-windows-x64-setup.exe`（`packaging/windows/screenferry.iss`，ADR 0011）：
@@ -39,14 +46,29 @@ const HELPER: &str = "Helpers/ScreenFerry.app";
 /// 系统登记应用的工具，不在 PATH 里。
 const LSREGISTER: &str = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
 
-pub(crate) fn run() -> Result {
+/// 打包选项，见本文件开头。
+#[derive(Default)]
+struct Options {
+    universal: bool,
+    notarize: bool,
+}
+
+pub(crate) fn run(args: &[String]) -> Result {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .ok_or("找不到仓库根目录")?
         .to_path_buf();
+    let mut options = Options::default();
+    for arg in args {
+        match arg.as_str() {
+            "--universal" => options.universal = true,
+            "--notarize" => options.notarize = true,
+            other => return Err(format!("不认识的选项 {other}")),
+        }
+    }
     match std::env::consts::OS {
-        "macos" => macos(&root),
-        "windows" => windows(&root),
+        "macos" => macos(&root, &options),
+        "windows" => windows(&root, &options),
         other => Err(format!("还不支持在 {other} 上打包")),
     }
 }
@@ -54,7 +76,7 @@ pub(crate) fn run() -> Result {
 /// 设置界面（Flutter）依赖的 Visual C++ 运行库，放在它旁边，没装过运行库的电脑也能打开。
 const VC_RUNTIME: [&str; 3] = ["msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll"];
 
-fn windows(root: &Path) -> Result {
+fn windows(root: &Path, _options: &Options) -> Result {
     let version = workspace_version(root)?;
     // 先找齐工具，免得编译完才发现缺东西。
     let iscc = find_iscc()?;
@@ -214,12 +236,22 @@ fn version_key(dir: &Path) -> Option<Vec<u32>> {
         .collect()
 }
 
-fn macos(root: &Path) -> Result {
+fn macos(root: &Path, options: &Options) -> Result {
     let root = root.to_path_buf();
     let version = workspace_version(&root)?;
+    let notary = if options.notarize {
+        Some(Notary::from_env()?)
+    } else {
+        None
+    };
 
-    step("编译后台（release）");
-    cargo(&root, &["build", "--release", "-p", "ferry-daemon"])?;
+    let daemon = if options.universal {
+        universal_daemon(&root)?
+    } else {
+        step("编译后台（release）");
+        cargo(&root, &["build", "--release", "-p", "ferry-daemon"])?;
+        root.join("target/release/screenferry")
+    };
 
     step("编译设置界面（flutter build macos --release）");
     let app_dir = root.join("app");
@@ -241,10 +273,7 @@ fn macos(root: &Path) -> Result {
         .replace("{{VERSION}}", &version);
     write(&contents.join("Info.plist"), plist.as_bytes())?;
 
-    copy(
-        &root.join("target/release/screenferry"),
-        &contents.join("MacOS/screenferry"),
-    )?;
+    copy(&daemon, &contents.join("MacOS/screenferry"))?;
     copy(
         &settings.join("Contents/Resources/AppIcon.icns"),
         &contents.join("Resources/AppIcon.icns"),
@@ -301,15 +330,155 @@ fn macos(root: &Path) -> Result {
         ],
     )?;
 
+    if let Some(notary) = &notary {
+        if identity == "-" {
+            return Err("公证需要 Developer ID 证书签名，钥匙串里没有找到".into());
+        }
+        notarize(&root, &bundle, notary)?;
+    }
+
     refresh_icons(&root, &[&bundle, &helper]);
 
+    step("打成更新包");
+    let zip = root.join(format!(
+        "target/bundle/macos/ScreenFerry-{version}-macos.zip"
+    ));
+    if zip.exists() {
+        fs::remove_file(&zip).map_err(|e| io(&zip, e))?;
+    }
+    run_in(
+        &root,
+        "ditto",
+        &[
+            "-c",
+            "-k",
+            "--keepParent",
+            bundle.to_str().ok_or("路径不是 UTF-8")?,
+            zip.to_str().ok_or("路径不是 UTF-8")?,
+        ],
+    )?;
+
     println!("\n✓ {}", bundle.display());
+    println!("  更新包：{}", zip.display());
     println!("  打开：open \"{}\"", bundle.display());
     println!("  安装：拖到“应用程序”文件夹。首次运行需要在系统设置里允许它控制键盘和鼠标。");
     if identity == "-" {
         println!("        临时签名的应用每次重新打包后，可能要在“辅助功能”里关掉再打开一次。");
     }
     Ok(())
+}
+
+/// 后台的通用版：分别编译 arm64 和 x86_64，再用 lipo 合成一个。
+fn universal_daemon(root: &Path) -> Result<PathBuf> {
+    const TARGETS: [&str; 2] = ["aarch64-apple-darwin", "x86_64-apple-darwin"];
+    let installed = Command::new("rustup")
+        .args(["target", "list", "--installed"])
+        .current_dir(root)
+        .output()
+        .map_err(|e| format!("无法运行 rustup：{e}"))?;
+    let installed = String::from_utf8_lossy(&installed.stdout);
+    if let Some(missing) = TARGETS
+        .iter()
+        .find(|t| !installed.lines().any(|l| l.trim() == **t))
+    {
+        return Err(format!(
+            "缺少编译目标 {missing}：先运行 rustup target add {}",
+            TARGETS.join(" ")
+        ));
+    }
+    let mut parts = Vec::new();
+    for target in TARGETS {
+        step(&format!("编译后台（release，{target}）"));
+        cargo(
+            root,
+            &[
+                "build",
+                "--release",
+                "-p",
+                "ferry-daemon",
+                "--target",
+                target,
+            ],
+        )?;
+        parts.push(root.join(format!("target/{target}/release/screenferry")));
+    }
+    step("合成通用版（lipo）");
+    let out = root.join("target/release/screenferry-universal");
+    if let Some(dir) = out.parent() {
+        fs::create_dir_all(dir).map_err(|e| io(dir, e))?;
+    }
+    let mut args = vec!["-create", "-output", out.to_str().ok_or("路径不是 UTF-8")?];
+    for part in &parts {
+        args.push(part.to_str().ok_or("路径不是 UTF-8")?);
+    }
+    run_in(root, "lipo", &args)?;
+    Ok(out)
+}
+
+/// 公证用的 App Store Connect API 密钥。
+struct Notary {
+    key: String,
+    key_id: String,
+    issuer: String,
+}
+
+impl Notary {
+    fn from_env() -> Result<Self> {
+        let var = |name: &str| {
+            std::env::var(name)
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+                .ok_or_else(|| format!("公证需要环境变量 {name}"))
+        };
+        Ok(Self {
+            key: var("SCREENFERRY_NOTARY_KEY")?,
+            key_id: var("SCREENFERRY_NOTARY_KEY_ID")?,
+            issuer: var("SCREENFERRY_NOTARY_ISSUER")?,
+        })
+    }
+}
+
+/// 交给 Apple 公证，等结果，通过后把票据装订进应用，再用 Gatekeeper 检查一遍。
+fn notarize(root: &Path, bundle: &Path, notary: &Notary) -> Result {
+    step("公证（xcrun notarytool，通常要几分钟）");
+    let upload = root.join("target/bundle/macos/ScreenFerry-notarize.zip");
+    let _ = fs::remove_file(&upload);
+    let bundle_path = bundle.to_str().ok_or("路径不是 UTF-8")?;
+    let upload_path = upload.to_str().ok_or("路径不是 UTF-8")?;
+    run_in(
+        root,
+        "ditto",
+        &["-c", "-k", "--keepParent", bundle_path, upload_path],
+    )?;
+    let output = Command::new("xcrun")
+        .args(["notarytool", "submit", upload_path, "--wait"])
+        .args([
+            "--key",
+            &notary.key,
+            "--key-id",
+            &notary.key_id,
+            "--issuer",
+            &notary.issuer,
+        ])
+        .current_dir(root)
+        .output()
+        .map_err(|e| format!("无法运行 notarytool：{e}"))?;
+    let _ = fs::remove_file(&upload);
+    let text = String::from_utf8_lossy(&output.stdout);
+    print!("{text}");
+    if !output.status.success() || !text.contains("status: Accepted") {
+        return Err(format!(
+            "公证没有通过：{}（可以用 xcrun notarytool log <提交号> 查看原因）",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    step("装订公证票据");
+    run_in(root, "xcrun", &["stapler", "staple", bundle_path])?;
+    run_in(
+        root,
+        "spctl",
+        &["--assess", "--type", "execute", bundle_path],
+    )
 }
 
 /// 访达和程序坞按路径缓存应用图标，原地重新打包后还显示旧图标。碰一下修改时间、重新登记，

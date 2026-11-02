@@ -20,6 +20,8 @@ class DemoBackend implements Backend {
     bool paired = true,
     this._problem,
     ClipboardSync? clipboard,
+    this.offer,
+    this._update = const UpdateInfo(),
   }) : platform = platform ?? (role == Role.server ? 'macos' : 'windows') {
     final now = DateTime.now();
     _since = now.subtract(const Duration(hours: 1, minutes: 12, seconds: 14));
@@ -331,6 +333,21 @@ class DemoBackend implements Backend {
           }),
         );
         emit(ToastNotice('开始发给 $name', phrase: Phrase('sending', {'name': name})));
+      case CheckUpdateRequest():
+        final release = offer;
+        if (release == null) {
+          _setUpdate(UpdateStatus.upToDate, keepLatest: false);
+        } else {
+          _setUpdate(_settings.autoUpdate ? UpdateStatus.ready : UpdateStatus.available, latest: release);
+        }
+      case DownloadUpdateRequest():
+        _setUpdate(UpdateStatus.ready);
+      case CancelUpdateRequest():
+        _setUpdate(UpdateStatus.available);
+      case InstallUpdateRequest():
+        _setUpdate(UpdateStatus.installing);
+      case DismissUpdateRequest(:final version):
+        _setUpdate(_update.status, dismissed: version);
       case HelloRequest() || OpenPermissionSettingsRequest() || OpenSettingsRequest():
         break;
     }
@@ -493,6 +510,7 @@ class DemoBackend implements Backend {
             alias: _settings.device(p.fingerprint).alias,
             // 演示里对方总是和本机不同的系统。
             platform: platform == 'macos' ? 'windows' : 'macos',
+            version: p.online ? '0.1.0' : '',
             addr: switch ((p.online || p.lastSeen != null, role)) {
               (false, _) => '',
               (true, Role.server) => '192.168.2.${18 + _peers.indexOf(p)}',
@@ -512,6 +530,23 @@ class DemoBackend implements Backend {
               connectedSecs: h < now.hour ? 3600 : now.minute * 60,
             ),
       ],
+      update: _update,
+    );
+  }
+
+  /// 演示的新版本：检查更新时“发现”它；为 null 时总是已是最新。
+  final UpdateRelease? offer;
+  UpdateInfo _update;
+
+  void _setUpdate(UpdateStatus status, {UpdateRelease? latest, bool keepLatest = true, String? dismissed}) {
+    _update = UpdateInfo(
+      status: status,
+      latest: latest ?? (keepLatest ? _update.latest : null),
+      done: status == UpdateStatus.downloading ? 13000000 : 0,
+      total: latest?.size ?? _update.latest?.size ?? 0,
+      checkedAt: DateTime.now(),
+      canInstall: true,
+      dismissed: dismissed ?? _update.dismissed,
     );
   }
 

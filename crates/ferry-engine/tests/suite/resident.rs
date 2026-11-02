@@ -1,18 +1,22 @@
 //! 常驻运行：用真实的本机通信当“设置界面”，平台换成 mock。
 
+mod update;
+
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use ferry_engine::resident::{self, Command, Host};
+use ferry_engine::resident::{self, Command, Host, UpdateSource};
 use ferry_engine::{ClientConfig, EdgeFeed, Events, Files, ServerAddr, connect};
 use ferry_ipc::{
     Connection, Endpoint, LinkStatus, Notice, PairingPrompt, ProblemKind, Request, SettingsPatch,
     State,
 };
 use ferry_platform::Error as PlatformError;
-use ferry_platform_mock::{MockCapture, MockClipboard, MockDisplays, MockInject, MockOverlay};
+use ferry_platform_mock::{
+    MockCapture, MockClipboard, MockDisplays, MockInject, MockOverlay, MockUpdater,
+};
 use ferry_types::{Config, Display, DisplayId, Rect, Role, Side, Theme};
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, timeout};
@@ -30,6 +34,9 @@ struct MockHost {
     verbose: Arc<AtomicBool>,
     /// 在访达里显示过的文件、打开过的文件夹，按先后。
     shown: Arc<Mutex<Vec<PathBuf>>>,
+    updater: MockUpdater,
+    /// 更新清单从哪里取；没设时指向一个连不上的地址，测试不碰外网。
+    update_source: Option<UpdateSource>,
 }
 
 impl Host for MockHost {
@@ -38,6 +45,7 @@ impl Host for MockHost {
     type Displays = MockDisplays;
     type Clipboard = MockClipboard;
     type Overlay = MockOverlay;
+    type Updater = MockUpdater;
 
     fn device_name(&self) -> String {
         "测试 Mac".into()
@@ -69,6 +77,15 @@ impl Host for MockHost {
 
     fn overlay(&self) -> MockOverlay {
         MockOverlay::new()
+    }
+    fn updater(&self) -> MockUpdater {
+        self.updater.clone()
+    }
+    fn update_source(&self) -> UpdateSource {
+        self.update_source.clone().unwrap_or(UpdateSource {
+            manifest_url: "http://127.0.0.1:9/update.json".into(),
+            keys: Vec::new(),
+        })
     }
     fn autostart(&self) -> bool {
         self.autostart.load(Ordering::SeqCst)
@@ -111,7 +128,11 @@ struct Daemon {
 
 impl Daemon {
     async fn start(host: MockHost) -> Self {
-        let device = Device::new();
+        Self::start_with(Device::new(), host).await
+    }
+
+    /// 在已经准备好的数据目录上启动。
+    async fn start_with(device: Device, host: MockHost) -> Self {
         device
             .store
             .save_config(&Config {
@@ -379,9 +400,14 @@ async fn first_pairing_is_confirmed_in_the_ui() {
     // 两边显示同一个配对码。
     assert_eq!(pc_confirm.requests()[0].code.to_string(), prompt.code);
     let state = ui
-        .state_where("已配对列表里有它且在线", |s| {
-            s.peers.iter().any(|p| p.name == "pc" && p.online)
-        })
+        .state_where(
+            "已配对列表里有它且在线，并且知道它的版本",
+            |s| {
+                s.peers
+                    .iter()
+                    .any(|p| p.name == "pc" && p.online && p.version == env!("CARGO_PKG_VERSION"))
+            },
+        )
         .await;
 
     // 从界面移除它：断开，并从信任列表删掉。

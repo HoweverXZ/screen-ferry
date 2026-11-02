@@ -93,6 +93,12 @@ pub fn samples() -> Vec<(Channel, Message)> {
         (Channel::Input, Message::OpenSettings),
         (
             Channel::Input,
+            Message::AppInfo {
+                version: "0.2.0".into(),
+            },
+        ),
+        (
+            Channel::Input,
             Message::DropHint(DropHint {
                 state: HintState::Over,
                 along: 4_800,

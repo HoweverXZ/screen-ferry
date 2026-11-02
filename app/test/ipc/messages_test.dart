@@ -116,8 +116,21 @@ void main() {
     expect(s.settings.theme, UiTheme.dark);
     expect(s.settings.accent, 2);
     expect(s.settings.language, UiLanguage.en);
+    expect(s.settings.autoUpdate, isTrue);
+    expect(s.peers.single.version, '0.1.0');
+    expect(s.update.status, UpdateStatus.downloading);
+    expect(s.update.latest!.version, '0.2.0');
+    expect(s.update.latest!.notesEn.split('\n'), ['English UI', 'Diagnostics log and export']);
+    expect(s.update.latest!.published, DateTime.fromMillisecondsSinceEpoch(1795161600000));
+    expect(s.update.done / s.update.total, closeTo(13 / 21, 0.001));
+    expect(s.update.canInstall, isTrue);
+    expect(s.update.readyVersion, isNull, reason: '还在下载');
     expect(s.activity.single.switches, 12);
     expect(s.activity.single.hour, DateTime.fromMillisecondsSinceEpoch(1793476800 * 1000));
+
+    expect(compareVersions('0.10.0', '0.9.1'), greaterThan(0));
+    expect(compareVersions('0.2.0', '0.2.0'), 0);
+    expect(compareVersions('0.1.0', '0.2.0-beta.1'), lessThan(0));
 
     final stopped = states[1];
     expect(stopped.sharing, isFalse);
@@ -172,6 +185,7 @@ void main() {
           autostart: true,
           theme: UiTheme.light,
           language: UiLanguage.zh,
+          autoUpdate: false,
           clipboardLimitMb: 16,
           mouseDpi: 800,
         ),
@@ -217,6 +231,11 @@ void main() {
       const RevealDiagnosticsRequest(),
       const OpenLogsFolderRequest(),
       const SetVerboseRequest(true),
+      const CheckUpdateRequest(),
+      const DownloadUpdateRequest(),
+      const CancelUpdateRequest(),
+      const InstallUpdateRequest(),
+      const DismissUpdateRequest('0.2.0'),
     ];
     expect(ours, hasLength(requests.length));
     for (var i = 0; i < ours.length; i++) {

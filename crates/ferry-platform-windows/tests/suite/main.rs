@@ -7,3 +7,4 @@
 
 mod clipboard;
 mod keymap;
+mod update;

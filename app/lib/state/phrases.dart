@@ -49,6 +49,12 @@ import 'app_state.dart';
     'role_changed' =>
       p.arg('role') == 'client' ? (l.phNowClient, l.phNowClientHint) : (l.phNowServer, l.phNowServerHint),
     'removed' => (l.phRemoved(name), l.phPairAgain),
+    'update_installed' => (l.phUpdateInstalled(p.arg('to')), l.phFromVersion(p.arg('from'))),
+    'update_not_installed' => (
+      l.phUpdateNotInstalled(p.arg('version')),
+      p.args['current'] == null ? '' : l.phStillOn(p.arg('current')),
+    ),
+    'update_failed' => (l.updateInstallFailed, p.arg('message')),
     _ => null,
   };
 }
@@ -78,6 +84,9 @@ String? toastText(AppLocalizations l, Phrase p) {
     'paused_connect_later' => l.toastPausedConnectLater,
     'not_sharing_invite_later' => l.toastNotSharingInviteLater,
     'diagnostics_failed' => l.toastDiagnosticsFailed(message),
+    'update_installed' => l.phUpdateInstalled(p.arg('to')),
+    'update_cancelled' => l.toastUpdateCancelled,
+    'update_failed' => l.toastUpdateFailed(message),
     _ => null,
   };
 }

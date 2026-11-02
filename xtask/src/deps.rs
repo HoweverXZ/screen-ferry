@@ -6,7 +6,7 @@ use crate::workspace::{DepKind, Workspace};
 pub(crate) fn layer(name: &str) -> Option<u8> {
     match name {
         "ferry-types" => Some(0),
-        "ferry-proto" | "ferry-core" | "ferry-trust" | "ferry-platform" => Some(1),
+        "ferry-proto" | "ferry-core" | "ferry-trust" | "ferry-platform" | "ferry-update" => Some(1),
         "ferry-net" | "ferry-store" | "ferry-ipc" => Some(2),
         n if is_platform_impl(n) => Some(2),
         "ferry-engine" => Some(3),

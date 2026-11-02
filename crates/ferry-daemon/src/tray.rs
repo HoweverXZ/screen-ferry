@@ -1,4 +1,5 @@
-//! 托盘图标：显示是否连着另一台电脑，菜单里可以暂停或继续共享、打开设置、退出。
+//! 托盘图标：显示是否连着另一台电脑，菜单里可以暂停或继续共享、打开设置、退出；
+//! 新版本下载好后多一项“重启并更新”。
 //! 图标只有两种：已连接（光球正穿过屏幕边框）和未连接（光球停在屏幕里、变淡）；
 //! 暂停、等待连接、寻找服务端、出了问题都算未连接，具体情况看菜单第一行。
 //! macOS 按菜单栏的习惯，点图标弹出菜单；Windows 按任务栏的习惯，左键直接打开设置界面，右键弹出菜单。
@@ -17,6 +18,7 @@ use tray_icon::{Icon, TrayIcon};
 
 const TOGGLE: &str = "toggle";
 const OPEN: &str = "open";
+const UPDATE: &str = "update";
 const QUIT: &str = "quit";
 
 /// 菜单栏用模板图：只看透明度，系统按明暗模式自动着色。
@@ -62,7 +64,12 @@ mod art {
 
 struct Tray {
     icon: TrayIcon,
+    menu: Menu,
     status: MenuItem,
+    /// “重启并更新”和它下面的分隔线，有新版本时才插进菜单。
+    update: MenuItem,
+    update_separator: PredefinedMenuItem,
+    update_shown: bool,
     toggle: MenuItem,
     open: MenuItem,
     quit: MenuItem,
@@ -81,6 +88,8 @@ pub(crate) fn install(handle: Handle) -> Result<(), Box<dyn std::error::Error>> 
     let toggle = MenuItem::with_id(TOGGLE, "暂停共享", true, None);
     let open = MenuItem::with_id(OPEN, "打开设置", true, None);
     let quit = MenuItem::with_id(QUIT, "退出 ScreenFerry", true, None);
+    let update = MenuItem::with_id(UPDATE, "", true, None);
+    let update_separator = PredefinedMenuItem::separator();
     let menu = Menu::new();
     menu.append_items(&[
         &status,
@@ -95,7 +104,7 @@ pub(crate) fn install(handle: Handle) -> Result<(), Box<dyn std::error::Error>> 
     let disconnected = decode(art::DISCONNECTED)?;
     let icon = art::builder(disconnected.clone())
         .with_tooltip("ScreenFerry")
-        .with_menu(Box::new(menu))
+        .with_menu(Box::new(menu.clone()))
         .build()?;
 
     #[cfg(target_os = "windows")]
@@ -121,6 +130,7 @@ pub(crate) fn install(handle: Handle) -> Result<(), Box<dyn std::error::Error>> 
             handle.send(Command::SetSharing(!sharing));
         }
         OPEN => handle.send(Command::OpenSettings),
+        UPDATE => handle.send(Command::InstallUpdate),
         QUIT => handle.send(Command::Quit),
         _ => {}
     }));
@@ -128,7 +138,11 @@ pub(crate) fn install(handle: Handle) -> Result<(), Box<dyn std::error::Error>> 
     TRAY.with(|tray| {
         *tray.borrow_mut() = Some(Tray {
             icon,
+            menu,
             status,
+            update,
+            update_separator,
+            update_shown: false,
             toggle,
             open,
             quit,
@@ -170,6 +184,7 @@ fn update(summary: &Summary) {
         tray.open.set_text(lang.pick("打开设置", "Open Settings"));
         tray.quit
             .set_text(lang.pick("退出 ScreenFerry", "Quit ScreenFerry"));
+        show_update(tray, summary);
         let linked = summary.sharing && summary.problem.is_none() && summary.connected_to.is_some();
         let icon = if linked {
             &tray.connected
@@ -185,6 +200,34 @@ fn update(summary: &Summary) {
             .set_tooltip(Some(format!("ScreenFerry · {status}")));
         tray.shown = Some(summary.clone());
     });
+}
+
+/// 有下载好的新版本时，在“退出”上面插一项“重启并更新到 …”，装好后去掉。
+fn show_update(tray: &mut Tray, summary: &Summary) {
+    match (&summary.update, tray.update_shown) {
+        (Some(version), shown) => {
+            tray.update.set_text(summary.lang.pick(
+                format!("重启并更新到 {version}"),
+                format!("Restart to Update to {version}"),
+            ));
+            if !shown {
+                // 菜单：状态、分隔线、暂停、打开设置、分隔线，然后是这两项，最后是退出。
+                let inserted = tray
+                    .menu
+                    .insert_items(&[&tray.update, &tray.update_separator], 5);
+                match inserted {
+                    Ok(()) => tray.update_shown = true,
+                    Err(e) => warn!("托盘菜单加不上“重启并更新”：{e}"),
+                }
+            }
+        }
+        (None, true) => {
+            let _ = tray.menu.remove(&tray.update);
+            let _ = tray.menu.remove(&tray.update_separator);
+            tray.update_shown = false;
+        }
+        (None, false) => {}
+    }
 }
 
 /// 菜单第一行的状态文字。

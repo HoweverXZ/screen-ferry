@@ -29,6 +29,7 @@ use super::confirm::{PairAsk, UiConfirm};
 use super::diagnostics;
 use super::record::{Activity, Log, Rtt, now_ms};
 use super::ui::UiEvent;
+use super::update::{Outcome, UpdateEvent, Updates};
 use super::{Command, Host, Summary};
 use crate::client::{ClientCommand, ClientConfig, ServerAddr, connect};
 use crate::clipboard::ClipLimit;
@@ -73,7 +74,7 @@ struct LinkInfo {
     rtt: Rtt,
 }
 
-pub(crate) struct Runtime<H> {
+pub(crate) struct Runtime<H: Host> {
     store: Store,
     host: H,
     config: Config,
@@ -140,6 +141,12 @@ pub(crate) struct Runtime<H> {
     last_export: Option<PathBuf>,
     /// 实际用的界面语言（托盘、屏幕边缘的胶囊）。
     lang: Lang,
+    /// 版本更新。
+    updates: Updates<H::Updater>,
+    /// 本次运行中连上过的设备告诉的版本。
+    versions: HashMap<Fingerprint, String>,
+    /// 启动时的提示（例如“已更新到 …”），等第一个界面连上来再发。
+    startup_toast: Option<(Phrase, String)>,
 }
 
 impl<H: Host> Runtime<H> {
@@ -148,8 +155,15 @@ impl<H: Host> Runtime<H> {
         host: H,
         events: Events,
         asks: mpsc::UnboundedSender<PairAsk>,
+        update_tx: mpsc::UnboundedSender<UpdateEvent>,
     ) -> Result<Self> {
         let config = store.config()?;
+        let updates = Updates::new(
+            host.updater(),
+            host.update_source(),
+            store.clone(),
+            update_tx,
+        );
         let name = resolve_name(&config, &host);
         let fingerprint = store.identity(&name)?.fingerprint();
         let peers = store.peers()?;
@@ -213,6 +227,9 @@ impl<H: Host> Runtime<H> {
             verbose_since: None,
             last_export: None,
             lang,
+            updates,
+            versions: HashMap::new(),
+            startup_toast: None,
         };
         let (role, role_key) = match runtime.config.role {
             Role::Server => ("键鼠在本机", "server"),
@@ -228,6 +245,11 @@ impl<H: Host> Runtime<H> {
             "ScreenFerry 已启动",
             format!("{} · {role}", mark::device(&runtime.name)),
         );
+        let (outcomes, open_settings) = runtime.updates.startup();
+        runtime.apply(outcomes);
+        if open_settings {
+            runtime.open_settings();
+        }
         Ok(runtime)
     }
 
@@ -653,6 +675,9 @@ impl<H: Host> Runtime<H> {
                 }
                 self.open_settings();
             }
+            Event::PeerVersion { peer, version } => {
+                self.versions.insert(peer, version);
+            }
             Event::PeerSettings { peer, sent } => {
                 let name = self.peer_name(&peer);
                 if sent {
@@ -908,6 +933,12 @@ impl<H: Host> Runtime<H> {
                         return;
                     }
                 }
+                if let Some((phrase, text)) = self.startup_toast.take() {
+                    let _ = outbox.try_send(Notice::Toast {
+                        text,
+                        phrase: Some(phrase),
+                    });
+                }
                 self.clients.insert(id, outbox);
                 // 超过一分钟的不算：多半是那次没打开，这次是界面自己重连。
                 if let Some(ms) = self
@@ -985,7 +1016,13 @@ impl<H: Host> Runtime<H> {
                 self.host.open_folder(&dir);
             }
             Request::SetVerbose { on } => self.set_verbose(on),
+            Request::CheckUpdate => self.updates.check(true),
+            Request::DownloadUpdate => self.updates.download(),
+            Request::CancelUpdate => self.updates.cancel(),
+            Request::InstallUpdate => self.updates.install(!self.clients.is_empty()),
+            Request::DismissUpdate { version } => self.updates.dismiss(version),
         }
+        self.dirty = true;
     }
 
     /// 把剪贴板图片存一份给设置界面预览，换掉上一份。存不下来时界面只显示尺寸。
@@ -1118,7 +1155,51 @@ impl<H: Host> Runtime<H> {
         match command {
             Command::SetSharing(on) => self.set_sharing(on).await,
             Command::OpenSettings => self.open_settings(),
+            Command::InstallUpdate => self.updates.install(!self.clients.is_empty()),
             Command::Quit => {}
+        }
+    }
+
+    // ── 版本更新 ─────────────────────────────────
+
+    pub(crate) fn on_update(&mut self, event: UpdateEvent) {
+        let outcomes = self.updates.on_event(event, self.config.auto_update);
+        self.apply(outcomes);
+        self.dirty = true;
+    }
+
+    /// 为安装更新退出时（macOS）交给 `run` 的安装。
+    pub(crate) fn take_restart(
+        &mut self,
+    ) -> Option<(std::sync::Arc<H::Updater>, ferry_platform::Prepared)> {
+        self.updates.take_restart()
+    }
+
+    fn apply(&mut self, outcomes: Vec<Outcome>) {
+        for outcome in outcomes {
+            match outcome {
+                Outcome::Toast(phrase, text) if self.clients.is_empty() => {
+                    self.startup_toast = Some((phrase, text));
+                }
+                Outcome::Toast(phrase, text) => self.toast(phrase, text),
+                Outcome::Log {
+                    warning,
+                    phrase,
+                    text,
+                    detail,
+                } => {
+                    let icon = if warning {
+                        LogIcon::Warning
+                    } else {
+                        LogIcon::Settings
+                    };
+                    self.log(LogKind::Link, icon, phrase, text, detail);
+                }
+                Outcome::Restart => {
+                    info!("为安装新版本退出");
+                    self.quit_requested = true;
+                }
+            }
         }
     }
 
@@ -1198,6 +1279,9 @@ impl<H: Host> Runtime<H> {
         }
         if let Some(theme) = patch.theme {
             next.theme = theme;
+        }
+        if let Some(on) = patch.auto_update {
+            next.auto_update = on;
         }
         if let Some(language) = patch.language {
             next.language = language;
@@ -1529,6 +1613,11 @@ impl<H: Host> Runtime<H> {
 
     /// 每 250 毫秒一次：结算每秒的统计、清理过期的配对请求、按时重试、推送状态。
     pub(crate) fn on_tick(&mut self) {
+        let outcomes = self.updates.tick(self.config.auto_update);
+        if !outcomes.is_empty() {
+            self.apply(outcomes);
+            self.dirty = true;
+        }
         let now = Instant::now();
         if now.duration_since(self.last_second) >= Duration::from_secs(1) {
             self.last_second = now;
@@ -1841,6 +1930,7 @@ impl<H: Host> Runtime<H> {
                 _ => p.message.clone(),
             }),
             lang,
+            update: self.updates.ready_version(),
         }
     }
 
@@ -1899,6 +1989,11 @@ impl<H: Host> Runtime<H> {
                         .cloned()
                         .unwrap_or_default(),
                     addr: p.addr.map(addr_text).unwrap_or_default(),
+                    version: self
+                        .versions
+                        .get(&p.fingerprint)
+                        .cloned()
+                        .unwrap_or_default(),
                 })
                 .collect(),
             found: self
@@ -1929,9 +2024,11 @@ impl<H: Host> Runtime<H> {
                 theme: self.config.theme,
                 accent: self.config.accent,
                 language: self.config.language,
+                auto_update: self.config.auto_update,
                 devices: self.config.devices.clone(),
             },
             activity: self.activity.recent(),
+            update: self.updates.info(!server && !self.links.is_empty()),
         }
     }
 }

@@ -93,6 +93,10 @@ class Sidebar extends StatelessWidget {
             ),
           ),
           const Spacer(),
+          if (state.updateReminder case final version?) ...[
+            _UpdatePill(version: version, collapsed: collapsed, onTap: () => state.go(SfPage.about)),
+            const SizedBox(height: 8),
+          ],
           Tooltip(
             message: _footer(state),
             child: AnimatedContainer(
@@ -128,6 +132,70 @@ class Sidebar extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 侧栏底部的更新提醒，和下面的状态条一样大小：一行“更新到 …”，点了去关于页。
+class _UpdatePill extends StatelessWidget {
+  const _UpdatePill({required this.version, required this.collapsed, required this.onTap});
+
+  final String version;
+  final bool collapsed;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = SfColors.of(context);
+    final label = context.l10n.updateSidebar(version);
+    return Pressable(
+      onTap: onTap,
+      color: c.accentSoft,
+      hoverColor: Color.lerp(c.accentSoft, c.accent, 0.12),
+      radius: 14,
+      tooltip: label,
+      semanticLabel: label,
+      child: AnimatedContainer(
+        duration: Motion.medium,
+        curve: Motion.ease,
+        height: 44,
+        padding: EdgeInsets.only(left: collapsed ? (_railWidth - 20) / 2 : 14, right: 8),
+        child: Row(
+          children: [
+            Container(
+              width: 20,
+              height: 20,
+              decoration: BoxDecoration(color: c.accent, shape: BoxShape.circle),
+              child: Icon(Icons.arrow_upward_rounded, size: 13, color: c.onAccent),
+            ),
+            Expanded(
+              child: ClipRect(
+                child: AnimatedOpacity(
+                  duration: Motion.fast,
+                  opacity: collapsed ? 0 : 1,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.only(left: 10),
+                          child: Text(
+                            label,
+                            maxLines: 1,
+                            softWrap: false,
+                            overflow: TextOverflow.fade,
+                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: c.accent),
+                          ),
+                        ),
+                      ),
+                      Icon(Icons.chevron_right_rounded, size: 18, color: c.accent),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

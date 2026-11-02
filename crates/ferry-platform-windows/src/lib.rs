@@ -15,6 +15,7 @@ mod inject;
 mod keymap;
 mod overlay;
 mod permission;
+mod update;
 
 pub use autostart::WinAutostart;
 pub use capture::WinCapture;
@@ -25,3 +26,4 @@ pub use inject::WinInject;
 pub use keymap::{WinKey, hid_from_windows, win_key};
 pub use overlay::WinOverlay;
 pub use permission::WinPermissions;
+pub use update::{WinUpdater, parse_proxy_server};

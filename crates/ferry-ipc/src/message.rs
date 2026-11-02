@@ -72,6 +72,16 @@ pub enum Request {
     OpenLogsFolder,
     /// 打开或关闭详细记录（运行日志多记调试信息）。重启后总是关着。
     SetVerbose { on: bool },
+    /// 马上检查更新，结果体现在 `state.update` 里。
+    CheckUpdate,
+    /// 下载新版本（关掉了自动检查时手动点的）。
+    DownloadUpdate,
+    /// 停下正在进行的下载，已下载的部分留着下次接着用。
+    CancelUpdate,
+    /// 安装已下载好的新版本：后台会退出，新版本启动后界面重新打开。
+    InstallUpdate,
+    /// 仪表盘横幅上点了“稍后”：到下一个版本前不再提示。
+    DismissUpdate { version: String },
 }
 
 /// 后台 → 界面。
@@ -180,6 +190,82 @@ pub struct State {
     pub settings: Settings,
     /// 最近 48 小时每小时的活动，只列出有活动的小时，按时间先后排列。
     pub activity: Vec<HourActivity>,
+    /// 版本更新。旧版后台没有这个字段。
+    #[serde(default)]
+    pub update: UpdateInfo,
+}
+
+/// 版本更新（ADR 0014）。
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UpdateInfo {
+    pub status: UpdateStatus,
+    /// 发现的新版本；没有时为 `null`。
+    pub latest: Option<UpdateRelease>,
+    /// `downloading`：已下载、总共多少字节。
+    pub done: u64,
+    pub total: u64,
+    /// `failed`：为什么。
+    pub error: Option<UpdateError>,
+    /// 出错的原话（中文）。`error` 为 `install_failed` 时界面显示它。
+    pub message: String,
+    /// 上次检查完的时刻（Unix 毫秒）；本次运行还没检查过为 `null`。
+    pub checked_at: Option<i64>,
+    /// 这份程序能自己装更新。不能时（临时签名的开发版本、不是用安装包装的、这个平台没有更新包）
+    /// 界面请用户去下载页面。
+    pub can_install: bool,
+    /// Windows 被另一台电脑控制时：安装要弹 UAC，从另一台电脑操作时点不到，要在这台电脑上点。
+    pub needs_local_confirm: bool,
+    /// 仪表盘横幅上点过“稍后”的版本。
+    pub dismissed: String,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateStatus {
+    /// 本次运行还没检查过。
+    #[default]
+    Idle,
+    Checking,
+    UpToDate,
+    /// 有新版本，还没下载。
+    Available,
+    Downloading,
+    /// 下载好、核对过，可以安装。
+    Ready,
+    Installing,
+    Failed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateError {
+    /// 连不上更新服务器。
+    Unreachable,
+    /// 清单签名或下载的文件对不上，已删除。
+    VerifyFailed,
+    /// 清单过期或比见过的旧：无法确认是不是最新。
+    Stale,
+    /// 这份程序里没有发布公钥，无法校验更新。
+    NoKeys,
+    /// 安装没有成功，原话见 `message`。
+    InstallFailed,
+}
+
+/// 新版本。
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UpdateRelease {
+    pub version: String,
+    /// 发布时间（Unix 毫秒）。
+    pub published: i64,
+    /// 本机这个平台的更新包大小；没有更新包时为 0。
+    pub size: u64,
+    /// 更新说明，每行一条。
+    pub notes_zh: String,
+    pub notes_en: String,
+    /// 新版本改了两台之间的通信方式：连着的设备也要更新才能再连上。
+    pub breaks_peers: bool,
 }
 
 /// 本机。
@@ -316,6 +402,10 @@ fn default_mouse_dpi() -> u32 {
     1600
 }
 
+fn default_true() -> bool {
+    true
+}
+
 /// 一台已配对的设备。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PeerInfo {
@@ -341,6 +431,9 @@ pub struct PeerInfo {
     /// 上次连上时它的地址：`IP:端口`，只知道 IP 时就是 IP；没连上过为空字符串。
     #[serde(default)]
     pub addr: String,
+    /// 它的 ScreenFerry 版本；本次运行还没连上过、或者它的版本太旧不说时为空字符串。
+    #[serde(default)]
+    pub version: String,
 }
 
 /// 局域网里发现的一台服务端。
@@ -380,6 +473,9 @@ pub struct Settings {
     /// 界面语言：设置界面、托盘菜单、屏幕边缘的胶囊都用它。
     #[serde(default)]
     pub language: Language,
+    /// 每天检查一次更新，有新版本时在后台下载好。
+    #[serde(default = "default_true")]
+    pub auto_update: bool,
     /// 单独设置过的设备；没列出的用缺省设置。
     #[serde(default)]
     pub devices: Vec<DeviceSettings>,
@@ -419,6 +515,8 @@ pub struct SettingsPatch {
     pub accent: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub language: Option<Language>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_update: Option<bool>,
 }
 
 /// 一小时内的活动。

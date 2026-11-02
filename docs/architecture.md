@@ -43,6 +43,7 @@ graph BT
   core[ferry-core] --> types
   trust[ferry-trust] --> types
   platform[ferry-platform] --> types
+  update[ferry-update]
   win[ferry-platform-windows] --> platform
   mac[ferry-platform-macos] --> platform
   mock[ferry-platform-mock] --> platform
@@ -55,10 +56,14 @@ graph BT
   engine --> net
   engine --> store
   engine --> ipc
+  engine --> update
   daemon[ferry-daemon · L4] --> engine
   daemon -.按平台注入.-> win
   daemon -.按平台注入.-> mac
   app[设置界面 app/ · Flutter] -.本机回环 TCP.-> ipc
 ```
+
+版本更新（ADR 0014）：`ferry-update` 校验更新清单的签名、判断有没有新版本，`ferry-net` 下载，
+`ferry-platform` 的 `Updater` 由各平台安装（macOS 交换应用、Windows 运行安装包），`ferry-engine` 把它们串起来。
 
 `ferry-engine` 只认识 `ferry-platform` 的 trait；`ferry-daemon` 在编译时按目标平台选择实现并注入。场景测试中用 `ferry-platform-mock` 替代真实平台。

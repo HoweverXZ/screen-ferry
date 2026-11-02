@@ -9,6 +9,7 @@ mod diagnostics;
 mod record;
 mod runtime;
 mod ui;
+mod update;
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -24,6 +25,7 @@ use tracing::{info, warn};
 use crate::error::Result;
 use crate::events::Events;
 use runtime::Runtime;
+pub use update::{MANIFEST_URL, UpdateSource};
 
 /// 状态推送与各种计时的节拍。界面最多每秒收到 4 次状态。
 const TICK: Duration = Duration::from_millis(250);
@@ -41,6 +43,7 @@ pub trait Host: Send + Sync + 'static {
     type Displays: Displays + Sync + 'static;
     type Clipboard: Clipboard;
     type Overlay: Overlay + 'static;
+    type Updater: ferry_platform::Updater + 'static;
 
     /// 本机缺省的设备名（计算机名）。
     fn device_name(&self) -> String;
@@ -52,6 +55,12 @@ pub trait Host: Send + Sync + 'static {
     fn clipboard(&self) -> Self::Clipboard;
     /// 屏幕边缘的浮层（边缘投递胶囊）。
     fn overlay(&self) -> Self::Overlay;
+    /// 自己更新（ADR 0014）。
+    fn updater(&self) -> Self::Updater;
+    /// 更新清单从哪里取、用哪些公钥校验。
+    fn update_source(&self) -> UpdateSource {
+        UpdateSource::official()
+    }
     /// 是否已登记为登录时启动。
     fn autostart(&self) -> bool;
     fn set_autostart(&self, on: bool) -> ferry_platform::Result<()>;
@@ -102,6 +111,8 @@ pub trait Host: Send + Sync + 'static {
 pub enum Command {
     SetSharing(bool),
     OpenSettings,
+    /// 安装已下载好的新版本。
+    InstallUpdate,
     /// 停止引擎、删除 `ipc.json`，然后 [`run`] 返回。
     Quit,
 }
@@ -116,6 +127,8 @@ pub struct Summary {
     pub problem: Option<String>,
     /// 托盘菜单用的语言。
     pub lang: ferry_types::Lang,
+    /// 下载好、可以安装的新版本。
+    pub update: Option<String>,
 }
 
 /// [`run`] 一侧：接收命令、发布简要状态。
@@ -174,7 +187,8 @@ pub async fn run<H: Host>(store: Store, host: H, mut control: Control) -> Result
     let (events, mut engine_events) = Events::channel();
     let (asks, mut pair_asks) = mpsc::unbounded_channel();
     let (ui_tx, mut ui_events) = mpsc::unbounded_channel();
-    let mut rt = Runtime::new(store, host, events, asks)?;
+    let (update_tx, mut update_events) = mpsc::unbounded_channel();
+    let mut rt = Runtime::new(store, host, events, asks, update_tx)?;
     rt.start_engine();
 
     let mut tick = interval(TICK);
@@ -192,6 +206,12 @@ pub async fn run<H: Host>(store: Store, host: H, mut control: Control) -> Result
                 }
             }
             Some(event) = engine_events.recv() => rt.on_engine(event),
+            Some(event) = update_events.recv() => {
+                rt.on_update(event);
+                if rt.quit_requested() {
+                    break;
+                }
+            }
             Some(ask) = pair_asks.recv() => rt.on_pairing(ask),
             command = control.commands.recv() => match command {
                 Some(Command::Quit) | None => break,
@@ -221,6 +241,12 @@ pub async fn run<H: Host>(store: Store, host: H, mut control: Control) -> Result
         }
     };
     let _ = tokio::time::timeout(FAREWELL, flushed).await;
+    // 为安装更新退出（macOS）：先删掉 ipc.json 让出位置，再启动新版本、等它起来。
+    if let Some((updater, prepared)) = rt.take_restart() {
+        let path = _endpoint.path.clone();
+        drop(_endpoint);
+        update::finish(updater, prepared, path).await;
+    }
     Ok(())
 }
 

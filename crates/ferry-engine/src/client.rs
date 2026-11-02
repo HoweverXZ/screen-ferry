@@ -573,6 +573,9 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
         }
         let mut screens = displays.displays()?;
         send(&mut framed, &Message::Displays(screens.clone())).await?;
+        if welcome.capabilities.contains(Capabilities::APP_INFO) {
+            send(&mut framed, &crate::link::app_info()).await?;
+        }
         info!(server = %mark::device(&welcome.name), fingerprint = %server, "已连接，等待光标进入");
         self.in_session = true;
         self.server = Some(server);
@@ -750,6 +753,13 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                     self.publish_edge(side, &screens, &shown);
                 }
                 Some(Message::DropHint(hint)) => self.edge.remote(server, Some(hint)),
+                Some(Message::AppInfo { version }) => {
+                    info!(%version, "服务端的版本");
+                    self.events.emit(Event::PeerVersion {
+                        peer: server,
+                        version,
+                    });
+                }
                 Some(Message::Displays(_)) => {}
                 Some(other) => debug!(kind = format_args!("{:#06x}", other.type_id()), "忽略消息"),
             }

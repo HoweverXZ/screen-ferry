@@ -6,4 +6,5 @@ mod addresses;
 mod discovery;
 mod framed;
 mod handshake;
+mod https;
 mod tls;

@@ -1792,4 +1792,181 @@ class AppLocalizationsZh extends AppLocalizations {
     });
     return '松手后放到本机$_temp0第 $n 台';
   }
+
+  @override
+  String aboutVersionLine(String version) {
+    return '版本 $version · 在 Mac 与 Windows 之间共享一套键盘鼠标';
+  }
+
+  @override
+  String updateCurrent(String version) {
+    return '当前版本 $version';
+  }
+
+  @override
+  String get updateUpToDate => '已是最新版本';
+
+  @override
+  String updateCheckedAgo(String version, String ago) {
+    return '$version · $ago检查';
+  }
+
+  @override
+  String get updateChecking => '正在检查更新…';
+
+  @override
+  String get updateCheckingHint => '只取一份很小的更新信息，不发送任何设备信息';
+
+  @override
+  String updateFound(String version) {
+    return '发现新版本 $version';
+  }
+
+  @override
+  String updateReleased(String date) {
+    return '$date发布';
+  }
+
+  @override
+  String get updateDownloadedHint => '已在后台下载好';
+
+  @override
+  String get updateDownload => '下载';
+
+  @override
+  String updateDownloading(String version) {
+    return '正在下载 $version';
+  }
+
+  @override
+  String get updateRestartHint => '重启时键鼠会断开约 5 秒';
+
+  @override
+  String get updateLater => '稍后';
+
+  @override
+  String get updateRestart => '重启并更新';
+
+  @override
+  String get updateInstall => '安装';
+
+  @override
+  String get updateLocalConfirm => '安装时 Windows 会弹出管理员确认框，从另一台电脑操作时点不到它。请用这台电脑自己的键盘鼠标点“安装”';
+
+  @override
+  String updateInstalling(String version) {
+    return '正在安装 $version…';
+  }
+
+  @override
+  String get updateInstallingHint => 'ScreenFerry 会自己重新打开，这个窗口随后重新连上';
+
+  @override
+  String updateManual(String version) {
+    return '发现新版本 $version，要手动安装';
+  }
+
+  @override
+  String get updateManualHint => '这份不能自己更新：可能是自己打包的开发版本，或者放在没有写权限的位置';
+
+  @override
+  String get updateOpenDownloads => '打开下载页面';
+
+  @override
+  String get updateUnreachable => '连不上更新服务器';
+
+  @override
+  String get updateUnreachableHint => '已按系统的代理设置连接，也可以在浏览器里下载';
+
+  @override
+  String get updateBrowserDownload => '浏览器下载';
+
+  @override
+  String get updateRetry => '重试';
+
+  @override
+  String get updateVerifyFailed => '安装包没有通过校验，已删除';
+
+  @override
+  String get updateVerifyFailedHint => '什么都没有安装。可能是网络里有东西改了文件，换个网络再试';
+
+  @override
+  String get updateStale => '无法确认是不是最新版';
+
+  @override
+  String get updateStaleHint => '拿到的更新信息已经过期，可能有人挡住了新版本';
+
+  @override
+  String get updateNoKeys => '这份程序不能检查更新';
+
+  @override
+  String get updateNoKeysHint => '它没有内置发布公钥，通常是自己打包的开发版本';
+
+  @override
+  String get updateInstallFailed => '更新没有装上';
+
+  @override
+  String get updateBreaksPeers => '两台要一起更新';
+
+  @override
+  String updateBreaksPeersHint(String version) {
+    return '$version 改了两台之间的通信方式：另一台也更新到 $version 之后才能再连上';
+  }
+
+  @override
+  String get updateAuto => '自动检查更新';
+
+  @override
+  String get updateAutoHint => '每天检查一次，有新版本时在后台下载好，由你决定何时重启';
+
+  @override
+  String updateLastChecked(String ago) {
+    return '上次检查：$ago';
+  }
+
+  @override
+  String updateSidebar(String version) {
+    return '更新到 $version';
+  }
+
+  @override
+  String updateBannerTitle(String version) {
+    return '新版本 $version 已准备好';
+  }
+
+  @override
+  String get updateBannerHint => '重启 ScreenFerry 完成更新，键鼠会断开约 5 秒';
+
+  @override
+  String devicePeerCanUpdate(String version) {
+    return '可以更新到 $version';
+  }
+
+  @override
+  String phUpdateInstalled(String to) {
+    return '已更新到 $to';
+  }
+
+  @override
+  String phFromVersion(String from) {
+    return '从 $from';
+  }
+
+  @override
+  String phUpdateNotInstalled(String version) {
+    return '$version 没有装上';
+  }
+
+  @override
+  String phStillOn(String current) {
+    return '还在用 $current';
+  }
+
+  @override
+  String get toastUpdateCancelled => '没有得到管理员确认，没有安装';
+
+  @override
+  String toastUpdateFailed(String message) {
+    return '更新没有装上：$message';
+  }
 }

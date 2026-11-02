@@ -109,7 +109,7 @@ fn config_defaults_until_saved_then_round_trips() {
     store.save_config(&config).unwrap();
     let text = fs::read_to_string(dir.path().join("config.toml")).unwrap();
     assert!(
-        text.starts_with("schema_version = 5\n"),
+        text.starts_with("schema_version = 6\n"),
         "第一行必须是 schema_version：{text}"
     );
     assert_eq!(store.config().unwrap(), config);
@@ -133,10 +133,10 @@ fn config_tolerates_missing_and_unknown_fields() {
 fn config_from_a_newer_version_is_refused() {
     let dir = TempDir::new();
     let store = Store::open(dir.path()).unwrap();
-    fs::write(dir.path().join("config.toml"), "schema_version = 6\n").unwrap();
+    fs::write(dir.path().join("config.toml"), "schema_version = 7\n").unwrap();
     assert!(matches!(
         store.config(),
-        Err(Error::TooNew { found: 6, .. })
+        Err(Error::TooNew { found: 7, .. })
     ));
 }
 
@@ -177,7 +177,7 @@ fn a_version_1_config_reads_as_version_2_with_an_empty_layout() {
     };
     store.save_config(&config).unwrap();
     let text = fs::read_to_string(dir.path().join("config.toml")).unwrap();
-    assert!(text.starts_with("schema_version = 5\n"), "{text}");
+    assert!(text.starts_with("schema_version = 6\n"), "{text}");
     assert!(text.contains("[[layout]]"), "{text}");
     assert_eq!(store.config().unwrap(), config);
 }
@@ -280,7 +280,7 @@ fn a_version_3_config_with_the_swap_off_makes_every_paired_device_plain() {
     // 写回之后是版本 4，旧字段不再出现，读回来一样。
     store.save_config(&config).unwrap();
     let text = fs::read_to_string(dir.path().join("config.toml")).unwrap();
-    assert!(text.starts_with("schema_version = 5\n"), "{text}");
+    assert!(text.starts_with("schema_version = 6\n"), "{text}");
     assert!(!text.contains("swap_cmd_ctrl"), "{text}");
     assert!(text.contains("[[devices]]"), "{text}");
     assert_eq!(store.config().unwrap(), config);
@@ -358,4 +358,33 @@ fn peers_remember_their_last_address_and_old_files_read_without_one() {
     .unwrap();
     let old = store.peers().unwrap();
     assert_eq!(old.get(&pc.fingerprint).unwrap().addr, None);
+}
+
+#[test]
+fn the_update_state_round_trips_and_is_empty_when_missing_or_broken() {
+    use ferry_store::{Installing, UpdateState};
+
+    let dir = TempDir::new();
+    let store = Store::open(dir.path()).unwrap();
+    assert_eq!(store.update_state(), UpdateState::default());
+
+    let state = UpdateState {
+        seen_published: Some(1_795_161_600),
+        dismissed: "0.2.0".into(),
+        installing: Some(Installing {
+            from: "0.1.0".into(),
+            to: "0.2.0".into(),
+            open_settings: true,
+        }),
+    };
+    store.save_update_state(&state).unwrap();
+    assert_eq!(store.update_state(), state);
+    assert!(store.updates_dir().join("state.toml").exists());
+
+    fs::write(store.updates_dir().join("state.toml"), "这不是 TOML").unwrap();
+    assert_eq!(
+        store.update_state(),
+        UpdateState::default(),
+        "只是缓存，读不懂就当没有"
+    );
 }

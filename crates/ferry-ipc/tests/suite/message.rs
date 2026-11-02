@@ -8,7 +8,8 @@ use std::path::PathBuf;
 use ferry_ipc::{
     ClipboardImage, ClipboardSync, DialError, FoundDevice, HourActivity, Link, LinkStatus, Local,
     LogEntry, LogIcon, LogKind, Notice, PairingPrompt, PeerInfo, PeerRef, Phrase, Problem,
-    ProblemKind, Request, RunLogLevel, RunLogLine, Settings, SettingsPatch, State, VERSION,
+    ProblemKind, Request, RunLogLevel, RunLogLine, Settings, SettingsPatch, State, UpdateError,
+    UpdateInfo, UpdateRelease, UpdateStatus, VERSION,
 };
 use ferry_types::{
     DeviceSettings, KeyMapping, Language, ModifierPreset, ModifierTarget, Placement, Role,
@@ -65,6 +66,7 @@ fn requests() -> Vec<Request> {
                 autostart: Some(true),
                 theme: Some(Theme::Light),
                 language: Some(Language::Zh),
+                auto_update: Some(false),
                 clipboard_limit_mb: Some(16),
                 mouse_dpi: Some(800),
                 ..SettingsPatch::default()
@@ -138,6 +140,13 @@ fn requests() -> Vec<Request> {
         Request::RevealDiagnostics,
         Request::OpenLogsFolder,
         Request::SetVerbose { on: true },
+        Request::CheckUpdate,
+        Request::DownloadUpdate,
+        Request::CancelUpdate,
+        Request::InstallUpdate,
+        Request::DismissUpdate {
+            version: "0.2.0".into(),
+        },
     ]
 }
 
@@ -199,6 +208,7 @@ fn state() -> State {
             alias: "书房的电脑".into(),
             platform: "windows".into(),
             addr: "192.168.2.18".into(),
+            version: "0.1.0".into(),
         }],
         found: vec![FoundDevice {
             name: "会议室 Mac".into(),
@@ -223,6 +233,7 @@ fn state() -> State {
             theme: Theme::Dark,
             accent: 2,
             language: Language::En,
+            auto_update: true,
             devices: vec![device()],
         },
         activity: vec![HourActivity {
@@ -231,6 +242,25 @@ fn state() -> State {
             clips: 3,
             connected_secs: 3600,
         }],
+        update: UpdateInfo {
+            status: UpdateStatus::Downloading,
+            latest: Some(UpdateRelease {
+                version: "0.2.0".into(),
+                published: 1_795_161_600_000,
+                size: 21_000_000,
+                notes_zh: "英文界面\n运行日志与诊断导出".into(),
+                notes_en: "English UI\nDiagnostics log and export".into(),
+                breaks_peers: false,
+            }),
+            done: 13_000_000,
+            total: 21_000_000,
+            error: None,
+            message: String::new(),
+            checked_at: Some(1_795_165_200_000),
+            can_install: true,
+            needs_local_confirm: false,
+            dismissed: String::new(),
+        },
     }
 }
 
@@ -351,6 +381,24 @@ fn every_sample_round_trips() {
             "{json}"
         );
     }
+}
+
+#[test]
+fn an_old_daemon_without_update_fields_still_parses() {
+    let mut value = serde_json::to_value(state()).unwrap();
+    value.as_object_mut().unwrap().remove("update");
+    value["settings"]
+        .as_object_mut()
+        .unwrap()
+        .remove("auto_update");
+    value["peers"][0].as_object_mut().unwrap().remove("version");
+    let parsed: State = serde_json::from_value(value).unwrap();
+    assert_eq!(parsed.update, UpdateInfo::default());
+    assert!(parsed.settings.auto_update, "缺省开着");
+    assert_eq!(
+        serde_json::to_value(UpdateError::VerifyFailed).unwrap(),
+        json!("verify_failed")
+    );
 }
 
 #[test]

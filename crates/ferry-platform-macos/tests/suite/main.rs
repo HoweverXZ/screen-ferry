@@ -8,3 +8,4 @@
 mod autostart;
 mod display;
 mod keymap;
+mod update;

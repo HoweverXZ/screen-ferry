@@ -82,13 +82,15 @@
             "online": true,
             "platform": "windows",
             "short": "3F9A-12C4-77E0-B1D2",
-            "side": "left"
+            "side": "left",
+            "version": "0.1.0"
           }
         ],
         "problem": null,
         "settings": {
           "accent": 2,
           "announce": true,
+          "auto_update": true,
           "autostart": false,
           "clipboard": true,
           "clipboard_limit_mb": 32,
@@ -136,7 +138,26 @@
           "side": "right",
           "theme": "dark"
         },
-        "sharing": true
+        "sharing": true,
+        "update": {
+          "can_install": true,
+          "checked_at": 1795165200000,
+          "dismissed": "",
+          "done": 13000000,
+          "error": null,
+          "latest": {
+            "breaks_peers": false,
+            "notes_en": "English UI\nDiagnostics log and export",
+            "notes_zh": "英文界面\n运行日志与诊断导出",
+            "published": 1795161600000,
+            "size": 21000000,
+            "version": "0.2.0"
+          },
+          "message": "",
+          "needs_local_confirm": false,
+          "status": "downloading",
+          "total": 21000000
+        }
       },
       "type": "state"
     },
@@ -196,7 +217,8 @@
             "online": true,
             "platform": "windows",
             "short": "3F9A-12C4-77E0-B1D2",
-            "side": "left"
+            "side": "left",
+            "version": "0.1.0"
           }
         ],
         "problem": {
@@ -206,6 +228,7 @@
         "settings": {
           "accent": 2,
           "announce": true,
+          "auto_update": true,
           "autostart": false,
           "clipboard": true,
           "clipboard_limit_mb": 32,
@@ -253,7 +276,26 @@
           "side": "right",
           "theme": "dark"
         },
-        "sharing": false
+        "sharing": false,
+        "update": {
+          "can_install": true,
+          "checked_at": 1795165200000,
+          "dismissed": "",
+          "done": 13000000,
+          "error": null,
+          "latest": {
+            "breaks_peers": false,
+            "notes_en": "English UI\nDiagnostics log and export",
+            "notes_zh": "英文界面\n运行日志与诊断导出",
+            "published": 1795161600000,
+            "size": 21000000,
+            "version": "0.2.0"
+          },
+          "message": "",
+          "needs_local_confirm": false,
+          "status": "downloading",
+          "total": 21000000
+        }
       },
       "type": "state"
     },
@@ -376,6 +418,7 @@
     },
     {
       "settings": {
+        "auto_update": false,
         "autostart": true,
         "clipboard_limit_mb": 16,
         "language": "zh",
@@ -534,6 +577,22 @@
     {
       "on": true,
       "type": "set_verbose"
+    },
+    {
+      "type": "check_update"
+    },
+    {
+      "type": "download_update"
+    },
+    {
+      "type": "cancel_update"
+    },
+    {
+      "type": "install_update"
+    },
+    {
+      "type": "dismiss_update",
+      "version": "0.2.0"
     }
   ],
   "version": 2

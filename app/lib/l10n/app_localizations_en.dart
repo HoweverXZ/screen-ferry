@@ -1859,4 +1859,187 @@ class AppLocalizationsEn extends AppLocalizations {
     });
     return 'Release to place it $_temp0';
   }
+
+  @override
+  String aboutVersionLine(String version) {
+    return 'Version $version · One keyboard and mouse for Mac and Windows';
+  }
+
+  @override
+  String updateCurrent(String version) {
+    return 'Current version $version';
+  }
+
+  @override
+  String get updateUpToDate => 'You’re up to date';
+
+  @override
+  String updateCheckedAgo(String version, String ago) {
+    return '$version · Checked $ago';
+  }
+
+  @override
+  String get updateChecking => 'Checking for updates…';
+
+  @override
+  String get updateCheckingHint => 'Only fetches a small update file and sends nothing about your devices';
+
+  @override
+  String updateFound(String version) {
+    return 'Version $version is available';
+  }
+
+  @override
+  String updateReleased(String date) {
+    return 'Released $date';
+  }
+
+  @override
+  String get updateDownloadedHint => 'Downloaded in the background';
+
+  @override
+  String get updateDownload => 'Download';
+
+  @override
+  String updateDownloading(String version) {
+    return 'Downloading $version';
+  }
+
+  @override
+  String get updateRestartHint => 'The keyboard and mouse disconnect for about 5 seconds';
+
+  @override
+  String get updateLater => 'Later';
+
+  @override
+  String get updateRestart => 'Restart to Update';
+
+  @override
+  String get updateInstall => 'Install';
+
+  @override
+  String get updateLocalConfirm =>
+      'Windows asks for administrator approval during installation, which can’t be clicked from another computer. Use this computer’s own keyboard and mouse to click Install';
+
+  @override
+  String updateInstalling(String version) {
+    return 'Installing $version…';
+  }
+
+  @override
+  String get updateInstallingHint => 'ScreenFerry will reopen by itself, and this window will reconnect';
+
+  @override
+  String updateManual(String version) {
+    return 'Version $version needs to be installed manually';
+  }
+
+  @override
+  String get updateManualHint =>
+      'This copy can’t update itself. It may be a self-built development version, or in a folder you can’t write to';
+
+  @override
+  String get updateOpenDownloads => 'Open Download Page';
+
+  @override
+  String get updateUnreachable => 'Can’t reach the update server';
+
+  @override
+  String get updateUnreachableHint => 'System proxy settings were used. You can also download in a browser';
+
+  @override
+  String get updateBrowserDownload => 'Download in Browser';
+
+  @override
+  String get updateRetry => 'Retry';
+
+  @override
+  String get updateVerifyFailed => 'The download failed verification and was deleted';
+
+  @override
+  String get updateVerifyFailedHint =>
+      'Nothing was installed. Something on the network may have altered the file. Try another network';
+
+  @override
+  String get updateStale => 'Can’t confirm you’re up to date';
+
+  @override
+  String get updateStaleHint => 'The update information is out of date, and something may be blocking new versions';
+
+  @override
+  String get updateNoKeys => 'This copy can’t check for updates';
+
+  @override
+  String get updateNoKeysHint =>
+      'It has no built-in release key, which usually means it’s a self-built development version';
+
+  @override
+  String get updateInstallFailed => 'The update wasn’t installed';
+
+  @override
+  String get updateBreaksPeers => 'Update both computers';
+
+  @override
+  String updateBreaksPeersHint(String version) {
+    return '$version changes how the two computers talk to each other. The other computer must also update to $version to reconnect';
+  }
+
+  @override
+  String get updateAuto => 'Check for Updates Automatically';
+
+  @override
+  String get updateAutoHint =>
+      'Checks once a day and downloads new versions in the background. You decide when to restart';
+
+  @override
+  String updateLastChecked(String ago) {
+    return 'Last checked $ago';
+  }
+
+  @override
+  String updateSidebar(String version) {
+    return 'Update to $version';
+  }
+
+  @override
+  String updateBannerTitle(String version) {
+    return 'Version $version is ready';
+  }
+
+  @override
+  String get updateBannerHint =>
+      'Restart ScreenFerry to finish updating. The keyboard and mouse disconnect for about 5 seconds';
+
+  @override
+  String devicePeerCanUpdate(String version) {
+    return 'Can update to $version';
+  }
+
+  @override
+  String phUpdateInstalled(String to) {
+    return 'Updated to $to';
+  }
+
+  @override
+  String phFromVersion(String from) {
+    return 'From $from';
+  }
+
+  @override
+  String phUpdateNotInstalled(String version) {
+    return '$version wasn’t installed';
+  }
+
+  @override
+  String phStillOn(String current) {
+    return 'Still on $current';
+  }
+
+  @override
+  String get toastUpdateCancelled => 'Administrator approval wasn’t given, so nothing was installed';
+
+  @override
+  String toastUpdateFailed(String message) {
+    return 'The update wasn’t installed: $message';
+  }
 }

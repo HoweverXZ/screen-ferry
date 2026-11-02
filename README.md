@@ -17,6 +17,7 @@ One keyboard and mouse for several computers. ScreenFerry shares a keyboard and 
 - **Secure**: confirm a 6-digit pairing code the first time, then only the paired certificate fingerprint is trusted.
 - **Easy to connect**: automatic discovery on the local network. Where discovery is blocked, connect by address or invite from the controlling computer.
 - **Lightweight**: a Rust background service in the tray. The settings window starts on demand and exits when closed.
+- **Automatic updates**: checks once a day, downloads in the background, and installs when you choose Restart to Update. Every update is signature-checked first.
 - **English and Chinese**: the settings window, tray menu and installer come in English and Simplified Chinese. They follow the system language, and you can switch in Settings → Appearance.
 
 ## How it works
@@ -59,14 +60,16 @@ sequenceDiagram
 
 | System | How |
 |---|---|
-| macOS | Build from source (see [Build from source](#build-from-source)) and drag `ScreenFerry.app` into Applications. On first launch, allow ScreenFerry in System Settings → Privacy & Security → Accessibility. |
-| Windows | Download `ScreenFerry-windows-setup-<commit>` from the Artifacts of the latest [Actions](https://github.com/icloudza/screen-ferry/actions/workflows/ci.yml) run and run the installer inside. |
+| macOS | Download `ScreenFerry-<version>-macos.zip` from [Releases](https://github.com/icloudza/screen-ferry/releases/latest), unzip it and drag `ScreenFerry.app` into Applications. On first launch, allow ScreenFerry in System Settings → Privacy & Security → Accessibility. |
+| Windows | Download `ScreenFerry-<version>-windows-x64-setup.exe` from [Releases](https://github.com/icloudza/screen-ferry/releases/latest) and run it. |
+
+ScreenFerry checks for updates once a day and downloads them in the background. Choose Restart to Update when it suits you; you can turn automatic checks off in Settings → About. Updates are verified against a built-in signing key before anything is installed.
 
 About the Windows installer:
 
 - It isn't code-signed. If SmartScreen blocks it, choose More info → Run anyway.
 - It installs into Program Files and allows ScreenFerry through the firewall on private and domain networks.
-- To upgrade, run the new installer. A running ScreenFerry quits and restarts after installing. Uninstall from Settings → Apps; your settings and pairings are kept.
+- Updates install silently after one administrator prompt. While another computer controls this one, use this computer's own keyboard and mouse to approve it. Uninstall from Settings → Apps; your settings and pairings are kept.
 
 ## Usage
 
@@ -108,7 +111,7 @@ macOS also needs Xcode; Windows also needs Visual Studio 2022 (Desktop developme
 cargo xtask bundle
 ```
 
-It builds for the system it runs on and puts the result in `target/bundle/`: `ScreenFerry.app` on macOS, `ScreenFerry-<version>-windows-x64-setup.exe` on Windows.
+It builds for the system it runs on and puts the result in `target/bundle/`: `ScreenFerry.app` and its update package `ScreenFerry-<version>-macos.zip` on macOS, `ScreenFerry-<version>-windows-x64-setup.exe` on Windows. Releases are made with `cargo xtask release <version>`; see ADR 0014.
 On macOS the app is signed with a Developer ID certificate from the keychain when there is one (or the one named by `SCREENFERRY_SIGN_IDENTITY`). Otherwise it gets an ad-hoc signature, and Accessibility permission has to be granted again after every rebuild.
 
 ## Development
@@ -128,7 +131,7 @@ flowchart TB
   end
   subgraph L1["L1 Pure logic"]
     direction LR
-    proto["proto"] ~~~ core["core"] ~~~ trust["trust"] ~~~ platform["platform (traits)"]
+    proto["proto"] ~~~ core["core"] ~~~ trust["trust"] ~~~ update["update"] ~~~ platform["platform (traits)"]
   end
   subgraph L0["L0 Domain types"]
     types["ferry-types"]

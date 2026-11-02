@@ -39,6 +39,31 @@ List<Widget> statusBanners(BuildContext context) {
               )
             : null,
       ),
+    // 新版本下载好了：只在仪表盘上提一下。
+    if (state.showUpdateBanner && state.page == SfPage.overview && state.openedDevice == null)
+      _Banner(
+        key: const ValueKey('banner-update'),
+        icon: Icons.arrow_upward_rounded,
+        title: context.l10n.updateBannerTitle(state.updateInfo.readyVersion!),
+        text: context.l10n.updateBannerHint,
+        action: Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            PillButton(
+              label: context.l10n.updateLater,
+              soft: true,
+              onPressed: () => state.dismissUpdate(state.updateInfo.readyVersion!),
+            ),
+            PillButton(
+              label: context.l10n.updateRestart,
+              primary: true,
+              onPressed: state.online ? state.installUpdate : null,
+            ),
+          ],
+        ),
+      ),
   ];
 }
 

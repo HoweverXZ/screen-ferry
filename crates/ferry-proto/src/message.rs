@@ -7,7 +7,7 @@ use crate::edge::DropHint;
 use crate::error::{DecodeError, EncodeError};
 use crate::file::{self, FileCancel, FileEnd, FileList, FileOffer, FileResume};
 use crate::handshake::{Bye, Channel, Hello, Reject, Welcome};
-use crate::limits::{MAX_DISPLAYS, PAIRING_NONCE_LEN};
+use crate::limits::{MAX_DISPLAYS, MAX_VERSION_LEN, PAIRING_NONCE_LEN};
 use crate::screen::Enter;
 use crate::transfer::{Cancel, Chunk};
 use crate::wire::{Body, Reader, Writer};
@@ -61,6 +61,11 @@ pub enum Message {
     /// 请接收方打开它的设置界面，翻到发送方这台设备的设置页。需要 `REMOTE_SETTINGS` 能力。
     /// 被控制的一方想改“对方控制本机时”的滚动、按键等设置时用：这些设置在控制的一方。
     OpenSettings,
+    /// 发送方的程序版本（例如 `0.2.0`），握手后发一次。需要 `APP_INFO` 能力。
+    /// 设置界面据此显示对方的版本，提醒两台一起更新。
+    AppInfo {
+        version: String,
+    },
 
     // ── 数据连接 ──────────────────────────
     ClipboardOffer(ClipboardOffer),
@@ -109,6 +114,7 @@ mod ty {
     pub(super) const PEER_SIDE: u16 = 0x0103;
     pub(super) const DROP_HINT: u16 = 0x0104;
     pub(super) const OPEN_SETTINGS: u16 = 0x0105;
+    pub(super) const APP_INFO: u16 = 0x0106;
     pub(super) const KEY: u16 = 0x0110;
     pub(super) const POINTER_MOTION: u16 = 0x0120;
     pub(super) const POINTER_DELTA: u16 = 0x0121;
@@ -143,6 +149,7 @@ pub(crate) fn allowed(ty: u16, channel: Channel) -> Option<bool> {
         | ty::PEER_SIDE
         | ty::DROP_HINT
         | ty::OPEN_SETTINGS
+        | ty::APP_INFO
         | ty::KEY
         | ty::POINTER_MOTION
         | ty::POINTER_DELTA
@@ -185,6 +192,7 @@ impl Message {
             Self::PeerSide { .. } => ty::PEER_SIDE,
             Self::DropHint(_) => ty::DROP_HINT,
             Self::OpenSettings => ty::OPEN_SETTINGS,
+            Self::AppInfo { .. } => ty::APP_INFO,
             Self::Input(event) => match event {
                 InputEvent::Key { .. } => ty::KEY,
                 InputEvent::PointerMotion { .. } => ty::POINTER_MOTION,
@@ -235,6 +243,7 @@ impl Message {
             Self::Input(event) => encode_input(event, w),
             Self::PeerSide { side } => side.encode(w),
             Self::DropHint(m) => m.encode(w),
+            Self::AppInfo { version } => w.str(version, MAX_VERSION_LEN, "版本号长度"),
             Self::ClipboardOffer(m) => m.encode(w),
             Self::ClipboardRequest(m) => m.encode(w),
             Self::Chunk(m) => m.encode(w),
@@ -313,6 +322,9 @@ impl Message {
             ty::FILE_END => Self::FileEnd(FileEnd::decode(r)?),
             ty::FILE_DONE => Self::FileDone,
             ty::OPEN_SETTINGS => Self::OpenSettings,
+            ty::APP_INFO => Self::AppInfo {
+                version: r.str(MAX_VERSION_LEN, "版本号长度")?,
+            },
             _ => return Err(DecodeError::UnknownMessage(ty)),
         })
     }

@@ -3133,6 +3133,288 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'松手后放到本机{side, select, left{左侧，从上往下} right{右侧，从上往下} top{上方，从左往右} other{下方，从左往右}}第 {n} 台'**
   String layoutDropAtNth(String side, int n);
+
+  /// No description provided for @aboutVersionLine.
+  ///
+  /// In zh, this message translates to:
+  /// **'版本 {version} · 在 Mac 与 Windows 之间共享一套键盘鼠标'**
+  String aboutVersionLine(String version);
+
+  /// No description provided for @updateCurrent.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前版本 {version}'**
+  String updateCurrent(String version);
+
+  /// No description provided for @updateUpToDate.
+  ///
+  /// In zh, this message translates to:
+  /// **'已是最新版本'**
+  String get updateUpToDate;
+
+  /// No description provided for @updateCheckedAgo.
+  ///
+  /// In zh, this message translates to:
+  /// **'{version} · {ago}检查'**
+  String updateCheckedAgo(String version, String ago);
+
+  /// No description provided for @updateChecking.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在检查更新…'**
+  String get updateChecking;
+
+  /// No description provided for @updateCheckingHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'只取一份很小的更新信息，不发送任何设备信息'**
+  String get updateCheckingHint;
+
+  /// No description provided for @updateFound.
+  ///
+  /// In zh, this message translates to:
+  /// **'发现新版本 {version}'**
+  String updateFound(String version);
+
+  /// No description provided for @updateReleased.
+  ///
+  /// In zh, this message translates to:
+  /// **'{date}发布'**
+  String updateReleased(String date);
+
+  /// No description provided for @updateDownloadedHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'已在后台下载好'**
+  String get updateDownloadedHint;
+
+  /// No description provided for @updateDownload.
+  ///
+  /// In zh, this message translates to:
+  /// **'下载'**
+  String get updateDownload;
+
+  /// No description provided for @updateDownloading.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在下载 {version}'**
+  String updateDownloading(String version);
+
+  /// No description provided for @updateRestartHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'重启时键鼠会断开约 5 秒'**
+  String get updateRestartHint;
+
+  /// No description provided for @updateLater.
+  ///
+  /// In zh, this message translates to:
+  /// **'稍后'**
+  String get updateLater;
+
+  /// No description provided for @updateRestart.
+  ///
+  /// In zh, this message translates to:
+  /// **'重启并更新'**
+  String get updateRestart;
+
+  /// No description provided for @updateInstall.
+  ///
+  /// In zh, this message translates to:
+  /// **'安装'**
+  String get updateInstall;
+
+  /// No description provided for @updateLocalConfirm.
+  ///
+  /// In zh, this message translates to:
+  /// **'安装时 Windows 会弹出管理员确认框，从另一台电脑操作时点不到它。请用这台电脑自己的键盘鼠标点“安装”'**
+  String get updateLocalConfirm;
+
+  /// No description provided for @updateInstalling.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在安装 {version}…'**
+  String updateInstalling(String version);
+
+  /// No description provided for @updateInstallingHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'ScreenFerry 会自己重新打开，这个窗口随后重新连上'**
+  String get updateInstallingHint;
+
+  /// No description provided for @updateManual.
+  ///
+  /// In zh, this message translates to:
+  /// **'发现新版本 {version}，要手动安装'**
+  String updateManual(String version);
+
+  /// No description provided for @updateManualHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'这份不能自己更新：可能是自己打包的开发版本，或者放在没有写权限的位置'**
+  String get updateManualHint;
+
+  /// No description provided for @updateOpenDownloads.
+  ///
+  /// In zh, this message translates to:
+  /// **'打开下载页面'**
+  String get updateOpenDownloads;
+
+  /// No description provided for @updateUnreachable.
+  ///
+  /// In zh, this message translates to:
+  /// **'连不上更新服务器'**
+  String get updateUnreachable;
+
+  /// No description provided for @updateUnreachableHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'已按系统的代理设置连接，也可以在浏览器里下载'**
+  String get updateUnreachableHint;
+
+  /// No description provided for @updateBrowserDownload.
+  ///
+  /// In zh, this message translates to:
+  /// **'浏览器下载'**
+  String get updateBrowserDownload;
+
+  /// No description provided for @updateRetry.
+  ///
+  /// In zh, this message translates to:
+  /// **'重试'**
+  String get updateRetry;
+
+  /// No description provided for @updateVerifyFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'安装包没有通过校验，已删除'**
+  String get updateVerifyFailed;
+
+  /// No description provided for @updateVerifyFailedHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'什么都没有安装。可能是网络里有东西改了文件，换个网络再试'**
+  String get updateVerifyFailedHint;
+
+  /// No description provided for @updateStale.
+  ///
+  /// In zh, this message translates to:
+  /// **'无法确认是不是最新版'**
+  String get updateStale;
+
+  /// No description provided for @updateStaleHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'拿到的更新信息已经过期，可能有人挡住了新版本'**
+  String get updateStaleHint;
+
+  /// No description provided for @updateNoKeys.
+  ///
+  /// In zh, this message translates to:
+  /// **'这份程序不能检查更新'**
+  String get updateNoKeys;
+
+  /// No description provided for @updateNoKeysHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'它没有内置发布公钥，通常是自己打包的开发版本'**
+  String get updateNoKeysHint;
+
+  /// No description provided for @updateInstallFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'更新没有装上'**
+  String get updateInstallFailed;
+
+  /// No description provided for @updateBreaksPeers.
+  ///
+  /// In zh, this message translates to:
+  /// **'两台要一起更新'**
+  String get updateBreaksPeers;
+
+  /// No description provided for @updateBreaksPeersHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'{version} 改了两台之间的通信方式：另一台也更新到 {version} 之后才能再连上'**
+  String updateBreaksPeersHint(String version);
+
+  /// No description provided for @updateAuto.
+  ///
+  /// In zh, this message translates to:
+  /// **'自动检查更新'**
+  String get updateAuto;
+
+  /// No description provided for @updateAutoHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'每天检查一次，有新版本时在后台下载好，由你决定何时重启'**
+  String get updateAutoHint;
+
+  /// No description provided for @updateLastChecked.
+  ///
+  /// In zh, this message translates to:
+  /// **'上次检查：{ago}'**
+  String updateLastChecked(String ago);
+
+  /// No description provided for @updateSidebar.
+  ///
+  /// In zh, this message translates to:
+  /// **'更新到 {version}'**
+  String updateSidebar(String version);
+
+  /// No description provided for @updateBannerTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'新版本 {version} 已准备好'**
+  String updateBannerTitle(String version);
+
+  /// No description provided for @updateBannerHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'重启 ScreenFerry 完成更新，键鼠会断开约 5 秒'**
+  String get updateBannerHint;
+
+  /// No description provided for @devicePeerCanUpdate.
+  ///
+  /// In zh, this message translates to:
+  /// **'可以更新到 {version}'**
+  String devicePeerCanUpdate(String version);
+
+  /// No description provided for @phUpdateInstalled.
+  ///
+  /// In zh, this message translates to:
+  /// **'已更新到 {to}'**
+  String phUpdateInstalled(String to);
+
+  /// No description provided for @phFromVersion.
+  ///
+  /// In zh, this message translates to:
+  /// **'从 {from}'**
+  String phFromVersion(String from);
+
+  /// No description provided for @phUpdateNotInstalled.
+  ///
+  /// In zh, this message translates to:
+  /// **'{version} 没有装上'**
+  String phUpdateNotInstalled(String version);
+
+  /// No description provided for @phStillOn.
+  ///
+  /// In zh, this message translates to:
+  /// **'还在用 {current}'**
+  String phStillOn(String current);
+
+  /// No description provided for @toastUpdateCancelled.
+  ///
+  /// In zh, this message translates to:
+  /// **'没有得到管理员确认，没有安装'**
+  String get toastUpdateCancelled;
+
+  /// No description provided for @toastUpdateFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'更新没有装上：{message}'**
+  String toastUpdateFailed(String message);
 }
 
 class _AppLocalizationsDelegate extends LocalizationsDelegate<AppLocalizations> {

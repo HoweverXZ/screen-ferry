@@ -24,6 +24,7 @@ fn kind(message: &Message) -> &'static str {
         Message::PeerSide { .. } => "PeerSide",
         Message::DropHint(_) => "DropHint",
         Message::OpenSettings => "OpenSettings",
+        Message::AppInfo { .. } => "AppInfo",
         Message::Input(event) => match event {
             InputEvent::Key { .. } => "Key",
             InputEvent::PointerMotion { .. } => "PointerMotion",
@@ -47,7 +48,7 @@ fn kind(message: &Message) -> &'static str {
     }
 }
 
-const MESSAGE_KINDS: usize = 33;
+const MESSAGE_KINDS: usize = 34;
 
 fn decode(channel: Channel, buf: &[u8]) -> Result<Option<(Message, usize)>, DecodeError> {
     Codec::new(channel).decode(buf)

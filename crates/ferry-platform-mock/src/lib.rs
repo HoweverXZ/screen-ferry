@@ -15,6 +15,7 @@ mod inject;
 mod keymap;
 mod overlay;
 mod permission;
+mod update;
 
 pub use autostart::MockAutostart;
 pub use capture::MockCapture;
@@ -24,3 +25,4 @@ pub use event_loop::MockEventLoop;
 pub use inject::MockInject;
 pub use overlay::MockOverlay;
 pub use permission::MockPermissions;
+pub use update::MockUpdater;

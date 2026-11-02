@@ -26,6 +26,7 @@ ScreenFerry 是跨 Windows 和 macOS 的键鼠共享工具，同时提供剪贴�
 | macOS | objc2 系列 crate |
 | 存储 | TOML 配置 + SQLite；图片和文件存磁盘 |
 | 本机进程通信 | 本机回环 TCP（`127.0.0.1`）+ 令牌，每行一条 JSON；协议见 `docs/ipc.md`（ADR 0004） |
+| 版本更新 | GitHub Releases 上的安装包和 minisign 签名的更新清单；macOS 交换应用，Windows 静默运行安装包（ADR 0014） |
 | 按键编码 | 协议中传物理键（USB HID Usage），两端各自转换成本地键码 |
 | 点击与滚轮 | 事件携带当时的光标绝对位置，接收端先定位再执行 |
 
@@ -64,6 +65,7 @@ screen-ferry/
 ├─ docs/
 │  ├─ architecture.md      #   架构总览 + crate 地图
 │  ├─ protocol.md          #   线协议说明（带版本号）
+│  ├─ releases/            #   每个版本的中英文更新说明（ADR 0014）
 │  └─ adr/                 #   架构决策记录
 ├─ .github/workflows/
 └─ .spec-workflow/         # 本地工具目录，已加入 .gitignore，不提交
@@ -82,6 +84,7 @@ crates/
 ├─ ferry-core               # 屏幕布局、边缘切换、会话状态机、按键状态跟踪
 ├─ ferry-trust              # 设备身份、证书指纹、配对码校验、TLS 证书验证器
 ├─ ferry-platform           # 平台抽象 trait（只有接口，没有实现）
+├─ ferry-update             # 版本更新：更新清单、签名校验、版本判断
 │  ── L2 适配层（对接操作系统、网络、磁盘、进程）───────
 ├─ ferry-platform-windows
 ├─ ferry-platform-macos
@@ -206,7 +209,8 @@ ferry-platform/src/              ferry-platform-{windows,macos,mock}/src/
           Windows: %LOCALAPPDATA%\ScreenFerry\
 ├─ ipc.json          # 后台运行时写下的端口与令牌，退出时删除（ADR 0004）
 ├─ logs/
-└─ partial/          # 传输中的分块，可以随时清空
+├─ partial/          # 传输中的分块，可以随时清空
+└─ updates/          # 版本更新的下载和状态，可以随时清空（ADR 0014）
 ```
 
 - 只有 `ferry-store` 知道这些路径，其他 crate 通过它访问。

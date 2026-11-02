@@ -108,6 +108,7 @@ mod mac {
         type Displays = MacDisplays;
         type Clipboard = MacClipboard;
         type Overlay = MacOverlay;
+        type Updater = ferry_platform_macos::MacUpdater;
 
         fn device_name(&self) -> String {
             Command::new("scutil")
@@ -148,6 +149,10 @@ mod mac {
 
         fn overlay(&self) -> MacOverlay {
             MacOverlay::new()
+        }
+
+        fn updater(&self) -> ferry_platform_macos::MacUpdater {
+            ferry_platform_macos::MacUpdater::new()
         }
 
         fn autostart(&self) -> bool {
@@ -290,6 +295,7 @@ mod win {
         type Displays = WinDisplays;
         type Clipboard = WinClipboard;
         type Overlay = WinOverlay;
+        type Updater = ferry_platform_windows::WinUpdater;
 
         fn device_name(&self) -> String {
             std::env::var("COMPUTERNAME")
@@ -320,6 +326,10 @@ mod win {
 
         fn overlay(&self) -> WinOverlay {
             WinOverlay::new()
+        }
+
+        fn updater(&self) -> ferry_platform_windows::WinUpdater {
+            ferry_platform_windows::WinUpdater::new()
         }
 
         fn autostart(&self) -> bool {

@@ -167,6 +167,16 @@
   - 协议：新增能力位 `REMOTE_SETTINGS` 和消息 `OpenSettings`。本机通信升到版本 2：`settings.mouse_dpi`、`settings.devices`、
     `set_device`、`open_peer_settings`、`show_device`、`peers[].alias`、`peers[].platform`、`local.natural_scrolling`，
     去掉 `settings.swap_cmd_ctrl`。
+- 版本更新（ADR 0014）：程序自己检查、下载、安装新版本。
+  - 每天检查一次 GitHub 上的正式版，有新版本就在后台下载好；侧栏、仪表盘、托盘菜单提醒，点“重启并更新”就装好重开。
+    “关于”页可以手动检查、看更新说明（长了可以滚动），可以关掉自动检查。
+  - 更新清单用 minisign 签名，程序内置两把公钥；清单有过期时间、不认比见过的旧的；下载的文件要和清单对得上。
+  - macOS：核对新应用的签名和公证，一步换掉旧应用，新版本没起来就换回去；辅助功能权限不会丢。
+  - Windows：静默运行安装包，弹一次管理员确认；被另一台电脑控制时提醒在本机确认。
+  - 设备页显示对方的版本；新版本改了线协议时提醒两台一起更新。线协议新增能力位 `APP_INFO` 和消息 `AppInfo`。
+  - 发布：`cargo xtask release <版本>` 改版本号并打 tag，CI 构建两个系统的安装包（macOS 通用版、签名、公证），
+    写好签名的清单，存成草稿；`cargo xtask update-keygen` 生成发布密钥。
+  - 配置升到 `schema_version = 6`，新增 `auto_update`；缓存目录新增 `updates/`；新增 crate `ferry-update`。
 - 英文界面（ADR 0013）：设置界面、托盘菜单、拖文件的边缘胶囊和 Windows 安装程序都有英文和简体中文。
   - 缺省跟随系统：系统语言是中文时用中文，其他用英文；可以在“设置 → 外观 → 语言”里改，托盘菜单和边缘胶囊跟着换。
   - 活动记录和提示由界面按当前语言说：后台另带一个结构化的 `phrase`，原来的中文两行保留，界面认不出时照原文显示。

@@ -1,0 +1,148 @@
+name: Release
+
+# 推上 v* 的 tag（cargo xtask release 打的）时构建两个系统的安装包，写好签名的更新清单，
+# 存成 GitHub 上的草稿。维护者看过草稿后点“公开”，程序的自动更新才看得到它（ADR 0014）。
+#
+# 需要的 Secrets：
+#   SCREENFERRY_UPDATE_KEY、SCREENFERRY_UPDATE_KEY_PASSWORD   发布私钥和口令（cargo xtask update-keygen）
+#   MACOS_CERTIFICATE、MACOS_CERTIFICATE_PASSWORD               Developer ID 证书（.p12 的 base64）和口令
+#   NOTARY_KEY、NOTARY_KEY_ID、NOTARY_ISSUER                     公证用的 App Store Connect API 密钥（.p8 的 base64）
+# 没有 macOS 的那几个时，这次发布只含 Windows 安装包。
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    name: Windows 安装包
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装工具链
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.8
+          channel: stable
+      - name: 安装 Inno Setup 7.1.1
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP 'innosetup-7.1.1-x64.exe'
+          $dir = Join-Path $env:RUNNER_TEMP 'InnoSetup'
+          Invoke-WebRequest 'https://github.com/jrsoftware/issrc/releases/download/is-7_1_1/innosetup-7.1.1-x64.exe' -OutFile $installer
+          $hash = (Get-FileHash $installer -Algorithm SHA256).Hash
+          if ($hash -ne '8a5a6711c3766a6e5fb74f280ba0e3551e719ce94538d901fdbd1f8f9920b3f0') { throw "Inno Setup 安装程序的校验和不对：$hash" }
+          Start-Process $installer -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=$dir" -Wait
+          "ISCC=$(Join-Path $dir 'ISCC.exe')" >> $env:GITHUB_ENV
+      - run: cargo xtask bundle
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: target/bundle/windows/*-setup.exe
+          if-no-files-found: error
+
+  macos:
+    name: macOS 应用
+    runs-on: macos-latest
+    env:
+      MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      NOTARY_KEY: ${{ secrets.NOTARY_KEY }}
+      NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+      NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}
+    steps:
+      - name: 检查签名和公证的密钥
+        id: secrets
+        run: |
+          if [ -n "$MACOS_CERTIFICATE" ] && [ -n "$NOTARY_KEY" ] && [ -n "$NOTARY_KEY_ID" ] && [ -n "$NOTARY_ISSUER" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::没有配置 macOS 的签名和公证密钥，这次发布不含 macOS 版"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.secrets.outputs.ok == 'true'
+      - name: 安装工具链
+        if: steps.secrets.outputs.ok == 'true'
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - uses: subosito/flutter-action@v2
+        if: steps.secrets.outputs.ok == 'true'
+        with:
+          flutter-version: 3.47.8
+          channel: stable
+      - name: 导入 Developer ID 证书
+        if: steps.secrets.outputs.ok == 'true'
+        run: |
+          keychain="$RUNNER_TEMP/release.keychain-db"
+          password="$(uuidgen)"
+          echo "$MACOS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/certificate.p12" -P "$MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple: -k "$password" "$keychain"
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/certificate.p12"
+      - name: 打包、签名、公证
+        if: steps.secrets.outputs.ok == 'true'
+        run: |
+          echo "$NOTARY_KEY" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          SCREENFERRY_NOTARY_KEY="$RUNNER_TEMP/notary.p8" \
+          SCREENFERRY_NOTARY_KEY_ID="$NOTARY_KEY_ID" \
+          SCREENFERRY_NOTARY_ISSUER="$NOTARY_ISSUER" \
+            cargo xtask bundle --universal --notarize
+          rm "$RUNNER_TEMP/notary.p8"
+      - uses: actions/upload-artifact@v4
+        if: steps.secrets.outputs.ok == 'true'
+        with:
+          name: release-macos
+          path: target/bundle/macos/*-macos.zip
+          if-no-files-found: error
+
+  publish:
+    name: 发布草稿
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装工具链
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      - name: 写更新清单并签名
+        env:
+          SCREENFERRY_UPDATE_KEY: ${{ secrets.SCREENFERRY_UPDATE_KEY }}
+          SCREENFERRY_UPDATE_KEY_PASSWORD: ${{ secrets.SCREENFERRY_UPDATE_KEY_PASSWORD }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          cargo xtask manifest --version "$version" --dir dist \
+            --base-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}" \
+            --out dist/update.json
+          cargo xtask sign dist/update.json
+      - name: 构建证明
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*
+      - name: 存成草稿
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --draft --verify-tag \
+            --title "ScreenFerry $version" \
+            --notes-file "docs/releases/$version.md"

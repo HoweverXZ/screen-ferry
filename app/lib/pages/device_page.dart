@@ -323,6 +323,9 @@ class _Header extends StatelessWidget {
                         style: TextStyle(fontSize: 13, color: c.muted, fontFeatures: tabular),
                       ),
                     if (!state.isServer && peer.online) Pill(context.l10n.deviceControlsThis, tone: PillTone.accent),
+                    if (peer.version.isNotEmpty) Pill('ScreenFerry ${peer.version}'),
+                    if (_newerThan(state, peer.version) case final target?)
+                      Pill(context.l10n.devicePeerCanUpdate(target), tone: PillTone.accent),
                     if (place != null)
                       TextLink(
                         label: context.l10n.devicePlaceAdjust(place.side.name),
@@ -940,4 +943,12 @@ class _ManageState extends State<_Manage> {
       ],
     );
   }
+}
+
+/// 对方比本机知道的最新版本（本机的版本、或者发现的新版本）旧时，返回那个版本。
+String? _newerThan(AppState state, String peerVersion) {
+  if (peerVersion.isEmpty) return null;
+  final latest = state.updateInfo.latest?.version;
+  final target = latest != null && compareVersions(latest, state.version) > 0 ? latest : state.version;
+  return target.isNotEmpty && compareVersions(target, peerVersion) > 0 ? target : null;
 }

@@ -15,12 +15,15 @@ ferry-trust.workspace = true
 ferry-types.workspace = true
 if-addrs.workspace = true
 mdns-sd.workspace = true
+ring.workspace = true
 rustls.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["io-util", "net"] }
 tokio-rustls.workspace = true
+ureq.workspace = true
 
 [dev-dependencies]
+ring.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "time"] }
 
 [lints]

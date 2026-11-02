@@ -15,7 +15,10 @@ pub const DEFAULT_PORT: u16 = 24810;
 
 /// 本机声明的可选能力。`command_key`：本机的快捷键以 Command 键为主。
 pub(crate) fn capabilities(clipboard: bool, command_key: bool) -> Capabilities {
-    let mut caps = Capabilities::FILES | Capabilities::EDGE_DROP | Capabilities::REMOTE_SETTINGS;
+    let mut caps = Capabilities::FILES
+        | Capabilities::EDGE_DROP
+        | Capabilities::REMOTE_SETTINGS
+        | Capabilities::APP_INFO;
     if clipboard {
         caps |= Capabilities::CLIPBOARD;
     }
@@ -23,6 +26,13 @@ pub(crate) fn capabilities(clipboard: bool, command_key: bool) -> Capabilities {
         caps |= Capabilities::COMMAND_KEY;
     }
     caps
+}
+
+/// 本机的程序版本，握手后经 `AppInfo` 告诉对方。
+pub(crate) fn app_info() -> Message {
+    Message::AppInfo {
+        version: env!("CARGO_PKG_VERSION").to_owned(),
+    }
 }
 
 /// 对方是什么系统：快捷键以 Command 为主的是 macOS，其余目前都是 Windows。

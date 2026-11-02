@@ -17,6 +17,7 @@
 - **安全**：首次连接核对 6 位配对码，之后只认对方的证书指纹。
 - **连得上**：局域网自动发现；网络不支持时按地址连接，或从控制端邀请。
 - **轻量**：Rust 编写的后台常驻托盘；设置界面按需启动，关闭即退出。
+- **自动更新**：每天检查一次，在后台下载好，你点“重启并更新”时安装；装之前先校验签名。
 - **中英文**：界面、托盘菜单和安装程序有简体中文和英文，默认跟随系统，可以在“设置 → 外观”里切换。
 
 ## 工作方式
@@ -59,14 +60,16 @@ sequenceDiagram
 
 | 系统 | 方式 |
 |---|---|
-| macOS | 从源码打包（见[从源码构建](#从源码构建)），把 `ScreenFerry.app` 拖进“应用程序”。首次运行时在「系统设置 → 隐私与安全性 → 辅助功能」中允许 ScreenFerry。 |
-| Windows | 在 [Actions](https://github.com/icloudza/screen-ferry/actions/workflows/ci.yml) 最近一次运行的 Artifacts 中下载 `ScreenFerry-windows-setup-<提交号>`，运行其中的安装程序。 |
+| macOS | 在 [Releases](https://github.com/icloudza/screen-ferry/releases/latest) 下载 `ScreenFerry-<版本>-macos.zip`，解压后把 `ScreenFerry.app` 拖进“应用程序”。首次运行时在「系统设置 → 隐私与安全性 → 辅助功能」中允许 ScreenFerry。 |
+| Windows | 在 [Releases](https://github.com/icloudza/screen-ferry/releases/latest) 下载 `ScreenFerry-<版本>-windows-x64-setup.exe` 并运行。 |
+
+ScreenFerry 每天检查一次更新，有新版本时在后台下载好，你方便时点“重启并更新”即可；可以在“设置 → 关于”里关掉自动检查。安装前会用内置的签名公钥校验更新。
 
 Windows 安装包：
 
 - 没有代码签名，SmartScreen 拦截时点“更多信息 → 仍要运行”。
 - 装进 Program Files，并在防火墙中放行专用网络和域网络。
-- 升级直接运行新的安装包，正在运行的 ScreenFerry 会自动退出，装完重新启动。卸载在“设置 → 应用”，配置和配对记录保留。
+- 更新时弹一次管理员确认后静默安装。另一台电脑正控制这台时，要用这台自己的键鼠点确认。卸载在“设置 → 应用”，配置和配对记录保留。
 
 ## 使用
 
@@ -108,7 +111,7 @@ macOS 另需 Xcode；Windows 另需 Visual Studio 2022（使用 C++ 的桌面开
 cargo xtask bundle
 ```
 
-在哪个系统上运行就打哪个系统的包，产物在 `target/bundle/`：macOS 是 `ScreenFerry.app`，Windows 是 `ScreenFerry-<版本>-windows-x64-setup.exe`。
+在哪个系统上运行就打哪个系统的包，产物在 `target/bundle/`：macOS 是 `ScreenFerry.app` 和它的更新包 `ScreenFerry-<版本>-macos.zip`，Windows 是 `ScreenFerry-<版本>-windows-x64-setup.exe`。发布用 `cargo xtask release <版本>`，见 ADR 0014。
 macOS 上钥匙串里有 Developer ID 证书时自动签名（也可以用 `SCREENFERRY_SIGN_IDENTITY` 指定），否则用临时签名，每次重新打包都要重新授予辅助功能权限。
 
 ## 开发
@@ -128,7 +131,7 @@ flowchart TB
   end
   subgraph L1["L1 纯逻辑"]
     direction LR
-    proto["proto"] ~~~ core["core"] ~~~ trust["trust"] ~~~ platform["platform（trait）"]
+    proto["proto"] ~~~ core["core"] ~~~ trust["trust"] ~~~ update["update"] ~~~ platform["platform（trait）"]
   end
   subgraph L0["L0 领域类型"]
     types["ferry-types"]

@@ -146,6 +146,9 @@ const _runLogKeep = 1000;
 /// 提问题的地方：GitHub 的问题表单，版本和系统预先填好。
 const _issueUrl = 'https://github.com/icloudza/screen-ferry/issues/new';
 
+/// 下载页面：不能自己更新时请用户来这里手动安装。
+const _releasesUrl = 'https://github.com/icloudza/screen-ferry/releases/latest';
+
 /// 已经导出的诊断文件。
 class ExportedDiagnostics {
   const ExportedDiagnostics({required this.path, required this.bytes});
@@ -249,6 +252,35 @@ class AppState extends ChangeNotifier {
   /// macOS：本机开着“自然滚动”。
   bool get naturalScrolling => _daemon?.local.naturalScrolling ?? false;
   String get version => _daemon?.local.version ?? '';
+
+  // ── 版本更新 ──
+
+  UpdateInfo get updateInfo => _daemon?.update ?? const UpdateInfo();
+
+  /// 侧栏和托盘提醒的版本：下载好可以重启更新的，或者发现了但不能自己装的。
+  String? get updateReminder {
+    final u = updateInfo;
+    final latest = u.latest;
+    if (latest == null) return null;
+    if (u.status == UpdateStatus.ready) return latest.version;
+    if (u.status == UpdateStatus.available && !u.canInstall) return latest.version;
+    return null;
+  }
+
+  /// 仪表盘横幅：下载好、用户还没点过“稍后”。
+  bool get showUpdateBanner {
+    final ready = updateInfo.readyVersion;
+    return ready != null && ready != updateInfo.dismissed;
+  }
+
+  void checkUpdate() => _send(const CheckUpdateRequest());
+  void downloadUpdate() => _send(const DownloadUpdateRequest());
+  void cancelUpdate() => _send(const CancelUpdateRequest());
+  void installUpdate() => _send(const InstallUpdateRequest());
+  void dismissUpdate(String version) => _send(DismissUpdateRequest(version));
+
+  /// 在浏览器里打开下载页面。
+  Future<void> openReleases() => openLink(_releasesUrl);
 
   // ── 连接 ──
 

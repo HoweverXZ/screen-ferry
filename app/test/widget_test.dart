@@ -1217,4 +1217,144 @@ void main() {
       await settle(tester);
     });
   });
+
+  group('版本更新', () {
+    const release = UpdateRelease(
+      version: '0.2.0',
+      size: 21000000,
+      notesZh: '界面有了英文\n运行日志与诊断导出\nWindows 安装包\n按地址连接\n设置界面只用一个窗口\n关于页更简洁',
+      notesEn:
+          'English UI\nDiagnostics log\nWindows installer\nConnect by address\nOne settings window\nSimpler About page',
+    );
+
+    Future<(AppState, DemoBackend)> about(WidgetTester tester, {Size size = const Size(1160, 780)}) async {
+      final backend = DemoBackend(animate: false, offer: release);
+      final state = await launch(tester, size, backend: backend);
+      state.updateSettings(const SettingsPatch(autoUpdate: false));
+      state.go(SfPage.about);
+      await settle(tester);
+      return (state, backend);
+    }
+
+    testWidgets('检查到新版本后手动下载，再重启更新', (tester) async {
+      final (state, backend) = await about(tester);
+      expect(find.text('当前版本 0.1.0'), findsOneWidget);
+
+      await tester.tap(find.text('检查更新'));
+      await settle(tester);
+      expect(backend.sent.whereType<CheckUpdateRequest>(), hasLength(1));
+      expect(find.text('发现新版本 0.2.0'), findsOneWidget);
+      expect(find.text('界面有了英文'), findsOneWidget);
+
+      await tester.tap(find.text('下载'));
+      await settle(tester);
+      expect(backend.sent.whereType<DownloadUpdateRequest>(), hasLength(1));
+      expect(find.textContaining('已在后台下载好'), findsOneWidget);
+      expect(find.text('重启时键鼠会断开约 5 秒'), findsOneWidget);
+
+      await tapInView(tester, find.text('重启并更新'));
+      expect(backend.sent.whereType<InstallUpdateRequest>(), hasLength(1));
+      expect(state.updateInfo.status, UpdateStatus.installing);
+      expect(find.text('正在安装 0.2.0…'), findsOneWidget);
+    });
+
+    testWidgets('下载好后侧栏和仪表盘都有提醒，点稍后收起横幅', (tester) async {
+      final (state, backend) = await about(tester);
+      await tester.tap(find.text('检查更新'));
+      await settle(tester);
+      await tester.tap(find.text('下载'));
+      await settle(tester);
+
+      final pill = find.descendant(of: find.byType(Sidebar), matching: find.text('更新到 0.2.0'));
+      expect(pill, findsOneWidget);
+      state.go(SfPage.overview);
+      await settle(tester);
+      expect(find.text('新版本 0.2.0 已准备好'), findsOneWidget);
+
+      await tester.tap(find.descendant(of: find.byKey(const ValueKey('banner-update')), matching: find.text('稍后')));
+      await settle(tester);
+      expect(backend.sent.whereType<DismissUpdateRequest>().single.version, '0.2.0');
+      expect(find.text('新版本 0.2.0 已准备好'), findsNothing);
+      expect(pill, findsOneWidget, reason: '侧栏的提醒还在');
+
+      await tester.tap(pill);
+      await settle(tester);
+      expect(state.page, SfPage.about);
+    });
+
+    testWidgets('关掉自动检查更新，把设置发给后台', (tester) async {
+      final backend = DemoBackend(animate: false);
+      final state = await launch(tester, const Size(1160, 780), backend: backend);
+      state.go(SfPage.about);
+      await settle(tester);
+      expect(state.settings.autoUpdate, isTrue);
+      await tester.tap(find.bySemanticsLabel('自动检查更新').last);
+      await settle(tester);
+      expect(state.settings.autoUpdate, isFalse);
+      expect(backend.sent.whereType<UpdateSettingsRequest>().last.settings.toJson(), {'auto_update': false});
+    });
+
+    testWidgets('不能自己更新时请用户去下载页面', (tester) async {
+      final opened = <String>[];
+      final backend = DemoBackend(
+        animate: false,
+        update: const UpdateInfo(status: UpdateStatus.available, latest: release),
+      );
+      final state = await launch(tester, const Size(1160, 780), backend: backend, opened: opened);
+      state.go(SfPage.about);
+      await settle(tester);
+      expect(find.text('发现新版本 0.2.0，要手动安装'), findsOneWidget);
+      await tester.tap(find.text('打开下载页面'));
+      await settle(tester);
+      expect(opened, ['https://github.com/icloudza/screen-ferry/releases/latest']);
+    });
+
+    testWidgets('出错时说明原因', (tester) async {
+      for (final (error, title) in [
+        (UpdateError.unreachable, '连不上更新服务器'),
+        (UpdateError.verifyFailed, '安装包没有通过校验，已删除'),
+        (UpdateError.stale, '无法确认是不是最新版'),
+        (UpdateError.noKeys, '这份程序不能检查更新'),
+      ]) {
+        final backend = DemoBackend(
+          animate: false,
+          update: UpdateInfo(status: UpdateStatus.failed, error: error),
+        );
+        final state = await launch(tester, const Size(1160, 780), backend: backend);
+        state.go(SfPage.about);
+        await settle(tester);
+        expect(find.text(title), findsOneWidget, reason: '$error');
+      }
+    });
+
+    testWidgets('被另一台电脑控制的 Windows 提醒在本机确认管理员权限', (tester) async {
+      final backend = DemoBackend(
+        role: Role.client,
+        animate: false,
+        update: const UpdateInfo(
+          status: UpdateStatus.ready,
+          latest: release,
+          canInstall: true,
+          needsLocalConfirm: true,
+        ),
+      );
+      final state = await launch(tester, const Size(1160, 780), backend: backend);
+      state.go(SfPage.about);
+      await settle(tester);
+      expect(find.textContaining('从另一台电脑操作时点不到它'), findsOneWidget);
+      expect(find.text('安装'), findsOneWidget);
+    });
+
+    testWidgets('英文和窄屏下更新卡片能正常显示', (tester) async {
+      final backend = DemoBackend(
+        animate: false,
+        update: const UpdateInfo(status: UpdateStatus.ready, latest: release, canInstall: true),
+      );
+      final state = await launch(tester, const Size(375, 667), backend: backend, system: const Locale('en'));
+      state.go(SfPage.about);
+      await settle(tester);
+      expect(find.text('Version 0.2.0 is available'), findsOneWidget);
+      expect(find.text('Restart to Update'), findsOneWidget);
+    });
+  });
 }

@@ -72,12 +72,14 @@ clipboard null | { to_peer, peer, chars, bytes, preview, rich（带格式）, at
 peers[]   { name（它自己报的名字）, fingerprint, short, online, last_seen,
             side（服务端：在本机哪一侧；客户端为 null）, cursor（光标正在它上面）,
             alias（本机给它起的名字，空为没起）, platform（macos|windows，本次运行还没看出来时为空）,
-            addr（上次连上的地址，没有为空；端口是缺省值时省略） }
+            addr（上次连上的地址，没有为空；端口是缺省值时省略）,
+            version（它的 ScreenFerry 版本，本次运行还没连上过为空） }
 found[]   { name, fingerprint, short, addr, paired }        只有客户端会有
 settings  { name, side(left|right|top|bottom), layout[], announce, clipboard,
             clipboard_limit_mb（剪贴板单项上限，1–64）, mouse_dpi（本机鼠标的 DPI，100–12800）,
             server（客户端：只连这个地址，空为自动寻找）, autostart, theme(system|light|dark), accent,
-            language(system|zh|en)（界面语言，system 为跟随系统）, devices[] }
+            language(system|zh|en)（界面语言，system 为跟随系统）,
+            auto_update（每天检查一次更新，有新版本时在后台下载好）, devices[] }
           layout[] { fingerprint, side }：单独安排过位置的设备，按先后排列，同一侧的几台按这个先后
           平分那条边（左右两侧从上到下，上下两侧从左到右）；side 是没有列出的设备放的那一侧
           devices[] 单独设置过的设备，没列出的用缺省值（括号里）：
@@ -89,6 +91,13 @@ settings  { name, side(left|right|top|bottom), layout[], announce, clipboard,
               keys[] { from, to }：USB HID 扩展用法码，to 为 0 表示不发送 }
             鼠标、按键、防误切只在本机控制它（本机是服务端）时生效；剪贴板、拖文件两边都生效
 activity[] { hour, switches, clips, connected_secs }         最近 48 小时，只列有活动的小时
+update    { status(idle|checking|up_to_date|available|downloading|ready|installing|failed),
+            latest(null | { version, published（Unix 毫秒）, size（本机平台的更新包大小）, notes_zh, notes_en,
+                            breaks_peers（新版本改了线协议，连着的设备也要更新） }),
+            done · total（下载进度，字节）· error(null | unreachable|verify_failed|stale|no_keys|install_failed)
+            message（出错的原话）· checked_at · can_install（这份能自己装更新）
+            needs_local_confirm（Windows 被控制时，安装要在本机确认 UAC）· dismissed（横幅上点过“稍后”的版本） }
+          见 ADR 0014；旧版后台没有这个字段
 ```
 
 ### 4.1 日志条目与 phrase
@@ -127,6 +136,10 @@ activity[] { hour, switches, clips, connected_secs }         最近 48 小时，
 | 提示 | `peer_settings_opened`、`peer_settings_unsupported`、`files_disabled`、`sending`、`peer_offline` | `name` |
 | 提示 | `error`、`autostart_failed`、`save_failed`、`peers_read_failed`、`remove_failed`、`diagnostics_failed` | `message` |
 | 提示 | `diagnostics_missing`、`not_connected`、`server_gone`、`paused_connect_later`、`not_sharing_invite_later` | |
+| 日志、提示 | `update_installed` | 日志 `from`、`to`；提示 `to` |
+| 日志 | `update_not_installed` | `version`、`current` |
+| 日志、提示 | `update_failed` | `message` |
+| 提示 | `update_cancelled` | |
 
 ## 5. 界面 → 后台
 
@@ -151,6 +164,11 @@ activity[] { hour, switches, clips, connected_secs }         最近 48 小时，
 | `reveal_diagnostics` | | 在访达或资源管理器里显示最近导出的诊断文件 |
 | `open_logs_folder` | | 打开运行日志所在的文件夹 |
 | `set_verbose` | `on` | 打开或关闭详细记录（DEBUG 级别）。重启后总是关着 |
+| `check_update` | | 马上检查更新，结果体现在 `state.update` 里 |
+| `download_update` | | 下载发现的新版本（关掉了自动检查时） |
+| `cancel_update` | | 停下正在进行的下载，已下载的部分留着下次接着用 |
+| `install_update` | | 安装下载好的新版本：后台退出，新版本启动后设置界面重新打开（ADR 0014） |
+| `dismiss_update` | `version` | 仪表盘横幅上点了“稍后”，到下一个版本前不再提示 |
 | `quit` | | 请后台退出：停下共享（归还键鼠、松开按键），给所有界面发 `quit` 后退出。`screenferry quit` 用，安装程序升级、卸载前靠它放开程序文件 |
 | `send_files` | `paths`：本机绝对路径的列表；可选 `to`：目标设备的证书指纹 | 把这些文件和文件夹发给 `to`，不填时发给光标最近去过的那台（只连着一台时就是它；`screenferry send` 用），结果以 `toast` 和日志告知 |
 

@@ -531,6 +531,13 @@ where
                     .events
                     .emit(Event::OpenSettings { peer: session.peer });
             }
+            Message::AppInfo { version } => {
+                info!(peer = %mark::device(&session.name), %version, "对方的版本");
+                self.config.events.emit(Event::PeerVersion {
+                    peer: session.peer,
+                    version,
+                });
+            }
             other => debug!(kind = format_args!("{:#06x}", other.type_id()), "忽略消息"),
         }
     }
@@ -968,6 +975,9 @@ async fn handshake<P: ConfirmPairing>(
             let remote = timeout(HANDSHAKE_TIMEOUT, expect_displays(&mut framed))
                 .await
                 .map_err(|_| Error::Timeout("等待对方的显示器信息"))??;
+            if welcome.capabilities.contains(Capabilities::APP_INFO) {
+                send(&mut framed, &crate::link::app_info()).await?;
+            }
             let new = NewSession {
                 id: welcome.session,
                 peer,
@@ -1056,7 +1066,12 @@ async fn run_session(
                         send(&mut framed, &Message::Pong { nonce }).await?;
                     }
                     Some(Message::Bye(_)) | None => return Ok(()),
-                    Some(message @ (Message::Displays(_) | Message::DropHint(_) | Message::OpenSettings)) => {
+                    Some(
+                        message @ (Message::Displays(_)
+                        | Message::DropHint(_)
+                        | Message::OpenSettings
+                        | Message::AppInfo { .. }),
+                    ) => {
                         let _ = arrivals.send(Arrival::Message { id, message }).await;
                     }
                     Some(other) => debug!(kind = format_args!("{:#06x}", other.type_id()), "忽略消息"),

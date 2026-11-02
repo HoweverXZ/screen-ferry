@@ -81,6 +81,7 @@ class DaemonState {
     required this.found,
     required this.settings,
     required this.activity,
+    this.update = const UpdateInfo(),
   });
 
   factory DaemonState.fromJson(Json j) => DaemonState(
@@ -93,6 +94,7 @@ class DaemonState {
     found: [for (final f in _list(j['found'])) FoundDevice.fromJson(f)],
     settings: DaemonSettings.fromJson(j['settings'] as Json? ?? const {}),
     activity: [for (final a in _list(j['activity'])) HourActivity.fromJson(a)],
+    update: j['update'] is Json ? UpdateInfo.fromJson(j['update'] as Json) : const UpdateInfo(),
   );
 
   final Local local;
@@ -106,6 +108,116 @@ class DaemonState {
   final List<FoundDevice> found;
   final DaemonSettings settings;
   final List<HourActivity> activity;
+
+  /// 版本更新。旧版后台没有，为缺省值。
+  final UpdateInfo update;
+}
+
+/// 版本更新的进度（ADR 0014）。
+enum UpdateStatus { idle, checking, upToDate, available, downloading, ready, installing, failed }
+
+/// 更新出错的原因。
+enum UpdateError { unreachable, verifyFailed, stale, noKeys, installFailed }
+
+class UpdateInfo {
+  const UpdateInfo({
+    this.status = UpdateStatus.idle,
+    this.latest,
+    this.done = 0,
+    this.total = 0,
+    this.error,
+    this.message = '',
+    this.checkedAt,
+    this.canInstall = false,
+    this.needsLocalConfirm = false,
+    this.dismissed = '',
+  });
+
+  factory UpdateInfo.fromJson(Json j) => UpdateInfo(
+    status: _enum(UpdateStatus.values, _camel(j['status']), UpdateStatus.idle),
+    latest: j['latest'] is Json ? UpdateRelease.fromJson(j['latest'] as Json) : null,
+    done: _int(j['done']),
+    total: _int(j['total']),
+    error: _enumOrNull(UpdateError.values, _camel(j['error'])),
+    message: _str(j['message']),
+    checkedAt: _time(j['checked_at']),
+    canInstall: _bool(j['can_install']),
+    needsLocalConfirm: _bool(j['needs_local_confirm']),
+    dismissed: _str(j['dismissed']),
+  );
+
+  final UpdateStatus status;
+
+  /// 发现的新版本；没有时为 null。
+  final UpdateRelease? latest;
+
+  /// 下载中：已下载、总共多少字节。
+  final int done;
+  final int total;
+  final UpdateError? error;
+
+  /// 出错的原话（中文）。
+  final String message;
+
+  /// 上次检查完的时刻；本次运行还没检查过为 null。
+  final DateTime? checkedAt;
+
+  /// 这份程序能自己装更新；不能时请用户去下载页面。
+  final bool canInstall;
+
+  /// Windows 被另一台电脑控制时，安装要在这台电脑上确认。
+  final bool needsLocalConfirm;
+
+  /// 仪表盘横幅上点过“稍后”的版本。
+  final String dismissed;
+
+  /// 下载好、可以重启更新的版本。
+  String? get readyVersion => status == UpdateStatus.ready ? latest?.version : null;
+}
+
+/// 新版本。
+class UpdateRelease {
+  const UpdateRelease({
+    required this.version,
+    this.published,
+    this.size = 0,
+    this.notesZh = '',
+    this.notesEn = '',
+    this.breaksPeers = false,
+  });
+
+  factory UpdateRelease.fromJson(Json j) => UpdateRelease(
+    version: _str(j['version']),
+    published: _time(j['published']),
+    size: _int(j['size']),
+    notesZh: _str(j['notes_zh']),
+    notesEn: _str(j['notes_en']),
+    breaksPeers: _bool(j['breaks_peers']),
+  );
+
+  final String version;
+  final DateTime? published;
+
+  /// 本机这个平台的更新包大小；没有时为 0。
+  final int size;
+
+  /// 更新说明，每行一条。
+  final String notesZh;
+  final String notesEn;
+
+  /// 新版本改了两台之间的通信方式：连着的设备也要更新才能再连上。
+  final bool breaksPeers;
+}
+
+/// 比较两个 `x.y.z` 版本号：前者更新时为正。读不懂的部分当作 0。
+int compareVersions(String a, String b) {
+  List<int> parts(String v) => [for (final p in v.split('-').first.split('.')) int.tryParse(p) ?? 0];
+  final (x, y) = (parts(a), parts(b));
+  for (var i = 0; i < 3; i++) {
+    final d = (i < x.length ? x[i] : 0) - (i < y.length ? y[i] : 0);
+    if (d != 0) return d;
+  }
+  return 0;
 }
 
 class Local {
@@ -327,6 +439,7 @@ class PeerInfo {
     this.alias = '',
     this.platform = '',
     this.addr = '',
+    this.version = '',
   });
 
   factory PeerInfo.fromJson(Json j) => PeerInfo(
@@ -340,6 +453,7 @@ class PeerInfo {
     alias: _str(j['alias']),
     platform: _str(j['platform']),
     addr: _str(j['addr']),
+    version: _str(j['version']),
   );
 
   /// 它自己报的名字。
@@ -365,6 +479,9 @@ class PeerInfo {
 
   /// 上次连上时它的地址（只知道 IP 时就是 IP）；没连上过为空。
   final String addr;
+
+  /// 它的 ScreenFerry 版本；本次运行还没连上过、或者它的版本太旧不说时为空。
+  final String version;
 
   /// 显示给用户的名字：起过名字就用起的。
   String get displayName => alias.trim().isEmpty ? name : alias.trim();
@@ -433,6 +550,7 @@ class DaemonSettings {
     required this.theme,
     required this.accent,
     this.language = UiLanguage.system,
+    this.autoUpdate = true,
     this.devices = const [],
   });
 
@@ -455,6 +573,7 @@ class DaemonSettings {
     theme: _enum(UiTheme.values, j['theme'], UiTheme.system),
     accent: _int(j['accent']),
     language: _enum(UiLanguage.values, j['language'], UiLanguage.system),
+    autoUpdate: j['auto_update'] is bool ? j['auto_update'] as bool : true,
     devices: [for (final d in _list(j['devices'])) DeviceSettings.fromJson(d)],
   );
 
@@ -482,6 +601,9 @@ class DaemonSettings {
   /// 界面语言。
   final UiLanguage language;
 
+  /// 每天检查一次更新，有新版本时在后台下载好。
+  final bool autoUpdate;
+
   /// 单独设置过的设备；没列出的用缺省设置。
   final List<DeviceSettings> devices;
 
@@ -503,6 +625,7 @@ class DaemonSettings {
     theme: p.theme ?? theme,
     accent: p.accent ?? accent,
     language: p.language ?? language,
+    autoUpdate: p.autoUpdate ?? autoUpdate,
     devices: devices,
   );
 
@@ -523,6 +646,7 @@ class DaemonSettings {
       theme: theme,
       accent: accent,
       language: language,
+      autoUpdate: autoUpdate,
       devices: [
         for (final x in next)
           if (!x.isDefault) x,
@@ -1168,6 +1292,47 @@ class SetVerboseRequest extends Request {
   Json toJson() => {'type': 'set_verbose', 'on': on};
 }
 
+/// 马上检查更新。
+class CheckUpdateRequest extends Request {
+  const CheckUpdateRequest();
+
+  @override
+  Json toJson() => {'type': 'check_update'};
+}
+
+/// 下载新版本。
+class DownloadUpdateRequest extends Request {
+  const DownloadUpdateRequest();
+
+  @override
+  Json toJson() => {'type': 'download_update'};
+}
+
+/// 停下正在进行的下载。
+class CancelUpdateRequest extends Request {
+  const CancelUpdateRequest();
+
+  @override
+  Json toJson() => {'type': 'cancel_update'};
+}
+
+/// 安装下载好的新版本：后台会退出，新版本启动后界面重新打开。
+class InstallUpdateRequest extends Request {
+  const InstallUpdateRequest();
+
+  @override
+  Json toJson() => {'type': 'install_update'};
+}
+
+/// 仪表盘横幅上点了“稍后”。
+class DismissUpdateRequest extends Request {
+  const DismissUpdateRequest(this.version);
+  final String version;
+
+  @override
+  Json toJson() => {'type': 'dismiss_update', 'version': version};
+}
+
 /// 要修改的设置；为 null 的字段不变，也不会发出去。
 class SettingsPatch {
   const SettingsPatch({
@@ -1184,6 +1349,7 @@ class SettingsPatch {
     this.theme,
     this.accent,
     this.language,
+    this.autoUpdate,
   });
 
   final String? name;
@@ -1203,6 +1369,7 @@ class SettingsPatch {
   final UiTheme? theme;
   final int? accent;
   final UiLanguage? language;
+  final bool? autoUpdate;
 
   Json toJson() => {
     'name': ?name,
@@ -1218,6 +1385,7 @@ class SettingsPatch {
     'theme': ?theme?.name,
     'accent': ?accent,
     'language': ?language?.name,
+    'auto_update': ?autoUpdate,
   };
 
   /// 后面的补丁覆盖前面的。
@@ -1235,6 +1403,7 @@ class SettingsPatch {
     theme: o.theme ?? theme,
     accent: o.accent ?? accent,
     language: o.language ?? language,
+    autoUpdate: o.autoUpdate ?? autoUpdate,
   );
 
   /// 去掉已经与 `s` 一致的字段：后台确认过的改动不再需要覆盖。
@@ -1256,6 +1425,7 @@ class SettingsPatch {
     theme: theme == s.theme ? null : theme,
     accent: accent == s.accent ? null : accent,
     language: language == s.language ? null : language,
+    autoUpdate: autoUpdate == s.autoUpdate ? null : autoUpdate,
   );
 
   bool get isEmpty => toJson().isEmpty;

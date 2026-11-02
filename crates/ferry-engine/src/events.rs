@@ -75,6 +75,8 @@ pub enum Event {
     Transfer(TransferUpdate),
     /// 服务端：`peer` 请本机打开设置界面，翻到它的设置页。
     OpenSettings { peer: Fingerprint },
+    /// 对方告诉了它的程序版本（握手后一次）。
+    PeerVersion { peer: Fingerprint, version: String },
     /// 客户端：请 `peer` 打开它的设置界面的结果。`sent` 为假表示对方的版本不支持。
     PeerSettings { peer: Fingerprint, sent: bool },
     /// 客户端开始在 `port` 上等服务端的邀请。

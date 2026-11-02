@@ -4,10 +4,12 @@ import '../l10n/l10n.dart';
 import '../state/app_scope.dart';
 import '../state/app_state.dart';
 import '../theme/tokens.dart';
+import '../widgets/controls.dart';
 import '../widgets/group.dart';
 import '../widgets/page_scaffold.dart';
 import '../widgets/pressable.dart';
 import '../widgets/surface.dart';
+import 'update_panel.dart';
 
 class AboutPage extends StatelessWidget {
   const AboutPage({super.key});
@@ -29,41 +31,56 @@ class AboutPage extends StatelessWidget {
       ),
       children: [
         SfCard(
-          child: BannerRow(
-            gap: 22,
-            leading: Container(
-              width: 88,
-              height: 88,
-              decoration: ShapeDecoration(color: c.accent, shape: continuous(26)),
-              child: Center(child: FerryGlyph(size: 50, color: c.onAccent)),
-            ),
-            body: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 6,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    const Text('ScreenFerry', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),
-                    if (state.version.isNotEmpty) Pill('v${state.version}', tone: PillTone.accent),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(context.l10n.aboutTagline, style: TextStyle(color: c.muted, height: 1.5)),
-              ],
-            ),
-            trailing: PillButton(
-              label: context.l10n.aboutCheckUpdates,
-              icon: Icons.refresh_rounded,
-              soft: true,
-              onPressed: () => state.showToast(context.l10n.aboutUpdatesSoon),
-            ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 66,
+                    height: 66,
+                    decoration: ShapeDecoration(color: c.accent, shape: continuous(20)),
+                    child: Center(child: FerryGlyph(size: 36, color: c.onAccent)),
+                  ),
+                  const SizedBox(width: 18),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('ScreenFerry', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),
+                        const SizedBox(height: 2),
+                        Text(
+                          state.version.isEmpty
+                              ? context.l10n.aboutTagline
+                              : context.l10n.aboutVersionLine(state.version),
+                          style: TextStyle(color: c.muted, height: 1.5),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
+              const UpdatePanel(),
+            ],
           ),
         ),
         SfGroup(
           children: [
+            SfRow(
+              icon: Icons.update_rounded,
+              title: context.l10n.updateAuto,
+              subtitle: switch (state.updateInfo.checkedAt) {
+                final at? =>
+                  '${context.l10n.updateAutoHint} · ${context.l10n.updateLastChecked(timeAgo(context.l10n, at))}',
+                null => context.l10n.updateAutoHint,
+              },
+              trailing: SfSwitch(
+                value: state.settings.autoUpdate,
+                label: context.l10n.updateAuto,
+                onChanged: state.online ? (v) => state.updateSettings(SettingsPatch(autoUpdate: v)) : null,
+              ),
+            ),
             SfRow(
               icon: Icons.code_rounded,
               title: context.l10n.aboutAuthor,

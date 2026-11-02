@@ -26,6 +26,12 @@ pub enum Error {
     NoPeerCertificate,
     #[error("局域网发现失败：{0}")]
     Discovery(String),
+    #[error("{0}")]
+    Http(String),
+    #[error("内容比预期的大")]
+    TooLarge,
+    #[error("已取消")]
+    Cancelled,
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

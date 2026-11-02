@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-02
+
 ### 新增
 
 - workspace 骨架：14 个 crate、`cargo xtask lint` 规范检查、CI。

@@ -458,7 +458,7 @@ pub struct Settings {
     pub layout: Vec<Placement>,
     pub announce: bool,
     pub clipboard: bool,
-    /// 剪贴板单项（一种格式）的大小上限，单位 MB，1–64。
+    /// 剪贴板单项（一种格式）的大小上限，单位 MB，1–1024。
     #[serde(default = "default_clipboard_limit")]
     pub clipboard_limit_mb: u32,
     /// 本机鼠标的 DPI，100–12800。每台设备的光标速度以它为准。
@@ -499,7 +499,7 @@ pub struct SettingsPatch {
     pub announce: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub clipboard: Option<bool>,
-    /// 1–64，超出的收进范围内。
+    /// 1–1024，超出的收进范围内。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub clipboard_limit_mb: Option<u32>,
     /// 100–12800，超出的收进范围内。

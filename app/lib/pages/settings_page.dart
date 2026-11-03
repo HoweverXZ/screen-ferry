@@ -1,5 +1,7 @@
 // 设置：外观、鼠标与剪贴板、通用，以及进入“关于”。按键映射、滚动方向等在“设备”里逐台设置。
 
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../l10n/l10n.dart';
@@ -195,38 +197,60 @@ class _LimitSlider extends StatefulWidget {
 }
 
 class _LimitSliderState extends State<_LimitSlider> {
-  double? _dragging;
+  /// 拖动中的 MB 值；松手才提交。
+  int? _dragging;
+
+  /// 一 MB 到一 GB 跨三个数量级，线性刻度的大半段都花在几 MB 上，用对数刻度。
+  static const _divisions = 100;
+
+  /// MB 值在滑杆上的位置：0 是一 MB，1 是一 GB。
+  static double _position(int mb) {
+    const range = DaemonSettings.clipboardLimitRange;
+    final ratio = range.max / range.min;
+    final value = math.min(math.max(mb, range.min), range.max);
+    final position = math.log(value / range.min) / math.log(ratio);
+    return math.min(math.max(position, 0.0), 1.0);
+  }
+
+  /// 滑杆位置对应的 MB 值，收进 1–1024。
+  static int _megabytes(double position) {
+    const range = DaemonSettings.clipboardLimitRange;
+    final ratio = range.max / range.min;
+    final value = (range.min * math.pow(ratio, position)).round();
+    return math.min(math.max(value, range.min), range.max);
+  }
+
+  static String _label(int mb) => mb >= 1024 ? '1 GB' : '$mb MB';
 
   @override
   Widget build(BuildContext context) {
     final c = SfColors.of(context);
     const range = DaemonSettings.clipboardLimitRange;
     final onChanged = widget.onChanged;
-    final shown = (_dragging ?? widget.value.toDouble()).clamp(range.min.toDouble(), range.max.toDouble());
+    final mb = _dragging ?? math.min(math.max(widget.value, range.min), range.max);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         SizedBox(
           width: 180,
           child: Slider(
-            value: shown,
-            min: range.min.toDouble(),
-            max: range.max.toDouble(),
-            divisions: range.max - range.min,
-            semanticFormatterCallback: (v) => '${v.round()} MB',
-            onChanged: onChanged == null ? null : (v) => setState(() => _dragging = v),
+            value: _position(mb),
+            divisions: _divisions,
+            semanticFormatterCallback: (v) => _label(_megabytes(v)),
+            onChanged: onChanged == null ? null : (v) => setState(() => _dragging = _megabytes(v)),
             onChangeEnd: onChanged == null
                 ? null
                 : (v) {
                     setState(() => _dragging = null);
-                    if (v.round() != widget.value) onChanged(v.round());
+                    final wanted = _megabytes(v);
+                    if (wanted != widget.value) onChanged(wanted);
                   },
           ),
         ),
         SizedBox(
-          width: 56,
+          width: 64,
           child: Text(
-            '${shown.round()} MB',
+            _label(mb),
             textAlign: TextAlign.end,
             style: TextStyle(fontFeatures: tabular, color: c.muted),
           ),

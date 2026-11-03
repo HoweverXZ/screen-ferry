@@ -167,6 +167,7 @@ where
         clip_limit: config.clipboard_limit.clone(),
         in_session: false,
         cursor_hidden: false,
+        cursor_stale: false,
         edge: config.edge.clone(),
         peer_side: None,
         server: None,
@@ -471,6 +472,8 @@ struct Client<I: InputInject, K, P> {
     in_session: bool,
     /// 本机光标是否被隐藏（光标在服务端屏幕上）。
     cursor_hidden: bool,
+    /// 上一次让平台藏起或显示本机光标没成，还要再试。
+    cursor_stale: bool,
     /// 边缘投递：报告本机光标和朝向服务端的那条边。
     edge: EdgeFeed,
     /// 服务端在本机的哪一侧；服务端说了才知道。
@@ -850,6 +853,8 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
     }
 
     fn apply(&mut self, event: InputEvent) {
+        // 上一次藏起或显示本机光标没成，趁这次注入输入再试一次。
+        self.retry_cursor();
         match event {
             InputEvent::PointerMotion { position } => return self.move_to(position),
             // 先把光标放到事件发生的位置，再执行按键或滚动。
@@ -895,13 +900,27 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
     }
 
     /// 光标在服务端屏幕上时隐藏本机光标，回到本机时重新显示。失败只影响显示，不影响控制。
+    ///
+    /// 没做成的那一次记在 `cursor_stale` 里，下一次注入输入时再试：显示没成功的话本机光标
+    /// 会一直藏着，用户找不到指针，只记一条日志不够。
     fn hide_cursor(&mut self, hidden: bool) {
-        if self.cursor_hidden == hidden {
+        if self.cursor_hidden == hidden && !self.cursor_stale {
             return;
         }
         self.cursor_hidden = hidden;
-        if let Err(e) = self.inject.set_cursor_hidden(hidden) {
-            debug!("{}本机光标失败：{e}", if hidden { "隐藏" } else { "显示" });
+        match self.inject.set_cursor_hidden(hidden) {
+            Ok(()) => self.cursor_stale = false,
+            Err(e) => {
+                self.cursor_stale = true;
+                debug!("{}本机光标失败：{e}", if hidden { "隐藏" } else { "显示" });
+            }
+        }
+    }
+
+    /// 上次没做成的隐藏或显示，现在再试一次。
+    fn retry_cursor(&mut self) {
+        if self.cursor_stale {
+            self.hide_cursor(self.cursor_hidden);
         }
     }
 

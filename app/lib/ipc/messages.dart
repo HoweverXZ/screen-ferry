@@ -555,7 +555,7 @@ class DaemonSettings {
   });
 
   /// 剪贴板单项大小上限的取值范围（MB）。
-  static const clipboardLimitRange = (min: 1, max: 64);
+  static const clipboardLimitRange = (min: 1, max: 1024);
 
   /// 本机鼠标 DPI 的取值范围，与每台设备的光标速度相同。
   static const mouseDpiRange = DeviceSettings.pointerDpiRange;

@@ -482,7 +482,7 @@
   "settingsClipboard": "同步剪贴板",
   "settingsClipboardHint": "光标切过去时，对方才来取最新的内容",
   "settingsClipLimit": "单项大小上限",
-  "settingsClipLimitHint": "图片、文字等每一项超过这么大就不同步",
+  "settingsClipLimitHint": "图片、文字等每一项超过这么大就不同步（1 MB – 1 GB）",
   "settingsGeneral": "通用",
   "settingsAutostart": "开机自动启动",
   "settingsAnnounce": "在局域网里广播本机",

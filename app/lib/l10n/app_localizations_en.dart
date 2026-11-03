@@ -761,7 +761,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsClipLimit => 'Size Limit per Item';
 
   @override
-  String get settingsClipLimitHint => 'Images, text and other items larger than this aren’t synced';
+  String get settingsClipLimitHint => 'Images, text and other items larger than this aren’t synced (1 MB – 1 GB)';
 
   @override
   String get settingsGeneral => 'General';

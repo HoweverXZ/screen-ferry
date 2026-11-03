@@ -110,7 +110,7 @@ pub struct Config {
     pub announce: bool,
     /// 同步剪贴板。
     pub clipboard: bool,
-    /// 剪贴板单项（一种格式）的大小上限，单位 MB，1–64。超过的不同步。
+    /// 剪贴板单项（一种格式）的大小上限，单位 MB，1–1024。超过的不同步。
     pub clipboard_limit_mb: u32,
     /// 客户端：服务端地址，空为在局域网里寻找。
     pub server: String,
@@ -143,8 +143,8 @@ impl Config {
     /// - 6：新增 `auto_update`（缺省开着）。
     pub const SCHEMA_VERSION: u32 = 6;
 
-    /// 剪贴板单项大小上限的取值范围（MB）。
-    pub const CLIPBOARD_LIMIT_MB: std::ops::RangeInclusive<u32> = 1..=64;
+    /// 剪贴板单项大小上限的取值范围（MB）。上限按用户自己的内存来定。
+    pub const CLIPBOARD_LIMIT_MB: std::ops::RangeInclusive<u32> = 1..=1024;
 
     /// 本机鼠标 DPI 的取值范围，与每台设备的光标速度相同。
     pub const MOUSE_DPI: std::ops::RangeInclusive<u32> = DeviceSettings::POINTER_DPI;

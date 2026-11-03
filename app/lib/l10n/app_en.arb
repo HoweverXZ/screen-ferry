@@ -217,7 +217,7 @@
   "settingsClipboard": "Sync Clipboard",
   "settingsClipboardHint": "The other computer fetches the latest contents when the cursor moves over",
   "settingsClipLimit": "Size Limit per Item",
-  "settingsClipLimitHint": "Images, text and other items larger than this aren’t synced",
+  "settingsClipLimitHint": "Images, text and other items larger than this aren’t synced (1 MB – 1 GB)",
   "settingsGeneral": "General",
   "settingsAutostart": "Start at Login",
   "settingsAnnounce": "Announce on the Local Network",

@@ -735,7 +735,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsClipLimit => '单项大小上限';
 
   @override
-  String get settingsClipLimitHint => '图片、文字等每一项超过这么大就不同步';
+  String get settingsClipLimitHint => '图片、文字等每一项超过这么大就不同步（1 MB – 1 GB）';
 
   @override
   String get settingsGeneral => '通用';

@@ -4,6 +4,9 @@
 //! 藏着的时候每隔一会儿看一眼：光标还停在那里、却不在这个窗口上（别的置顶窗口后来盖了上来），
 //! 就把窗口重新放到最上面、再把光标放回去，让它重新用透明的光标。
 //!
+//! 收起时必须主动把光标换回底下那个窗口的样子：窗口收起来、光标从透明的窗口上挪开，
+//! 系统都不一定重新问一遍“这里该用哪个光标”，光标就会一直保持全透明，用户找不到指针。
+//!
 //! 窗口要有消息循环才能设置光标形状，所以它跑在自己的线程上。藏起和收起都同步等它做完：
 //! 调用方紧接着注入的移动必须排在后面，否则光标刚移到入口，又被挪回屏幕中央。
 
@@ -16,17 +19,18 @@ use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateCursor, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetCursorPos,
-    GetMessageW, GetSystemMetrics, HWND_TOPMOST, KillTimer, MSG, PostMessageW, PostQuitMessage,
-    RegisterClassW, SM_CXCURSOR, SM_CXSCREEN, SM_CYCURSOR, SM_CYSCREEN, SMTO_ABORTIFHUNG, SW_HIDE,
-    SWP_NOACTIVATE, SWP_SHOWWINDOW, SendMessageTimeoutW, SetCursorPos, SetTimer, SetWindowPos,
-    ShowWindow, TranslateMessage, WM_APP, WM_DESTROY, WM_TIMER, WNDCLASSW, WS_EX_NOACTIVATE,
-    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WindowFromPoint,
+    GetMessageW, GetSystemMetrics, HCURSOR, HTCLIENT, HWND_TOPMOST, KillTimer, MSG, PostMessageW,
+    PostQuitMessage, RegisterClassW, SM_CXCURSOR, SM_CXSCREEN, SM_CYCURSOR, SM_CYSCREEN,
+    SMTO_ABORTIFHUNG, SW_HIDE, SWP_NOACTIVATE, SWP_SHOWWINDOW, SendMessageTimeoutW, SetCursor,
+    SetCursorPos, SetTimer, SetWindowPos, ShowWindow, TranslateMessage, WM_APP, WM_DESTROY,
+    WM_MOUSEMOVE, WM_SETCURSOR, WM_TIMER, WNDCLASSW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    WS_EX_TOPMOST, WS_POPUP, WindowFromPoint,
 };
 use windows::core::w;
 
 /// 把窗口放到屏幕中央、光标移上去。
 const WM_HIDE_CURSOR: u32 = WM_APP + 10;
-/// 收起窗口。光标已经被移走时它本来就可见。
+/// 收起窗口，并且把光标换回底下那个窗口的样子。
 const WM_SHOW_CURSOR: u32 = WM_APP + 11;
 /// 销毁窗口，结束线程。
 const WM_STOP: u32 = WM_APP + 12;
@@ -34,11 +38,15 @@ const WM_STOP: u32 = WM_APP + 12;
 const SEND_TIMEOUT_MS: u32 = 200;
 /// 藏着的时候多久看一眼（毫秒）。
 const CHECK_MS: u32 = 250;
+/// 等光标底下的窗口换回自己的光标最多等这么久（毫秒）。别等太久，藏起和收起都在等这条消息。
+const RESTORE_TIMEOUT_MS: u32 = 50;
 const CHECK_TIMER: usize = 1;
 
 thread_local! {
     /// 藏着的时候光标停在哪里；没藏时为 `None`。只在窗口所在的线程上读写。
     static PARKED: Cell<Option<(i32, i32)>> = const { Cell::new(None) };
+    /// 全透明的光标形状。藏的时候显式换上，不指望系统自己来问。
+    static BLANK: Cell<isize> = const { Cell::new(0) };
 }
 
 #[derive(Debug)]
@@ -118,6 +126,8 @@ impl CursorHider {
 
 impl Drop for CursorHider {
     fn drop(&mut self) {
+        // 先让光标回来再销毁窗口：窗口没了，那个全透明的光标形状还留在屏幕上。
+        let _ = self.post(WM_SHOW_CURSOR);
         let _ = self.post(WM_STOP);
     }
 }
@@ -145,6 +155,7 @@ fn create_window() -> Result<HWND> {
             xor_mask.as_ptr().cast(),
         )
         .map_err(|e| os("CreateCursor", e))?;
+        BLANK.with(|b| b.set(blank.0 as isize));
 
         let class = w!("ScreenFerryCursorHider");
         let wc = WNDCLASSW {
@@ -196,6 +207,8 @@ unsafe extern "system" fn window_proc(
                 PARKED.with(|p| p.set(None));
                 let _ = KillTimer(Some(hwnd), CHECK_TIMER);
                 let _ = ShowWindow(hwnd, SW_HIDE);
+                // 窗口收起来之后系统不会自己把光标换回底下那个窗口的样子。
+                restore_cursor();
                 LRESULT(0)
             }
             WM_TIMER if wparam.0 == CHECK_TIMER => {
@@ -206,8 +219,12 @@ unsafe extern "system" fn window_proc(
                 let mut now = POINT::default();
                 if GetCursorPos(&mut now).is_ok() && (now.x, now.y) != (x, y) {
                     // 光标被挪走了（多半是本机的人自己动了鼠标）：它本来就该出现，不再看着。
+                    // 窗口也要收起来，否则屏幕中央一直留着一个看不见的置顶窗口，
+                    // 远端的光标经过这一像素时会突然消失。
                     PARKED.with(|p| p.set(None));
                     let _ = KillTimer(Some(hwnd), CHECK_TIMER);
+                    let _ = ShowWindow(hwnd, SW_HIDE);
+                    restore_cursor();
                 } else if WindowFromPoint(POINT { x, y }) != hwnd {
                     // 别的置顶窗口盖了上来，光标用的是它的样子。
                     park(hwnd, x, y);
@@ -227,7 +244,8 @@ unsafe extern "system" fn window_proc(
     }
 }
 
-/// 把窗口放到最上面的 (x, y)，光标移上去。移动光标会让窗口收到 WM_SETCURSOR，换成透明的光标。
+/// 把窗口放到最上面的 (x, y)，光标移上去。移动光标会让窗口收到 WM_SETCURSOR，换成透明的光标；
+/// 光标本来就在那一点时不会收到，所以显式再换一次。
 ///
 /// # Safety
 ///
@@ -245,6 +263,51 @@ unsafe fn park(hwnd: HWND, x: i32, y: i32) {
             SWP_NOACTIVATE | SWP_SHOWWINDOW,
         );
         let _ = SetCursorPos(x, y);
+        let blank = BLANK.with(Cell::get);
+        if blank != 0 {
+            // 光标本来就在这一点时 SetCursorPos 不会产生 WM_SETCURSOR，显式换上透明的那个。
+            let _ = SetCursor(HCURSOR(blank as _));
+        }
+    }
+}
+
+/// 让光标换回它底下那个窗口自己的样子。
+///
+/// 光标停过一个全透明的光标形状之后，收窗口、挪走光标都不一定让它变回来：系统只在光标
+/// 真的换了一个窗口时才会重新问一次。这里主动给光标底下的窗口发一条 `WM_SETCURSOR`，
+/// 让它把光标设回去；对方不理这条消息时，再把光标挪开一个像素、挪回来，让系统自己重问一遍。
+///
+/// # Safety
+///
+/// 只读本线程所在桌面上的光标位置和窗口，消息发给那个窗口自己的线程。
+unsafe fn restore_cursor() {
+    // SAFETY: 调用方保证在本线程、处理自己的窗口消息。
+    unsafe {
+        let mut at = POINT::default();
+        if GetCursorPos(&mut at).is_err() {
+            return;
+        }
+        let under = WindowFromPoint(at);
+        // WM_SETCURSOR 的低 16 位是命中的区域，高 16 位是鼠标消息。
+        let lparam = (HTCLIENT as i32 & 0xFFFF) | ((WM_MOUSEMOVE as i32) << 16);
+        let done = if under.0.is_null() {
+            LRESULT(0)
+        } else {
+            SendMessageTimeoutW(
+                under,
+                WM_SETCURSOR,
+                WPARAM(under.0 as _),
+                LPARAM(lparam as _),
+                SMTO_ABORTIFHUNG,
+                RESTORE_TIMEOUT_MS,
+                None,
+            )
+        };
+        if done.0 == 0 {
+            // 那个窗口没理会（卡住、或者不是本程序的窗口）：让系统自己再问一遍。
+            let _ = SetCursorPos(at.x + 1, at.y);
+            let _ = SetCursorPos(at.x, at.y);
+        }
     }
 }
 

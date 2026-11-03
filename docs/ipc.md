@@ -76,7 +76,7 @@ peers[]   { name（它自己报的名字）, fingerprint, short, online, last_se
             version（它的 ScreenFerry 版本，本次运行还没连上过为空） }
 found[]   { name, fingerprint, short, addr, paired }        只有客户端会有
 settings  { name, side(left|right|top|bottom), layout[], announce, clipboard,
-            clipboard_limit_mb（剪贴板单项上限，1–64）, mouse_dpi（本机鼠标的 DPI，100–12800）,
+            clipboard_limit_mb（剪贴板单项上限，1–1024）, mouse_dpi（本机鼠标的 DPI，100–12800）,
             server（客户端：只连这个地址，空为自动寻找）, autostart, theme(system|light|dark), accent,
             language(system|zh|en)（界面语言，system 为跟随系统）,
             auto_update（每天检查一次更新，有新版本时在后台下载好）, devices[] }

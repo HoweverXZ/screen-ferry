@@ -266,7 +266,7 @@ unsafe fn park(hwnd: HWND, x: i32, y: i32) {
         let blank = BLANK.with(Cell::get);
         if blank != 0 {
             // 光标本来就在这一点时 SetCursorPos 不会产生 WM_SETCURSOR，显式换上透明的那个。
-            let _ = SetCursor(HCURSOR(blank as _));
+            let _ = SetCursor(Some(HCURSOR(blank as _)));
         }
     }
 }

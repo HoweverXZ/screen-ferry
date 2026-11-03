@@ -222,13 +222,21 @@ fn a_version_2_config_reads_with_the_old_clipboard_limit() {
         clipboard_limit_mb: 5000,
         ..Config::default()
     };
-    assert_eq!(wild.clipboard_limit_bytes(), 1024 * 1024 * 1024, "收进范围内");
+    assert_eq!(
+        wild.clipboard_limit_bytes(),
+        1024 * 1024 * 1024,
+        "收进范围内"
+    );
 
     let large = Config {
         clipboard_limit_mb: 512,
         ..Config::default()
     };
-    assert_eq!(large.clipboard_limit_bytes(), 512 * 1024 * 1024, "512 MB 可以直接用");
+    assert_eq!(
+        large.clipboard_limit_bytes(),
+        512 * 1024 * 1024,
+        "512 MB 可以直接用"
+    );
 }
 
 #[test]

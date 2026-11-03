@@ -106,17 +106,19 @@ async fn the_local_cursor_is_hidden_while_the_pointer_is_on_the_server() {
 #[tokio::test]
 async fn a_failed_cursor_change_is_retried_on_the_next_input() {
     let rig = Rig::start().await;
-    eventually("连上后隐藏本机光标", || rig.inject.cursor_hidden() == [true]).await;
+    eventually("连上后隐藏本机光标", || {
+        rig.inject.cursor_hidden() == [true]
+    })
+    .await;
 
     // 平台那边这一次没做成：进入时要求显示，失败。
     rig.inject.fail_cursor(1);
     rig.enter().await;
     // 接着注入的输入把它补上。没有重试的话这里只有 [true, false]。
     rig.push_at(500, 540, 10, 0);
-    eventually(
-        "下一次注入输入时重新显示",
-        || rig.inject.cursor_hidden() == [true, false, false],
-    )
+    eventually("下一次注入输入时重新显示", || {
+        rig.inject.cursor_hidden() == [true, false, false]
+    })
     .await;
 }
 

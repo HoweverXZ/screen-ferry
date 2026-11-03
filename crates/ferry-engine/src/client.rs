@@ -750,7 +750,25 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                         peer: server,
                     });
                 }
-                Some(Message::Input(event)) => self.apply(event),
+                Some(Message::Input(event)) => {
+                    // 已经在往这边注入输入，光标其实就在本机屏幕上。Enter 有可能在本机连上之前
+                    // 就发出去了（那时连接还没建立，服务端只会记住状态），不把光标显示出来的话
+                    // 用户能操作却找不到指针。
+                    let active = *self.active.borrow();
+                    if !active {
+                        warn!("没收到光标进入就收到输入，当作光标已经在这边");
+                        self.hide_cursor(false);
+                        self.active.send_replace(true);
+                        self.edge.pointer(|p| p.here = true);
+                        info!("光标进入本机（没有收到进入消息）");
+                        self.events.emit(Event::Cursor {
+                            here: true,
+                            hotkey: false,
+                            peer: server,
+                        });
+                    }
+                    self.apply(event)
+                }
                 Some(Message::PeerSide { side }) => {
                     info!(?side, "服务端在本机的这一侧");
                     self.publish_edge(side, &screens, &shown);
@@ -911,8 +929,15 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
         match self.inject.set_cursor_hidden(hidden) {
             Ok(()) => self.cursor_stale = false,
             Err(e) => {
+                // 显示没成功用户就找不到指针，值得记在默认级别里；隐藏没成功只是光标多露一会儿。
+                // 同一次失败只记一条 warn：重试是每次输入都来的，都记在默认级别里会刷屏。
+                let first = !self.cursor_stale;
                 self.cursor_stale = true;
-                debug!("{}本机光标失败：{e}", if hidden { "隐藏" } else { "显示" });
+                if hidden || !first {
+                    debug!("{}本机光标失败：{e}", if hidden { "隐藏" } else { "显示" });
+                } else {
+                    warn!("显示本机光标失败：{e}，下一次注入输入时再试");
+                }
             }
         }
     }

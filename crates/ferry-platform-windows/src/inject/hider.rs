@@ -11,6 +11,7 @@
 //! 调用方紧接着注入的移动必须排在后面，否则光标刚移到入口，又被挪回屏幕中央。
 
 use std::cell::Cell;
+use std::mem::size_of;
 use std::sync::mpsc;
 use std::thread;
 
@@ -18,13 +19,15 @@ use ferry_platform::{Error, Result};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateCursor, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetCursorPos,
-    GetMessageW, GetSystemMetrics, HCURSOR, HTCLIENT, HWND_TOPMOST, KillTimer, MSG, PostMessageW,
-    PostQuitMessage, RegisterClassW, SM_CXCURSOR, SM_CXSCREEN, SM_CYCURSOR, SM_CYSCREEN,
-    SMTO_ABORTIFHUNG, SW_HIDE, SWP_NOACTIVATE, SWP_SHOWWINDOW, SendMessageTimeoutW, SetCursor,
-    SetCursorPos, SetTimer, SetWindowPos, ShowWindow, TranslateMessage, WM_APP, WM_DESTROY,
-    WM_MOUSEMOVE, WM_SETCURSOR, WM_TIMER, WNDCLASSW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-    WS_EX_TOPMOST, WS_POPUP, WindowFromPoint,
+    CURSOR_SHOWING, CURSORINFO, CreateCursor, CreateWindowExW, DefWindowProcW, DestroyWindow,
+    DispatchMessageW, GetCursorInfo, GetCursorPos, GetMessageW, GetSystemMetrics, HCURSOR,
+    HTCLIENT, HWND_TOPMOST, IDC_ARROW, KillTimer, LoadCursorW, MSG, PostMessageW, PostQuitMessage,
+    RegisterClassW, SM_CXCURSOR, SM_CXSCREEN, SM_CXVIRTUALSCREEN, SM_CYCURSOR, SM_CYSCREEN,
+    SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SMTO_ABORTIFHUNG, SW_HIDE,
+    SWP_NOACTIVATE, SWP_SHOWWINDOW, SendMessageTimeoutW, SetCursor, SetCursorPos, SetTimer,
+    SetWindowPos, ShowCursor, ShowWindow, TranslateMessage, WM_APP, WM_DESTROY, WM_MOUSEMOVE,
+    WM_SETCURSOR, WM_TIMER, WNDCLASSW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    WindowFromPoint,
 };
 use windows::core::w;
 
@@ -96,7 +99,8 @@ impl CursorHider {
         } else {
             WM_SHOW_CURSOR
         };
-        // SAFETY: 窗口在本对象存在期间一直存在；不需要结果，结果指针为空。
+        // SAFETY: 窗口在本对象存在期间一直存在；结果写在栈上的 result 里。
+        let mut result = 0_usize;
         let done = unsafe {
             SendMessageTimeoutW(
                 HWND(self.hwnd as *mut _),
@@ -105,13 +109,21 @@ impl CursorHider {
                 LPARAM(0),
                 SMTO_ABORTIFHUNG,
                 SEND_TIMEOUT_MS,
-                None,
+                Some(&mut result),
             )
         };
         if done.0 == 0 {
             return Err(Error::Os {
                 call: "SendMessageTimeoutW",
                 detail: "隐藏光标的窗口没有及时响应".into(),
+            });
+        }
+        if msg == WM_SHOW_CURSOR && result == 0 {
+            // 窗口收起来了，但光标没能露出来（或者还是那个全透明的形状）。
+            // 交给引擎重试：一直看不见比形状不对更糟。
+            return Err(Error::Os {
+                call: "ShowCursor",
+                detail: "光标没能重新显示出来".into(),
             });
         }
         Ok(())
@@ -208,8 +220,11 @@ unsafe extern "system" fn window_proc(
                 let _ = KillTimer(Some(hwnd), CHECK_TIMER);
                 let _ = ShowWindow(hwnd, SW_HIDE);
                 // 窗口收起来之后系统不会自己把光标换回底下那个窗口的样子。
-                restore_cursor();
-                LRESULT(0)
+                if restore_cursor() {
+                    LRESULT(1)
+                } else {
+                    LRESULT(0)
+                }
             }
             WM_TIMER if wparam.0 == CHECK_TIMER => {
                 let Some((x, y)) = PARKED.with(Cell::get) else {
@@ -224,7 +239,7 @@ unsafe extern "system" fn window_proc(
                     PARKED.with(|p| p.set(None));
                     let _ = KillTimer(Some(hwnd), CHECK_TIMER);
                     let _ = ShowWindow(hwnd, SW_HIDE);
-                    restore_cursor();
+                    let _ = restore_cursor();
                 } else if WindowFromPoint(POINT { x, y }) != hwnd {
                     // 别的置顶窗口盖了上来，光标用的是它的样子。
                     park(hwnd, x, y);
@@ -271,7 +286,7 @@ unsafe fn park(hwnd: HWND, x: i32, y: i32) {
     }
 }
 
-/// 让光标换回它底下那个窗口自己的样子。
+/// 让光标换回它底下那个窗口自己的样子，返回时确认过它真的露出来了。
 ///
 /// 光标停过一个全透明的光标形状之后，收窗口、挪走光标都不一定让它变回来：系统只在光标
 /// 真的换了一个窗口时才会重新问一次。这里主动给光标底下的窗口发一条 `WM_SETCURSOR`，
@@ -280,12 +295,12 @@ unsafe fn park(hwnd: HWND, x: i32, y: i32) {
 /// # Safety
 ///
 /// 只读本线程所在桌面上的光标位置和窗口，消息发给那个窗口自己的线程。
-unsafe fn restore_cursor() {
+unsafe fn restore_cursor() -> bool {
     // SAFETY: 调用方保证在本线程、处理自己的窗口消息。
     unsafe {
         let mut at = POINT::default();
         if GetCursorPos(&mut at).is_err() {
-            return;
+            return ensure_visible();
         }
         let under = WindowFromPoint(at);
         // WM_SETCURSOR 的低 16 位是命中的区域，高 16 位是鼠标消息。
@@ -308,6 +323,80 @@ unsafe fn restore_cursor() {
             let _ = SetCursorPos(at.x + 1, at.y);
             let _ = SetCursorPos(at.x, at.y);
         }
+        ensure_visible()
+    }
+}
+
+/// 核对光标是不是真的露着，不是就把它换成箭头并数回显示计数；返回核对的结果。
+///
+/// 有的机器上（例如没接鼠标的机器）光标换回形状这一步不一定发生，透明光标就一直留着，
+/// 用户能操作却找不到指针。形状不对总比看不见强。
+///
+/// # Safety
+///
+/// 只读写本线程所在桌面上的光标。
+unsafe fn ensure_visible() -> bool {
+    // SAFETY: 调用方保证在本线程、处理自己的窗口消息。
+    unsafe {
+        pull_onscreen();
+        if cursor_visible() {
+            return true;
+        }
+        if let Ok(arrow) = LoadCursorW(None, IDC_ARROW) {
+            let _ = SetCursor(Some(arrow));
+        }
+        // 别的程序可能把光标藏起来了（显示计数是负的），把它数回来；别无限数下去。
+        for _ in 0..32 {
+            if ShowCursor(true) >= 0 {
+                break;
+            }
+        }
+        cursor_visible()
+    }
+}
+
+/// 光标落在虚拟屏幕之外时把它挪回中间：这种时候也看不见它，效果和藏起来一样。
+///
+/// # Safety
+///
+/// 只读系统度量、只挪光标。
+unsafe fn pull_onscreen() {
+    // SAFETY: 只读系统度量、只挪光标。
+    unsafe {
+        let mut at = POINT::default();
+        if GetCursorPos(&mut at).is_err() {
+            return;
+        }
+        let (x0, y0) = (
+            GetSystemMetrics(SM_XVIRTUALSCREEN),
+            GetSystemMetrics(SM_YVIRTUALSCREEN),
+        );
+        let (w, h) = (
+            GetSystemMetrics(SM_CXVIRTUALSCREEN).max(1),
+            GetSystemMetrics(SM_CYVIRTUALSCREEN).max(1),
+        );
+        let outside = at.x < x0 || at.y < y0 || at.x >= x0 + w || at.y >= y0 + h;
+        if outside {
+            let _ = SetCursorPos(x0 + w / 2, y0 + h / 2);
+        }
+    }
+}
+
+/// 光标现在是不是露着，而且用的是它自己那个形状（不是我们那个全透明的）。
+///
+/// # Safety
+///
+/// 只读本线程所在桌面上的光标。
+unsafe fn cursor_visible() -> bool {
+    // SAFETY: info 是有效的缓冲区，cbSize 按结构体实际大小填。
+    unsafe {
+        let mut info = CURSORINFO {
+            cbSize: size_of::<CURSORINFO>() as u32,
+            ..Default::default()
+        };
+        GetCursorInfo(&mut info).is_ok()
+            && info.flags.0 & CURSOR_SHOWING.0 != 0
+            && info.hCursor.0 as isize != BLANK.with(Cell::get)
     }
 }
 

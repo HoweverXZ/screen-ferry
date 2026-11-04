@@ -9,6 +9,8 @@ use ferry_engine::{ClientConfig, EdgeFeed, Events, Files, Live, ServerAddr, Serv
 use ferry_store::Store;
 use ferry_trust::Fingerprint;
 use ferry_types::{Config, DeviceSettings, ModifierPreset, uses_command_key};
+#[cfg(target_os = "windows")]
+use tracing::warn;
 use tracing::{error, info};
 
 use crate::cli::{Mode, Options, Parsed};
@@ -48,7 +50,23 @@ pub(crate) fn init_output(parsed: &Result<Parsed, String>) {
     }
 }
 
+/// 以管理员权限运行的提示。
+///
+/// 这种情况下资源管理器里的文件拖不到屏幕边缘：Windows 的用户界面特权隔离不允许普通权限
+/// 的程序把东西拖进管理员权限的窗口，用户只会看到一个“禁止”光标，完全看不出原因。
+#[cfg(target_os = "windows")]
+fn warn_if_elevated() {
+    if ferry_platform_windows::is_elevated() {
+        warn!("正在以管理员权限运行：资源管理器里的文件拖不到屏幕边缘，请以普通权限重新启动");
+    }
+}
+
+/// 其他系统没有这个限制。
+#[cfg(not(target_os = "windows"))]
+fn warn_if_elevated() {}
+
 pub(crate) fn run(options: Options) -> ExitCode {
+    warn_if_elevated();
     let store = match &options.data_dir {
         Some(dir) => Store::open(dir),
         None => Store::open_default(),

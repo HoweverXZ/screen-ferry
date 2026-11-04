@@ -84,11 +84,14 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 ; 公用网络不放行，连到公用网络时 Windows 会照常询问。
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""{#AppName}"""; Flags: runhidden waituntilterminated; StatusMsg: "{cm:FirewallStatus}"
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""{#AppName}"" dir=in action=allow program=""{app}\{#AppExe}"" enable=yes profile=private,domain"; Flags: runhidden waituntilterminated
-; 安装前正在运行的：装完马上以原来的用户身份重新启动，不弹出设置界面。
+; 安装前正在运行的：装完马上重新启动，不弹出设置界面。
 ; 用户可能正从另一台电脑控制这台，这样不用等到点“完成”就能接着用键鼠。
-Filename: "{app}\{#AppExe}"; Parameters: "--autostart"; Flags: nowait runasoriginaluser; Check: WasRunning
+; 经资源管理器启动：安装程序本身是管理员权限，直接启动的程序也会带上管理员权限，
+; 而 Windows 不允许普通权限的资源管理器把文件拖进管理员权限的窗口（拖到屏幕边缘
+; 只会出现一个“禁止”光标）。资源管理器是普通权限，请它代劳就没有这个问题。
+Filename: "{sys}\explorer.exe"; Parameters: """{app}\{#AppExe}"" --autostart"; Flags: nowait; Check: WasRunning
 ; 第一次安装：完成页上可以选择启动，打开设置界面开始配对。
-Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent runasoriginaluser; Check: not WasRunning
+Filename: "{sys}\explorer.exe"; Parameters: """{app}\{#AppExe}"""; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent; Check: not WasRunning
 
 [UninstallRun]
 ; 先请 ScreenFerry 正常退出（归还键鼠、松开按键），还在的再强行结束，然后删掉防火墙规则。

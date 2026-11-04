@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-11-04
+
+### 修复
+
+- 修复以管理员权限运行时，资源管理器里的文件拖不到屏幕边缘、拖动时只有一个“禁止”光标的问题。
+  安装程序改成经资源管理器启动（`packaging/windows/screenferry.iss` 的 `[Run]` 改用 `{sys}\explorer.exe`，
+  去掉 `runasoriginaluser`）：安装程序自己是管理员权限，直接启动会让程序也带上管理员权限。
+  `ferry-platform-windows` 新增 `is_elevated`，`ferry-daemon` 启动时若发现自己被提权就记一条 `warn!`，
+  免得以后再靠猜。原因是 Windows 的用户界面特权隔离：普通权限的进程把文件拖进管理员权限的窗口时，
+  OLE 的 `DragEnter` 根本不会送到浮层窗口，所以既没有胶囊，也没有“发不出去”的提示。
+
 ## [0.2.1] - 2026-11-03
 
 ### 修复

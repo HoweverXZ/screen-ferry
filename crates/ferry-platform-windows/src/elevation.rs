@@ -6,6 +6,8 @@
 //!
 //! 所以启动时查一次，是管理员权限就提示以普通权限重新启动。
 
+use std::mem::size_of;
+
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Security::{GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation};
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
@@ -25,7 +27,7 @@ pub fn is_elevated() -> bool {
             token,
             TokenElevation,
             Some(&mut elevation as *mut _ as *mut _),
-            std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+            size_of::<TOKEN_ELEVATION>() as u32,
             &mut returned,
         )
         .is_ok();
